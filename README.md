@@ -104,3 +104,81 @@ For example:
 MQTT_BROKER_IP=10.20.30.123 MQTT_BROKER_PORT=11883 ./bin/bacserv
 ```
 
+Compiling The Bacnet Server
+---
+Download or clone the repo.
+```
+git clone git@github.com:NubeIO/bacnet-server-c.git
+cd bacnet-server-c/bacnet-stack
+make clean all
+```
+
+Running The Bacnet Server
+---
+On the bacnet-stack directory, run bin/bacserv without any option. The server will connect to the local MQTT broker with the IP address and port number 127.0.0.1 and 1883.
+```
+./bin/bacserv
+```
+
+To use an external MQTT broker, set the environment variable MQTT_BROKER_IP for the IP address and MQTT_BROKER_PORT for the port number.
+```
+MQTT_BROKER_IP=104.219.42.42 MQTT_BROKER_PORT=11883 ./bin/bacserv 1234
+```
+
+Sample Get/Set Commands
+---
+Get and set the device propery name. The client and server are on the same machine here. If the client is on a different machine, you can omit the "mac" option.
+
+Get the device object property name.
+```
+./bin/bacrp 1234 8 1234 77 --mac 10.104.0.11:47808
+"SimpleServer"
+```
+
+To change the device object property name to "My Simple Server".
+```
+./bin/bacwp 1234 8 1234 77 0 -1 7 "My Simple Server" D 10.104.0.11:47808
+WriteProperty Acknowledged!
+```
+
+Confirm the change was made.
+```
+./bin/bacrp 1234 8 1234 77 --mac 10.104.0.11:47808
+"My Simple Server"
+```
+
+Get and set the binary output object propery name.
+Get the binary output object propery name.
+```
+./bin/bacrp 1234 4 1 77 --mac 10.104.0.11:47808
+"BINARY OUTPUT"
+```
+
+To change the binary output object property name to "MY BINARY OUTPUT".
+```
+./bin/bacwp 1234 4 1 77 0 -1 7 "MY BINARY OUTPUT" D 10.104.0.11:47808
+WriteProperty Acknowledged!
+```
+
+Confirm the change was made.
+```
+./bin/bacrp 1234 4 1 77 --mac 10.104.0.11:47808
+"MY BINARY OUTPUT"
+```
+
+Testing the MQTT Publish/Subscribe Message
+---
+You can use any MQTT protocol compliant client. I used the [mqtt-cli](https://hivemq.github.io/mqtt-cli).
+To subscribe to changes to the device object and binary output object property name of the bacnet instance with device ID 1234.
+```
+mqtt sub -h <mqtt broker ip address> -t "/1234/binary_output_object_name" -t "/1234/device_object_name" -T
+```
+
+The client will receive a publish message when a change is made to the device object and binary output object propery name with the new value in the message.
+```
+mqtt sub -h <mqtt broker ip address> -t "/1234/binary_output_object_name" -t "/1234/device_object_name" -T
+
+/1234/device_object_name: My Simple Server
+/1234/binary_output_object_name: MY BINARY OUTPUT
+```
+
