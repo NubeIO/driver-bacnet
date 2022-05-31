@@ -18,16 +18,7 @@
 /* topic value types */
 #define MQTT_TOPIC_VALUE_STRING          1
 #define MQTT_TOPIC_VALUE_BACNET_STRING   2
-
-/* object and property ids */
-#define DEVICE_OBJECT_NAME_TOPIC_ID            0
-#define BINARY_OUTPUT_OBJECT_NAME_TOPIC_ID     1
-#define TOPIC_ID_MAX                           2
-
-typedef struct topic_mapping {
-  int topic_id;
-  char *topic_mid_name;
-} topic_mapping_t;
+#define MQTT_TOPIC_VALUE_INTEGER         3
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,8 +27,8 @@ extern "C" {
   int mqtt_client_init(void);
   void mqtt_client_shutdown(void);
   char *mqtt_form_publish_topic(char *device_id, char *object_name);
-  char *mqtt_create_topic(int topic_id, char *buf, int buf_len);
-  int mqtt_publish_topic(int topic_id, int vtype, void *vptr);
+  char *mqtt_create_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len);
+  int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr);
 
 #ifdef __cplusplus
 }

@@ -1469,8 +1469,8 @@ bool Device_Write_Property_Local(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 } else {
                     Device_Set_Object_Name(&value.type.Character_String);
 #if defined(MQTT)
-                    mqtt_publish_topic(DEVICE_OBJECT_NAME_TOPIC_ID,
-                      MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+                    mqtt_publish_topic(OBJECT_DEVICE, wp_data->object_instance, PROP_OBJECT_NAME,
+                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
 #endif /* defined(MQTT) */
                 }
             }

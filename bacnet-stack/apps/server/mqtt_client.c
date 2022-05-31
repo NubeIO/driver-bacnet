@@ -16,15 +16,6 @@ static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[51] = {0};
 static MQTTClient mqtt_client;
 
-/* topic and object/property mappings */
-static topic_mapping_t topic_mappings[] = {
-  { DEVICE_OBJECT_NAME_TOPIC_ID,
-    "device_object_name" },
-  { BINARY_OUTPUT_OBJECT_NAME_TOPIC_ID,
-    "binary_output_object_name" },
-  { TOPIC_ID_MAX, NULL }
-};
-
 
 /*
  * Initialize mqtt client module.
@@ -95,29 +86,48 @@ char *mqtt_form_publish_topic(char *device_id, char *object_name)
 /*
  * Create mqtt topic from the topic mappings.
  */
-char *mqtt_create_topic(int topic_id, char *buf, int buf_len)
+char *mqtt_create_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len)
 {
-  topic_mapping_t *ptm;
+  char *object_type_str;
+  char *property_id_str;
 
-  if (topic_id >= TOPIC_ID_MAX) {
-    return(NULL);
+  switch(object_type) {
+    case OBJECT_BINARY_OUTPUT:
+      object_type_str = "bo";
+      break;
+
+    case OBJECT_DEVICE:
+      object_type_str = "device";
+      break;
+
+    default:
+      return(NULL);
   }
 
-  for (ptm = &topic_mappings[0]; ptm->topic_id != TOPIC_ID_MAX; ptm++) {
-    if (ptm->topic_id == topic_id) {
-      snprintf(buf, buf_len - 1, "/%d/%s", Device_Object_Instance_Number(), ptm->topic_mid_name);
-      return(buf);
-    }
+  switch(property_id) {
+    case PROP_OBJECT_NAME:
+      property_id_str = "name";
+      break;
+
+    case PROP_PRESENT_VALUE:
+      property_id_str = "pv";
+      break;
+
+    default:
+      return(NULL);
   }
 
-  return(NULL); 
+  snprintf(buf, buf_len - 1, "bacnet/%s/%d/%s", object_type_str,
+    object_instance, property_id_str);
+
+  return(buf); 
 }
 
 
 /*
  * Publish topic.
  */
-int mqtt_publish_topic(int topic_id, int vtype, void *vptr)
+int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr)
 {
   MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
   MQTTClient_message pubmsg = MQTTClient_message_initializer;
@@ -126,8 +136,8 @@ int mqtt_publish_topic(int topic_id, int vtype, void *vptr)
   char buf[1024];
   int rc;
 
-  if (!mqtt_create_topic(topic_id, topic, sizeof(topic))) {
-    printf("Failed to create MQTT topic: %d\n", topic_id);
+  if (!mqtt_create_topic(object_type, object_instance, property_id, topic, sizeof(topic))) {
+    printf("Failed to create MQTT topic: %d/%d\n", object_type, property_id);
     return(1);
   }
 
@@ -147,6 +157,12 @@ int mqtt_publish_topic(int topic_id, int vtype, void *vptr)
       pubmsg.payloadlen = strlen(buf);
       break;
 
+    case MQTT_TOPIC_VALUE_INTEGER:
+      sprintf(buf, "%d", *((int*)vptr));
+      pubmsg.payload = buf;
+      pubmsg.payloadlen = strlen(buf);
+      break;
+
     default:
       printf("MQTT unsupported topic value: %d\n", vtype);
       return(1);
@@ -160,7 +176,7 @@ int mqtt_publish_topic(int topic_id, int vtype, void *vptr)
   }
 
   pubmsg.qos = DEFAULT_PUB_QOS;
-  pubmsg.retained = 1;
+  pubmsg.retained = 0;
   MQTTClient_publishMessage(mqtt_client, topic, &pubmsg, &token);
   rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
   if (mqtt_debug) {

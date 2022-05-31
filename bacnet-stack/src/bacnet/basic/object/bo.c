@@ -195,19 +195,10 @@ bool Binary_Output_Object_Name(
 bool Binary_Output_Set_Object_Name(BACNET_CHARACTER_STRING *object_name)
 {
     bool status = false; /*return value */
-#if defined(MQTT)
-    char buf[512];
-#endif /* defined(MQTT) */
 
     if (!characterstring_same(&My_Binary_Output_Object_Name, object_name)) {
         /* Make the change and update the database revision */
         status = characterstring_copy(&My_Binary_Output_Object_Name, object_name);
-
-#if defined(MQTT)
-        characterstring_ansi_copy(buf, sizeof(buf), object_name);
-        mqtt_publish_topic(BINARY_OUTPUT_OBJECT_NAME_TOPIC_ID,
-            MQTT_TOPIC_VALUE_STRING, buf);
-#endif /* defined(MQTT) */
     }
 
     return status;
@@ -411,6 +402,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                        main loop (i.e. check out of service before changing
                        output) */
                     status = true;
+#if defined(MQTT)
+                    mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                        MQTT_TOPIC_VALUE_INTEGER, &level);
+#endif /* defined(MQTT) */
                 } else if (priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -439,6 +434,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                            comment may apply to the
                            main loop (i.e. check out of service before changing
                            output) */
+#if defined(MQTT)
+                        mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                            MQTT_TOPIC_VALUE_INTEGER, &level);
+#endif /* defined(MQTT) */
                     } else {
                         status = false;
                         wp_data->error_class = ERROR_CLASS_PROPERTY;
@@ -462,6 +461,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&My_Binary_Output_Object_Name));
             if (status) {
                 Binary_Output_Set_Object_Name(&value.type.Character_String);
+#if defined(MQTT)
+                mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+#endif /* defined(MQTT) */
             }
             break;
 
