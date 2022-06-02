@@ -148,6 +148,7 @@ extern "C" {
 
     BACNET_STACK_EXPORT
     bool Binary_Output_Set_Object_Name(
+        uint32_t object_instance,
         BACNET_CHARACTER_STRING *object_name);
 
     BACNET_STACK_EXPORT

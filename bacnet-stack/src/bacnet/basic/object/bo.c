@@ -28,6 +28,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -45,15 +46,19 @@
 #define MAX_BINARY_OUTPUTS 4
 #endif
 
+/* Run-time Binary Input Instances */
+static int Binary_Output_Instances = 0;
+
 /* When all the priorities are level null, the present value returns */
 /* the Relinquish Default value */
 #define RELINQUISH_DEFAULT BINARY_INACTIVE
 /* Here is our Priority Array.*/
-static BACNET_BINARY_PV Binary_Output_Level[MAX_BINARY_OUTPUTS]
-                                           [BACNET_MAX_PRIORITY];
+static BACNET_BINARY_PV **Binary_Output_Level = NULL;
 /* Writable out-of-service allows others to play with our Present Value */
 /* without changing the physical output */
-static bool Out_Of_Service[MAX_BINARY_OUTPUTS];
+static bool *Out_Of_Service = NULL;
+/* Binary Output Instances Object Name */
+static BACNET_CHARACTER_STRING *Binary_Output_Instance_Names = NULL;
 
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Binary_Output_Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
@@ -65,9 +70,6 @@ static const int Binary_Output_Properties_Optional[] = { PROP_DESCRIPTION,
     PROP_ACTIVE_TEXT, PROP_INACTIVE_TEXT, -1 };
 
 static const int Binary_Output_Properties_Proprietary[] = { -1 };
-
-/* Binary Output Object Name*/
-static BACNET_CHARACTER_STRING My_Binary_Output_Object_Name;
 
 void Binary_Output_Property_Lists(
     const int **pRequired, const int **pOptional, const int **pProprietary)
@@ -87,18 +89,37 @@ void Binary_Output_Property_Lists(
 
 void Binary_Output_Init(void)
 {
+    char buf[51];
+    char *pEnv;
     unsigned i, j;
     static bool initialized = false;
-
-    characterstring_init_ansi(&My_Binary_Output_Object_Name, "BINARY OUTPUT");
 
     if (!initialized) {
         initialized = true;
 
+        pEnv = getenv("BO");
+        if (pEnv) {
+            Binary_Output_Instances = atoi(pEnv);
+        }
+
         /* initialize all the analog output priority arrays to NULL */
-        for (i = 0; i < MAX_BINARY_OUTPUTS; i++) {
-            for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
-                Binary_Output_Level[i][j] = BINARY_NULL;
+        if (Binary_Output_Instances > 0) {
+            Binary_Output_Level = malloc(Binary_Output_Instances * sizeof(BACNET_BINARY_PV*));
+            for (i = 0; i < Binary_Output_Instances; i++) {
+                Binary_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
+            }
+
+            for (i = 0; i < Binary_Output_Instances; i++) {
+                for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
+                    Binary_Output_Level[i][j] = BINARY_NULL;
+                }
+            }
+
+            Out_Of_Service = malloc(Binary_Output_Instances * sizeof(bool));
+            Binary_Output_Instance_Names = malloc(Binary_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
+            for (i = 0; i < Binary_Output_Instances; i++) {
+                sprintf(buf, "BINARY OUTPUT %d", i);
+                characterstring_init_ansi(&Binary_Output_Instance_Names[i], buf);
             }
         }
     }
@@ -111,7 +132,7 @@ void Binary_Output_Init(void)
 /* given instance exists */
 bool Binary_Output_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance < MAX_BINARY_OUTPUTS) {
+    if (object_instance < Binary_Output_Instances) {
         return true;
     }
 
@@ -122,7 +143,7 @@ bool Binary_Output_Valid_Instance(uint32_t object_instance)
 /* more complex, and then count how many you have */
 unsigned Binary_Output_Count(void)
 {
-    return MAX_BINARY_OUTPUTS;
+    return Binary_Output_Instances;
 }
 
 /* we simply have 0-n object instances.  Yours might be */
@@ -138,9 +159,9 @@ uint32_t Binary_Output_Index_To_Instance(unsigned index)
 /* that correlates to the correct instance number */
 unsigned Binary_Output_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = MAX_BINARY_OUTPUTS;
+    unsigned index = Binary_Output_Instances;
 
-    if (object_instance < MAX_BINARY_OUTPUTS) {
+    if (object_instance < Binary_Output_Instances) {
         index = object_instance;
     }
 
@@ -154,7 +175,7 @@ BACNET_BINARY_PV Binary_Output_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < MAX_BINARY_OUTPUTS) {
+    if (index < Binary_Output_Instances) {
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Binary_Output_Level[index][i] != BINARY_NULL) {
                 value = Binary_Output_Level[index][i];
@@ -172,7 +193,7 @@ bool Binary_Output_Out_Of_Service(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < MAX_BINARY_OUTPUTS) {
+    if (index < Binary_Output_Instances) {
         value = Out_Of_Service[index];
     }
 
@@ -184,21 +205,27 @@ bool Binary_Output_Object_Name(
     uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
 {
     bool status = false;
+    unsigned index = 0;
 
-    if (object_instance < MAX_BINARY_OUTPUTS) {
-        status = characterstring_copy(object_name, &My_Binary_Output_Object_Name);
+    index = Binary_Output_Instance_To_Index(object_instance);
+    if (index < Binary_Output_Instances) {
+        status = characterstring_copy(object_name, &Binary_Output_Instance_Names[index]);
     }
 
     return status;
 }
 
-bool Binary_Output_Set_Object_Name(BACNET_CHARACTER_STRING *object_name)
+bool Binary_Output_Set_Object_Name(
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
 {
-    bool status = false; /*return value */
+    bool status = false;
+    unsigned index = 0;
 
-    if (!characterstring_same(&My_Binary_Output_Object_Name, object_name)) {
-        /* Make the change and update the database revision */
-        status = characterstring_copy(&My_Binary_Output_Object_Name, object_name);
+    index = Binary_Output_Instance_To_Index(object_instance);
+    if (index < Binary_Output_Instances) {
+        if (!characterstring_same(&Binary_Output_Instance_Names[index], object_name)) {
+            status = characterstring_copy(&Binary_Output_Instance_Names[index], object_name);
+        }
     }
 
     return status;
@@ -458,9 +485,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         case PROP_OBJECT_IDENTIFIER:
         case PROP_OBJECT_NAME:
             status = write_property_string_valid(wp_data, &value,
-                characterstring_capacity(&My_Binary_Output_Object_Name));
+                characterstring_capacity(&Binary_Output_Instance_Names[0]));
             if (status) {
-                Binary_Output_Set_Object_Name(&value.type.Character_String);
+                Binary_Output_Set_Object_Name(wp_data->object_instance,
+                    &value.type.Character_String);
 #if defined(MQTT)
                 mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_OBJECT_NAME,
                     MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);

@@ -64,6 +64,10 @@ extern "C" {
         uint32_t object_instance,
         BACNET_CHARACTER_STRING * object_name);
     BACNET_STACK_EXPORT
+    bool Binary_Input_Set_Object_Name(
+        uint32_t object_instance,
+        BACNET_CHARACTER_STRING * object_name);
+    BACNET_STACK_EXPORT
     bool Binary_Input_Name_Set(
         uint32_t object_instance,
         char *new_name);
