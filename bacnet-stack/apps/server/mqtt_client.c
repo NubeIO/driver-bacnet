@@ -13,7 +13,7 @@
 static int mqtt_debug = false;
 static char mqtt_broker_ip[51] = {0};
 static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
-static char mqtt_client_id[51] = {0};
+static char mqtt_client_id[124] = {0};
 static MQTTClient mqtt_client;
 
 
@@ -92,8 +92,28 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
   char *property_id_str;
 
   switch(object_type) {
+    case OBJECT_ANALOG_INPUT:
+      object_type_str = "ai";
+      break;
+
+    case OBJECT_ANALOG_OUTPUT:
+      object_type_str = "ao";
+      break;
+
+    case OBJECT_ANALOG_VALUE:
+      object_type_str = "av";
+      break;
+
+    case OBJECT_BINARY_INPUT:
+      object_type_str = "bi";
+      break;
+
     case OBJECT_BINARY_OUTPUT:
       object_type_str = "bo";
+      break;
+
+    case OBJECT_BINARY_VALUE:
+      object_type_str = "bv";
       break;
 
     case OBJECT_DEVICE:
@@ -159,6 +179,12 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
 
     case MQTT_TOPIC_VALUE_INTEGER:
       sprintf(buf, "%d", *((int*)vptr));
+      pubmsg.payload = buf;
+      pubmsg.payloadlen = strlen(buf);
+      break;
+
+    case MQTT_TOPIC_VALUE_FLOAT:
+      sprintf(buf, "%.6f", *((float*)vptr));
       pubmsg.payload = buf;
       pubmsg.payloadlen = strlen(buf);
       break;

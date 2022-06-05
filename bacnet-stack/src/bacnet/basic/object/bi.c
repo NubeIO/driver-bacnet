@@ -39,6 +39,9 @@
 #include "bacnet/config.h" /* the custom stuff */
 #include "bacnet/basic/object/bi.h"
 #include "bacnet/basic/services.h"
+#if defined(MQTT)
+#include "mqtt_client.h"
+#endif /* defined(MQTT) */
 
 #ifndef MAX_BINARY_INPUTS
 #define MAX_BINARY_INPUTS 5
@@ -58,7 +61,7 @@ static bool *Change_Of_Value = NULL;
 /* Polarity of Input */
 static BACNET_POLARITY *Polarity = NULL;
 /* Binary Input Instances Object Name */
-static char **Binary_Input_Instance_Names = NULL;
+static BACNET_CHARACTER_STRING *Binary_Input_Instance_Names = NULL;
 
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Binary_Input_Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
@@ -114,9 +117,10 @@ uint32_t Binary_Input_Index_To_Instance(unsigned index)
 
 void Binary_Input_Init(void)
 {
+    char buf[51];
+    char *pEnv;
     static bool initialized = false;
     unsigned i;
-    char *pEnv;
 
     if (!initialized) {
         initialized = true;
@@ -133,10 +137,10 @@ void Binary_Input_Init(void)
             Change_Of_Value = malloc(Binary_Input_Instances * sizeof(bool));
             Polarity = malloc(Binary_Input_Instances * sizeof(BACNET_POLARITY));
 
-            Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(char *));
+            Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Input_Instances; i++) {
-                Binary_Input_Instance_Names[i] = malloc(MAX_BINARY_INPUT_OBJECT_NAME_LEN);
-                sprintf(Binary_Input_Instance_Names[i], "BINARY INPUT %d", i);
+                sprintf(buf, "BINARY INPUT %d", i);
+                characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
             }
         }
 
@@ -320,7 +324,7 @@ bool Binary_Input_Object_Name(
 
     index = Binary_Input_Instance_To_Index(object_instance);
     if (index < Binary_Input_Instances) {
-        status = characterstring_init_ansi(object_name, Binary_Input_Instance_Names[index]);
+        status = characterstring_copy(object_name, &Binary_Input_Instance_Names[index]);
     }
 
     return status;
@@ -334,9 +338,8 @@ bool Binary_Input_Set_Object_Name(
 
     index = Binary_Input_Instance_To_Index(object_instance);
     if (index < Binary_Input_Instances) {
-        if (!characterstring_ansi_same(object_name, Binary_Input_Instance_Names[index])) {
-            status = characterstring_ansi_copy(Binary_Input_Instance_Names[index],
-                MAX_BINARY_INPUT_OBJECT_NAME_LEN, object_name);
+        if (!characterstring_same(&Binary_Input_Instance_Names[index], object_name)) {
+            status = characterstring_copy(&Binary_Input_Instance_Names[index], object_name);
         }
     }
 
@@ -476,6 +479,10 @@ bool Binary_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 if (value.type.Enumerated <= MAX_BINARY_PV) {
                     Binary_Input_Present_Value_Set(wp_data->object_instance,
                         (BACNET_BINARY_PV)value.type.Enumerated);
+#if defined(MQTT)
+                    mqtt_publish_topic(OBJECT_BINARY_INPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                        MQTT_TOPIC_VALUE_INTEGER, &value.type.Enumerated);
+#endif /* defined(MQTT) */
                 } else {
                     status = false;
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
@@ -508,10 +515,13 @@ bool Binary_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         case PROP_OBJECT_NAME:
             status = write_property_string_valid(wp_data, &value,
                 MAX_BINARY_INPUT_OBJECT_NAME_LEN);
-printf("status: %d\n", status);
             if (status) {
                 Binary_Input_Set_Object_Name(wp_data->object_instance,
                     &value.type.Character_String);
+#if defined(MQTT)
+                mqtt_publish_topic(OBJECT_BINARY_INPUT, wp_data->object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+#endif /* defined(MQTT) */
             }
             break;
         case PROP_OBJECT_IDENTIFIER:

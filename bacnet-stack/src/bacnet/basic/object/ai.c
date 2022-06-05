@@ -29,7 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-
+#include <stdlib.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -40,6 +40,9 @@
 #include "bacnet/proplist.h"
 #include "bacnet/timestamp.h"
 #include "bacnet/basic/object/ai.h"
+#if defined(MQTT)
+#include "mqtt_client.h"
+#endif /* defined(MQTT) */
 
 #if PRINT_ENABLED
 #include <stdio.h>
@@ -52,7 +55,12 @@
 #define MAX_ANALOG_INPUTS 4
 #endif
 
-static ANALOG_INPUT_DESCR AI_Descr[MAX_ANALOG_INPUTS];
+/* Run-time Analog Input Instances */
+static int Analog_Input_Instances = 0;
+
+static ANALOG_INPUT_DESCR *AI_Descr = NULL;
+/* Analog Input Instances Object Name */
+static BACNET_CHARACTER_STRING *Analog_Input_Instance_Names = NULL;
 
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
@@ -88,12 +96,24 @@ void Analog_Input_Property_Lists(
 
 void Analog_Input_Init(void)
 {
+    char buf[51];
+    char *pEnv;
     unsigned i;
 #if defined(INTRINSIC_REPORTING)
     unsigned j;
 #endif
 
-    for (i = 0; i < MAX_ANALOG_INPUTS; i++) {
+    pEnv = getenv("AI");
+    if (pEnv) {
+        Analog_Input_Instances = atoi(pEnv);
+    }
+
+    if (Analog_Input_Instances> 0) {
+        AI_Descr = malloc(Analog_Input_Instances * sizeof(ANALOG_INPUT_DESCR));
+        Analog_Input_Instance_Names = malloc(Analog_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
+    }
+
+    for (i = 0; i < Analog_Input_Instances; i++) {
         AI_Descr[i].Present_Value = 0.0f;
         AI_Descr[i].Out_Of_Service = false;
         AI_Descr[i].Units = UNITS_PERCENT;
@@ -121,6 +141,9 @@ void Analog_Input_Init(void)
         handler_get_alarm_summary_set(
             OBJECT_ANALOG_INPUT, Analog_Input_Alarm_Summary);
 #endif
+
+       sprintf(buf, "ANALOG INPUT %d", i);
+       characterstring_init_ansi(&Analog_Input_Instance_Names[i], buf);
     }
 }
 
@@ -132,7 +155,7 @@ bool Analog_Input_Valid_Instance(uint32_t object_instance)
     unsigned int index;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         return true;
     }
 
@@ -143,7 +166,7 @@ bool Analog_Input_Valid_Instance(uint32_t object_instance)
 /* more complex, and then count how many you have */
 unsigned Analog_Input_Count(void)
 {
-    return MAX_ANALOG_INPUTS;
+    return Analog_Input_Instances;
 }
 
 /* we simply have 0-n object instances.  Yours might be */
@@ -159,9 +182,9 @@ uint32_t Analog_Input_Index_To_Instance(unsigned index)
 /* that correlates to the correct instance number */
 unsigned Analog_Input_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = MAX_ANALOG_INPUTS;
+    unsigned index = Analog_Input_Instances;
 
-    if (object_instance < MAX_ANALOG_INPUTS) {
+    if (object_instance < Analog_Input_Instances) {
         index = object_instance;
     }
 
@@ -174,7 +197,7 @@ float Analog_Input_Present_Value(uint32_t object_instance)
     unsigned int index;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         value = AI_Descr[index].Present_Value;
     }
 
@@ -187,7 +210,7 @@ static void Analog_Input_COV_Detect(unsigned int index, float value)
     float cov_increment = 0.0;
     float cov_delta = 0.0;
 
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         prior_value = AI_Descr[index].Prior_Value;
         cov_increment = AI_Descr[index].COV_Increment;
         if (prior_value > value) {
@@ -207,7 +230,7 @@ void Analog_Input_Present_Value_Set(uint32_t object_instance, float value)
     unsigned int index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         Analog_Input_COV_Detect(index, value);
         AI_Descr[index].Present_Value = value;
     }
@@ -216,14 +239,28 @@ void Analog_Input_Present_Value_Set(uint32_t object_instance, float value)
 bool Analog_Input_Object_Name(
     uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
 {
-    static char text_string[32] = ""; /* okay for single thread */
     unsigned int index;
     bool status = false;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
-        sprintf(text_string, "ANALOG INPUT %lu", (unsigned long)index);
-        status = characterstring_init_ansi(object_name, text_string);
+    if (index < Analog_Input_Instances) {
+        status = characterstring_copy(object_name, &Analog_Input_Instance_Names[index]);
+    }
+
+    return status;
+}
+
+bool Analog_Input_Set_Object_Name(
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
+{
+    bool status = false;
+    unsigned index = 0;
+
+    index = Analog_Input_Instance_To_Index(object_instance);
+    if (index < Analog_Input_Instances) {
+        if (!characterstring_same(&Analog_Input_Instance_Names[index], object_name)) {
+            status = characterstring_copy(&Analog_Input_Instance_Names[index], object_name);
+        }
     }
 
     return status;
@@ -243,7 +280,7 @@ unsigned Analog_Input_Event_State(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         state = AI_Descr[index].Event_State;
     }
 #endif
@@ -257,7 +294,7 @@ bool Analog_Input_Change_Of_Value(uint32_t object_instance)
     bool changed = false;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         changed = AI_Descr[index].Changed;
     }
 
@@ -269,7 +306,7 @@ void Analog_Input_Change_Of_Value_Clear(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         AI_Descr[index].Changed = false;
     }
 }
@@ -294,7 +331,7 @@ bool Analog_Input_Encode_Value_List(
     unsigned index = 0; /* offset from instance lookup */
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         if (AI_Descr[index].Event_State != EVENT_STATE_NORMAL) {
             in_alarm = true;
         }
@@ -313,7 +350,7 @@ float Analog_Input_COV_Increment(uint32_t object_instance)
     float value = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         value = AI_Descr[index].COV_Increment;
     }
 
@@ -325,7 +362,7 @@ void Analog_Input_COV_Increment_Set(uint32_t object_instance, float value)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         AI_Descr[index].COV_Increment = value;
         Analog_Input_COV_Detect(index, AI_Descr[index].Present_Value);
     }
@@ -337,7 +374,7 @@ bool Analog_Input_Out_Of_Service(uint32_t object_instance)
     bool value = false;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         value = AI_Descr[index].Out_Of_Service;
     }
 
@@ -349,7 +386,7 @@ void Analog_Input_Out_Of_Service_Set(uint32_t object_instance, bool value)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         /* 	BACnet Testing Observed Incident oi00104
                 The Changed flag was not being set when a client wrote to the
         Out-of-Service bit. Revealed by BACnet Test Client v1.8.16 (
@@ -386,7 +423,7 @@ int Analog_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
     }
 
     object_index = Analog_Input_Instance_To_Index(rpdata->object_instance);
-    if (object_index < MAX_ANALOG_INPUTS) {
+    if (object_index < Analog_Input_Instances) {
         CurrentAI = &AI_Descr[object_index];
     } else {
         return BACNET_STATUS_ERROR;
@@ -625,7 +662,7 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         return false;
     }
     object_index = Analog_Input_Instance_To_Index(wp_data->object_instance);
-    if (object_index < MAX_ANALOG_INPUTS) {
+    if (object_index < Analog_Input_Instances) {
         CurrentAI = &AI_Descr[object_index];
     } else {
         return false;
@@ -639,6 +676,10 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 if (CurrentAI->Out_Of_Service == true) {
                     Analog_Input_Present_Value_Set(
                         wp_data->object_instance, value.type.Real);
+#if defined(MQTT)
+                    mqtt_publish_topic(OBJECT_ANALOG_INPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                        MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+#endif /* defined(MQTT) */
                 } else {
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_WRITE_ACCESS_DENIED;
@@ -771,6 +812,17 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 #endif
         case PROP_OBJECT_IDENTIFIER:
         case PROP_OBJECT_NAME:
+            status = write_property_string_valid(wp_data, &value,
+                characterstring_capacity(&Analog_Input_Instance_Names[0]));
+            if (status) {
+                Analog_Input_Set_Object_Name(wp_data->object_instance,
+                    &value.type.Character_String);
+#if defined(MQTT)
+                mqtt_publish_topic(OBJECT_ANALOG_INPUT, wp_data->object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+#endif /* defined(MQTT) */
+            }
+            break;
         case PROP_OBJECT_TYPE:
         case PROP_STATUS_FLAGS:
         case PROP_EVENT_STATE:
@@ -809,7 +861,7 @@ void Analog_Input_Intrinsic_Reporting(uint32_t object_instance)
     bool SendNotify = false;
 
     object_index = Analog_Input_Instance_To_Index(object_instance);
-    if (object_index < MAX_ANALOG_INPUTS) {
+    if (object_index < Analog_Input_Instances) {
         CurrentAI = &AI_Descr[object_index];
     } else {
         return;
@@ -1140,7 +1192,7 @@ int Analog_Input_Event_Information(
     int i;
 
     /* check index */
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         /* Event_State not equal to NORMAL */
         IsActiveEvent = (AI_Descr[index].Event_State != EVENT_STATE_NORMAL);
 
@@ -1214,7 +1266,7 @@ int Analog_Input_Alarm_Ack(
     object_index = Analog_Input_Instance_To_Index(
         alarmack_data->eventObjectIdentifier.instance);
 
-    if (object_index < MAX_ANALOG_INPUTS)
+    if (object_index < Analog_Input_Instances)
         CurrentAI = &AI_Descr[object_index];
     else {
         *error_code = ERROR_CODE_UNKNOWN_OBJECT;
@@ -1315,7 +1367,7 @@ int Analog_Input_Alarm_Summary(
     unsigned index, BACNET_GET_ALARM_SUMMARY_DATA *getalarm_data)
 {
     /* check index */
-    if (index < MAX_ANALOG_INPUTS) {
+    if (index < Analog_Input_Instances) {
         /* Event_State is not equal to NORMAL  and
            Notify_Type property value is ALARM */
         if ((AI_Descr[index].Event_State != EVENT_STATE_NORMAL) &&

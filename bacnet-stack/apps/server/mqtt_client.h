@@ -19,6 +19,7 @@
 #define MQTT_TOPIC_VALUE_STRING          1
 #define MQTT_TOPIC_VALUE_BACNET_STRING   2
 #define MQTT_TOPIC_VALUE_INTEGER         3
+#define MQTT_TOPIC_VALUE_FLOAT           4
 
 #ifdef __cplusplus
 extern "C" {

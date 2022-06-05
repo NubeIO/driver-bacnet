@@ -28,6 +28,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -37,20 +38,27 @@
 #include "bacnet/rp.h"
 #include "bacnet/basic/object/bv.h"
 #include "bacnet/basic/services.h"
+#if defined(MQTT)
+#include "mqtt_client.h"
+#endif /* defined(MQTT) */
 
 #ifndef MAX_BINARY_VALUES
 #define MAX_BINARY_VALUES 10
 #endif
 
+/* Run-time Binary Value Instances */
+static int Binary_Value_Instances = 0;
+
 /* When all the priorities are level null, the present value returns */
 /* the Relinquish Default value */
 #define RELINQUISH_DEFAULT BINARY_INACTIVE
 /* Here is our Priority Array.*/
-static BACNET_BINARY_PV Binary_Value_Level[MAX_BINARY_VALUES]
-                                          [BACNET_MAX_PRIORITY];
+static BACNET_BINARY_PV **Binary_Value_Level = NULL;
 /* Writable out-of-service allows others to play with our Present Value */
 /* without changing the physical output */
-static bool Out_Of_Service[MAX_BINARY_VALUES];
+static bool *Out_Of_Service = NULL;
+/* Binary Value Instances Object Name */
+static BACNET_CHARACTER_STRING *Binary_Value_Instance_Names = NULL;
 
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Binary_Value_Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
@@ -91,16 +99,37 @@ void Binary_Value_Property_Lists(
  */
 void Binary_Value_Init(void)
 {
+    char buf[51];
+    char *pEnv;
     unsigned i, j;
     static bool initialized = false;
 
     if (!initialized) {
         initialized = true;
 
+        pEnv = getenv("BV");
+        if (pEnv) {
+            Binary_Value_Instances = atoi(pEnv);
+        }
+
         /* initialize all the analog output priority arrays to NULL */
-        for (i = 0; i < MAX_BINARY_VALUES; i++) {
-            for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
-                Binary_Value_Level[i][j] = BINARY_NULL;
+        if (Binary_Value_Instances > 0) {
+            Binary_Value_Level = malloc(Binary_Value_Instances * sizeof(BACNET_BINARY_PV*));
+            for (i = 0; i < Binary_Value_Instances; i++) {
+                Binary_Value_Level [i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
+            }
+
+            for (i = 0; i < Binary_Value_Instances; i++) {
+                for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
+                    Binary_Value_Level[i][j] = BINARY_NULL;
+                }
+            }
+
+            Out_Of_Service = malloc(Binary_Value_Instances * sizeof(bool));
+            Binary_Value_Instance_Names = malloc(Binary_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
+            for (i = 0; i < Binary_Value_Instances; i++) {
+                sprintf(buf, "BINARY VALUE %d", i);
+                characterstring_init_ansi(&Binary_Value_Instance_Names[i], buf);
             }
         }
     }
@@ -119,7 +148,7 @@ void Binary_Value_Init(void)
  */
 bool Binary_Value_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance < MAX_BINARY_VALUES) {
+    if (object_instance < Binary_Value_Instances) {
         return true;
     }
 
@@ -133,7 +162,7 @@ bool Binary_Value_Valid_Instance(uint32_t object_instance)
  */
 unsigned Binary_Value_Count(void)
 {
-    return MAX_BINARY_VALUES;
+    return Binary_Value_Instances;
 }
 
 /**
@@ -161,9 +190,9 @@ uint32_t Binary_Value_Index_To_Instance(unsigned index)
  */
 unsigned Binary_Value_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = MAX_BINARY_VALUES;
+    unsigned index = Binary_Value_Instances;
 
-    if (object_instance < MAX_BINARY_VALUES) {
+    if (object_instance < Binary_Value_Instances) {
         index = object_instance;
     }
 
@@ -184,7 +213,7 @@ BACNET_BINARY_PV Binary_Value_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index < MAX_BINARY_VALUES) {
+    if (index < Binary_Value_Instances) {
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Binary_Value_Level[index][i] != BINARY_NULL) {
                 value = Binary_Value_Level[index][i];
@@ -209,13 +238,28 @@ BACNET_BINARY_PV Binary_Value_Present_Value(uint32_t object_instance)
 bool Binary_Value_Object_Name(
     uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
 {
-    static char text_string[32] = ""; /* okay for single thread */
     bool status = false;
+    unsigned index = 0;
 
-    if (object_instance < MAX_BINARY_VALUES) {
-        sprintf(
-            text_string, "BINARY VALUE %lu", (unsigned long)object_instance);
-        status = characterstring_init_ansi(object_name, text_string);
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index < Binary_Value_Instances) {
+        status = characterstring_copy(object_name, &Binary_Value_Instance_Names[index]);
+    }
+
+    return status;
+}
+
+bool Binary_Value_Set_Object_Name(
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
+{
+    bool status = false;
+    unsigned index = 0;
+
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index < Binary_Value_Instances) {
+        if (!characterstring_same(&Binary_Value_Instance_Names[index], object_name)) {
+            status = characterstring_copy(&Binary_Value_Instance_Names[index], object_name);
+        }
     }
 
     return status;
@@ -234,7 +278,7 @@ bool Binary_Value_Out_Of_Service(uint32_t instance)
     bool oos_flag = false;
 
     index = Binary_Value_Instance_To_Index(instance);
-    if (index < MAX_BINARY_VALUES) {
+    if (index < Binary_Value_Instances) {
         oos_flag = Out_Of_Service[index];
     }
 
@@ -252,7 +296,7 @@ void Binary_Value_Out_Of_Service_Set(uint32_t instance, bool oos_flag)
     unsigned index = 0;
 
     index = Binary_Value_Instance_To_Index(instance);
-    if (index < MAX_BINARY_VALUES) {
+    if (index < Binary_Value_Instances) {
         Out_Of_Service[index] = oos_flag;
     }
 }
@@ -287,7 +331,7 @@ int Binary_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 
     /* Valid object index? */
     object_index = Binary_Value_Instance_To_Index(rpdata->object_instance);
-    if (object_index >= MAX_BINARY_VALUES) {
+    if (object_index >= Binary_Value_Instances) {
         rpdata->error_class = ERROR_CLASS_OBJECT;
         rpdata->error_code = ERROR_CODE_UNKNOWN_OBJECT;
         return BACNET_STATUS_ERROR;
@@ -449,7 +493,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 
     /* Valid object index? */
     object_index = Binary_Value_Instance_To_Index(wp_data->object_instance);
-    if (object_index >= MAX_BINARY_VALUES) {
+    if (object_index >= Binary_Value_Instances) {
         wp_data->error_class = ERROR_CLASS_OBJECT;
         wp_data->error_code = ERROR_CODE_UNKNOWN_OBJECT;
         return false;
@@ -477,6 +521,10 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                        main loop (i.e. check out of service before changing
                        output) */
                     status = true;
+#if defined(MQTT)
+                    mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_PRESENT_VALUE,
+                        MQTT_TOPIC_VALUE_INTEGER, &level);
+#endif /* defined(MQTT) */
                 } else if (priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -521,6 +569,17 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             break;
         case PROP_OBJECT_IDENTIFIER:
         case PROP_OBJECT_NAME:
+            status = write_property_string_valid(wp_data, &value,
+                characterstring_capacity(&Binary_Value_Instance_Names[0]));
+            if (status) {
+                Binary_Value_Set_Object_Name(wp_data->object_instance,
+                    &value.type.Character_String);
+#if defined(MQTT)
+                mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+#endif /* defined(MQTT) */
+            }
+            break;
         case PROP_DESCRIPTION:
         case PROP_OBJECT_TYPE:
         case PROP_STATUS_FLAGS:

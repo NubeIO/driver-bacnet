@@ -28,6 +28,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -36,10 +37,16 @@
 #include "bacnet/wp.h"
 #include "bacnet/basic/object/ao.h"
 #include "bacnet/basic/services.h"
+#if defined(MQTT)
+#include "mqtt_client.h"
+#endif /* defined(MQTT) */
 
 #ifndef MAX_ANALOG_OUTPUTS
 #define MAX_ANALOG_OUTPUTS 4
 #endif
+
+/* Run-time Analog Output Instances */
+static int Analog_Output_Instances = 0;
 
 /* we choose to have a NULL level in our system represented by */
 /* a particular value.  When the priorities are not in use, they */
@@ -51,10 +58,12 @@
 /* Here is our Priority Array.  They are supposed to be Real, but */
 /* we don't have that kind of memory, so we will use a single byte */
 /* and load a Real for returning the value when asked. */
-static uint8_t Analog_Output_Level[MAX_ANALOG_OUTPUTS][BACNET_MAX_PRIORITY];
+static uint8_t **Analog_Output_Level = NULL;
 /* Writable out-of-service allows others to play with our Present Value */
 /* without changing the physical output */
-static bool Out_Of_Service[MAX_ANALOG_OUTPUTS];
+static bool *Out_Of_Service = NULL;
+/* Analog Output Instances Object Name */
+static BACNET_CHARACTER_STRING *Analog_Output_Instance_Names = NULL;
 
 /* we need to have our arrays initialized before answering any calls */
 static bool Analog_Output_Initialized = false;
@@ -87,15 +96,36 @@ void Analog_Output_Property_Lists(
 
 void Analog_Output_Init(void)
 {
+    char buf[51];
+    char *pEnv;
     unsigned i, j;
 
     if (!Analog_Output_Initialized) {
         Analog_Output_Initialized = true;
 
+        pEnv = getenv("AO");
+        if (pEnv) {
+            Analog_Output_Instances = atoi(pEnv);
+        }
+
         /* initialize all the analog output priority arrays to NULL */
-        for (i = 0; i < MAX_ANALOG_OUTPUTS; i++) {
-            for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
-                Analog_Output_Level[i][j] = AO_LEVEL_NULL;
+        if (Analog_Output_Instances > 0) {
+            Analog_Output_Level = malloc(Analog_Output_Instances * sizeof(uint8_t*));
+            for (i = 0; i < Analog_Output_Instances; i++) {
+                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(uint8_t));
+            }
+
+            for (i = 0; i < Analog_Output_Instances; i++) {
+                for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
+                    Analog_Output_Level[i][j] = AO_LEVEL_NULL;
+                }
+            }
+
+            Out_Of_Service = malloc(Analog_Output_Instances * sizeof(bool));
+            Analog_Output_Instance_Names = malloc(Analog_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
+            for (i = 0; i < Analog_Output_Instances; i++) {
+                sprintf(buf, "ANALOG OUTPUT %d", i);
+                characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
             }
         }
     }
@@ -108,7 +138,7 @@ void Analog_Output_Init(void)
 /* given instance exists */
 bool Analog_Output_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance < MAX_ANALOG_OUTPUTS) {
+    if (object_instance < Analog_Output_Instances) {
         return true;
     }
 
@@ -119,7 +149,7 @@ bool Analog_Output_Valid_Instance(uint32_t object_instance)
 /* more complex, and then count how many you have */
 unsigned Analog_Output_Count(void)
 {
-    return MAX_ANALOG_OUTPUTS;
+    return Analog_Output_Instances;
 }
 
 /* we simply have 0-n object instances.  Yours might be */
@@ -135,9 +165,9 @@ uint32_t Analog_Output_Index_To_Instance(unsigned index)
 /* that correlates to the correct instance number */
 unsigned Analog_Output_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = MAX_ANALOG_OUTPUTS;
+    unsigned index = Analog_Output_Instances;
 
-    if (object_instance < MAX_ANALOG_OUTPUTS) {
+    if (object_instance < Analog_Output_Instances) {
         index = object_instance;
     }
 
@@ -151,7 +181,7 @@ float Analog_Output_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_OUTPUTS) {
+    if (index < Analog_Output_Instances) {
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Analog_Output_Level[index][i] != AO_LEVEL_NULL) {
                 value = (float)Analog_Output_Level[index][i];
@@ -170,7 +200,7 @@ unsigned Analog_Output_Present_Value_Priority(uint32_t object_instance)
     unsigned priority = 0; /* return value */
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_OUTPUTS) {
+    if (index < Analog_Output_Instances) {
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Analog_Output_Level[index][i] != AO_LEVEL_NULL) {
                 priority = i + 1;
@@ -189,7 +219,7 @@ bool Analog_Output_Present_Value_Set(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_OUTPUTS) {
+    if (index < Analog_Output_Instances) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */) && (value >= 0.0) &&
             (value <= 100.0)) {
@@ -214,7 +244,7 @@ bool Analog_Output_Present_Value_Relinquish(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < MAX_ANALOG_OUTPUTS) {
+    if (index < Analog_Output_Instances) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
             Analog_Output_Level[index][priority - 1] = AO_LEVEL_NULL;
@@ -235,13 +265,28 @@ bool Analog_Output_Present_Value_Relinquish(
 bool Analog_Output_Object_Name(
     uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
 {
-    static char text_string[32] = ""; /* okay for single thread */
     bool status = false;
+    unsigned index = 0;
 
-    if (object_instance < MAX_ANALOG_OUTPUTS) {
-        sprintf(
-            text_string, "ANALOG OUTPUT %lu", (unsigned long)object_instance);
-        status = characterstring_init_ansi(object_name, text_string);
+    index = Analog_Output_Instance_To_Index(object_instance);
+    if (index < Analog_Output_Instances) {
+        status = characterstring_copy(object_name, &Analog_Output_Instance_Names[index]);
+    }
+
+    return status;
+}
+
+bool Analog_Output_Set_Object_Name(
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
+{
+    bool status = false;
+    unsigned index = 0;
+
+    index = Analog_Output_Instance_To_Index(object_instance);
+    if (index < Analog_Output_Instances) {
+        if (!characterstring_same(&Analog_Output_Instance_Names[index], object_name)) {
+            status = characterstring_copy(&Analog_Output_Instance_Names[index], object_name);
+        }
     }
 
     return status;
@@ -253,7 +298,7 @@ bool Analog_Output_Out_Of_Service(uint32_t instance)
     bool oos_flag = false;
 
     index = Analog_Output_Instance_To_Index(instance);
-    if (index < MAX_ANALOG_OUTPUTS) {
+    if (index < Analog_Output_Instances) {
         oos_flag = Out_Of_Service[index];
     }
 
@@ -265,7 +310,7 @@ void Analog_Output_Out_Of_Service_Set(uint32_t instance, bool oos_flag)
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(instance);
-    if (index < MAX_ANALOG_OUTPUTS) {
+    if (index < Analog_Output_Instances) {
         Out_Of_Service[index] = oos_flag;
     }
 }
@@ -443,6 +488,11 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 } else if (!status) {
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                } else {
+#if defined(MQTT)
+                    mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                        MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+#endif /* defined(MQTT) */
                 }
             } else {
                 status = write_property_type_valid(wp_data, &value,
@@ -467,6 +517,17 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             break;
         case PROP_OBJECT_IDENTIFIER:
         case PROP_OBJECT_NAME:
+            status = write_property_string_valid(wp_data, &value,
+                characterstring_capacity(&Analog_Output_Instance_Names[0]));
+            if (status) {
+                Analog_Output_Set_Object_Name(wp_data->object_instance,
+                    &value.type.Character_String);
+#if defined(MQTT)
+                mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+#endif /* defined(MQTT) */
+            }
+            break;
         case PROP_OBJECT_TYPE:
         case PROP_STATUS_FLAGS:
         case PROP_EVENT_STATE:
