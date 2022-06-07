@@ -1097,6 +1097,18 @@ static int CheckCommandLineArgs(int argc, char *argv[])
 }
                     /* Used strtol so dest.net can be either 0x1234 or 4660 */
                     break;
+                case 'm':
+                    if (++i < argc) {
+                        BACNET_MAC_ADDRESS mac = { 0 };
+                        if (address_mac_from_ascii(&mac, argv[i])) {
+                            memcpy(&Target_Address.mac[0], &mac.adr[0], mac.len);
+                            Target_Address.mac_len = mac.len;
+                            Target_Address.len = 0;
+                            Target_Address.net = 0;
+                            Provided_Targ_MAC = true;
+                        }
+                    }
+                    break;
                 case 't':
                     if (++i < argc) {
                         /* decoded MAC addresses */
