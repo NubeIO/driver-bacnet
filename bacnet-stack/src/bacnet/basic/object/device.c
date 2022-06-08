@@ -163,12 +163,14 @@ static object_functions_t My_Object_Table[] = {
         NULL /* ReadRangeInfo */, NULL /* Iterator */, NULL /* Value_Lists */,
         NULL /* COV */, NULL /* COV Clear */, NULL /* Intrinsic Reporting */ },
 #endif
+#if 0
     { OBJECT_INTEGER_VALUE, Integer_Value_Init, Integer_Value_Count,
         Integer_Value_Index_To_Instance, Integer_Value_Valid_Instance,
         Integer_Value_Object_Name, Integer_Value_Read_Property,
         Integer_Value_Write_Property, Integer_Value_Property_Lists,
         NULL /* ReadRangeInfo */, NULL /* Iterator */, NULL /* Value_Lists */,
         NULL /* COV */, NULL /* COV Clear */, NULL /* Intrinsic Reporting */ },
+#endif
 #if defined(INTRINSIC_REPORTING)
 #if 0
     { OBJECT_NOTIFICATION_CLASS, Notification_Class_Init,
