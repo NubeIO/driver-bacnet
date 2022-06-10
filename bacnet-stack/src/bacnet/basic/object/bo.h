@@ -155,6 +155,9 @@ extern "C" {
     int Binary_Output_Read_Property(
         BACNET_READ_PROPERTY_DATA * rpdata);
     BACNET_STACK_EXPORT
+    void publish_priority_array(
+        uint32_t object_instance);
+    BACNET_STACK_EXPORT
     bool Binary_Output_Write_Property(
         BACNET_WRITE_PROPERTY_DATA * wp_data);
 

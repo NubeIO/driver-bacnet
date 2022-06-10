@@ -133,6 +133,14 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
       property_id_str = "pv";
       break;
 
+    case PROP_PRIORITY_ARRAY:
+      property_id_str = "pri";
+      break;
+
+    case PROP_RELINQUISH_DEFAULT:
+      property_id_str = "rel";
+      break;
+
     default:
       return(NULL);
   }
