@@ -564,6 +564,25 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             status = write_property_type_valid(wp_data, &value,
                 BACNET_APPLICATION_TAG_ENUMERATED);
             if (status) {
+                if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
+                    if (value.type.Enumerated <= MAX_BINARY_PV) {
+                        object_index = Binary_Output_Instance_To_Index(
+                            wp_data->object_instance);
+                        level = (BACNET_BINARY_PV)value.type.Enumerated;
+                        Binary_Output_Level[object_index][wp_data->array_index - 1] = level;
+#if defined(MQTT)
+                        publish_priority_array(wp_data->object_instance);
+#endif /* defined(MQTT) */
+                    } else {
+                        status = false;
+                        wp_data->error_class = ERROR_CLASS_PROPERTY;
+                        wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                    }
+                } else {
+                    status = false;
+                    wp_data->error_class = ERROR_CLASS_PROPERTY;
+                    wp_data->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
+                }
             }
             break;
         case PROP_RELINQUISH_DEFAULT:
@@ -580,6 +599,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                         MQTT_TOPIC_VALUE_INTEGER, &level);
 #endif /* defined(MQTT) */
                 } else {
+                    status = false;
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
                 }
