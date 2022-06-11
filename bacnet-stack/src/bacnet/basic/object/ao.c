@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -55,6 +56,7 @@ static int Analog_Output_Instances = 0;
 /* When all the priorities are level null, the present value returns */
 /* the Relinquish Default value */
 #define AO_RELINQUISH_DEFAULT 0
+static uint8_t *Analog_Output_Relinquish_Defaults = NULL;
 /* Here is our Priority Array.  They are supposed to be Real, but */
 /* we don't have that kind of memory, so we will use a single byte */
 /* and load a Real for returning the value when asked. */
@@ -127,6 +129,11 @@ void Analog_Output_Init(void)
                 sprintf(buf, "ANALOG OUTPUT %d", i);
                 characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
             }
+
+            Analog_Output_Relinquish_Defaults = malloc(Analog_Output_Instances * sizeof(uint8_t));
+            for (i = 0; i < Analog_Output_Instances; i++) {
+                Analog_Output_Relinquish_Defaults[i] = AO_RELINQUISH_DEFAULT;
+            }
         }
     }
 
@@ -182,6 +189,7 @@ float Analog_Output_Present_Value(uint32_t object_instance)
 
     index = Analog_Output_Instance_To_Index(object_instance);
     if (index < Analog_Output_Instances) {
+        value = Analog_Output_Relinquish_Defaults[index];
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Analog_Output_Level[index][i] != AO_LEVEL_NULL) {
                 value = (float)Analog_Output_Level[index][i];
@@ -315,6 +323,19 @@ void Analog_Output_Out_Of_Service_Set(uint32_t instance, bool oos_flag)
     }
 }
 
+float Analog_Output_Relinquish_Default(uint32_t object_instance)
+{
+    BACNET_BINARY_PV value = AO_RELINQUISH_DEFAULT;
+    unsigned index = 0;
+
+    index = Analog_Output_Instance_To_Index(object_instance);
+    if (index < Analog_Output_Instances) {
+        value = Analog_Output_Relinquish_Defaults[index];
+    }
+
+    return value;
+}
+
 /* return apdu len, or BACNET_STATUS_ERROR on error */
 int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 {
@@ -424,7 +445,8 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
             }
             break;
         case PROP_RELINQUISH_DEFAULT:
-            real_value = AO_RELINQUISH_DEFAULT;
+            real_value =
+                Analog_Output_Relinquish_Default(rpdata->object_instance);
             apdu_len = encode_application_real(&apdu[0], real_value);
             break;
         default:
@@ -444,9 +466,40 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
     return apdu_len;
 }
 
+/* publish the values of priority array over mqtt */
+void publish_ao_priority_array(uint32_t object_instance)
+{
+    uint8_t value;
+    char buf[1024] = {0};
+    char *first = "";
+    unsigned index = 0;
+    unsigned i;
+
+
+    index = Analog_Output_Instance_To_Index(object_instance);
+    if (index < Analog_Output_Instances) {
+        strcpy(buf, "{");
+        for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
+            value = Analog_Output_Level[index][i];
+            if (value == AO_LEVEL_NULL) {
+                sprintf(&buf[strlen(buf)], "%sNull", first);
+            } else {
+                sprintf(&buf[strlen(buf)], "%s%.6f", first, (float)value);
+            }
+
+            first = ",";
+        }
+
+        sprintf(&buf[strlen(buf)], "}");
+        mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRIORITY_ARRAY,
+            MQTT_TOPIC_VALUE_STRING, buf);
+    }
+}
+
 /* returns true if successful */
 bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 {
+    unsigned int object_index = 0;
     bool status = false; /* return value */
     int len = 0;
     BACNET_APPLICATION_DATA_VALUE value;
@@ -492,6 +545,7 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 #if defined(MQTT)
                     mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
                         MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+                    publish_ao_priority_array(wp_data->object_instance);
 #endif /* defined(MQTT) */
                 }
             } else {
@@ -532,10 +586,55 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         case PROP_STATUS_FLAGS:
         case PROP_EVENT_STATE:
         case PROP_UNITS:
-        case PROP_PRIORITY_ARRAY:
-        case PROP_RELINQUISH_DEFAULT:
             wp_data->error_class = ERROR_CLASS_PROPERTY;
             wp_data->error_code = ERROR_CODE_WRITE_ACCESS_DENIED;
+            break;
+        case PROP_PRIORITY_ARRAY:
+            status = write_property_type_valid(wp_data, &value,
+                BACNET_APPLICATION_TAG_REAL);
+            if (status) {
+                if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
+                    float f_value;
+                    f_value = value.type.Real;
+                    if ((f_value >= 0.0) && (f_value <= 100.0)) {
+                        object_index = Analog_Output_Instance_To_Index(
+                            wp_data->object_instance);
+                        Analog_Output_Level[object_index][wp_data->array_index - 1] = f_value;
+#if defined(MQTT)
+                        publish_ao_priority_array(wp_data->object_instance);
+#endif /* defined(MQTT) */
+                    } else {
+                        status = false;
+                        wp_data->error_class = ERROR_CLASS_PROPERTY;
+                        wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                    }
+                } else {
+                    status = false;
+                    wp_data->error_class = ERROR_CLASS_PROPERTY;
+                    wp_data->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
+                }
+            }
+            break;
+        case PROP_RELINQUISH_DEFAULT:
+            status = write_property_type_valid(wp_data, &value,
+                BACNET_APPLICATION_TAG_REAL);
+            if (status) {
+                float f_value;
+                f_value = value.type.Real;
+                if ((f_value >= 0.0) && (f_value <= 100.0)) {
+                    object_index = Analog_Output_Instance_To_Index(
+                        wp_data->object_instance);
+                    Analog_Output_Relinquish_Defaults[object_index] = f_value;
+#if defined(MQTT)
+                    mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
+                        MQTT_TOPIC_VALUE_FLOAT, &f_value);
+#endif /* defined(MQTT) */
+                } else {
+                    status = false;
+                    wp_data->error_class = ERROR_CLASS_PROPERTY;
+                    wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                }
+            }
             break;
         default:
             wp_data->error_class = ERROR_CLASS_PROPERTY;

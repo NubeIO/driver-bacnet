@@ -165,6 +165,9 @@ extern "C" {
     void Analog_Output_Init(
         void);
 
+    BACNET_STACK_EXPORT
+    void publish_ao_priority_array(
+        uint32_t object_instance);
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
