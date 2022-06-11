@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -52,6 +53,7 @@ static int Binary_Value_Instances = 0;
 /* When all the priorities are level null, the present value returns */
 /* the Relinquish Default value */
 #define RELINQUISH_DEFAULT BINARY_INACTIVE
+static BACNET_BINARY_PV *Binary_Value_Relinquish_Defaults = NULL;
 /* Here is our Priority Array.*/
 static BACNET_BINARY_PV **Binary_Value_Level = NULL;
 /* Writable out-of-service allows others to play with our Present Value */
@@ -130,6 +132,11 @@ void Binary_Value_Init(void)
             for (i = 0; i < Binary_Value_Instances; i++) {
                 sprintf(buf, "BINARY VALUE %d", i);
                 characterstring_init_ansi(&Binary_Value_Instance_Names[i], buf);
+            }
+
+            Binary_Value_Relinquish_Defaults = malloc(Binary_Value_Instances * sizeof(BACNET_BINARY_PV));
+            for (i = 0; i < Binary_Value_Instances; i++) {
+                Binary_Value_Relinquish_Defaults[i] = RELINQUISH_DEFAULT;
             }
         }
     }
@@ -214,6 +221,7 @@ BACNET_BINARY_PV Binary_Value_Present_Value(uint32_t object_instance)
 
     index = Binary_Value_Instance_To_Index(object_instance);
     if (index < Binary_Value_Instances) {
+        value = Binary_Value_Relinquish_Defaults[index];
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Binary_Value_Level[index][i] != BINARY_NULL) {
                 value = Binary_Value_Level[index][i];
@@ -263,6 +271,19 @@ bool Binary_Value_Set_Object_Name(
     }
 
     return status;
+}
+
+BACNET_BINARY_PV Binary_Value_Relinquish_Default(uint32_t object_instance)
+{
+    BACNET_BINARY_PV value = RELINQUISH_DEFAULT;
+    unsigned index = 0;
+
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index < Binary_Value_Instances) {
+        value = Binary_Value_Relinquish_Defaults[index];
+    }
+
+    return value;
 }
 
 /**
@@ -427,7 +448,8 @@ int Binary_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
             }
             break;
         case PROP_RELINQUISH_DEFAULT:
-            present_value = RELINQUISH_DEFAULT;
+            present_value =
+                Binary_Value_Relinquish_Default(rpdata->object_instance);
             apdu_len = encode_application_enumerated(&apdu[0], present_value);
             break;
         default:
@@ -446,6 +468,36 @@ int Binary_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
     }
 
     return apdu_len;
+}
+
+/* publish the values of priority array over mqtt */
+void publish_bv_priority_array(uint32_t object_instance)
+{   
+    BACNET_BINARY_PV value;
+    char buf[1024] = {0};
+    char *first = "";
+    unsigned index = 0;
+    unsigned i;
+    
+
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index < Binary_Value_Instances) {
+        strcpy(buf, "{");
+        for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
+            value = Binary_Value_Level[index][i];
+            if (value == BINARY_NULL) {
+                sprintf(&buf[strlen(buf)], "%sNull", first);
+            } else { 
+                sprintf(&buf[strlen(buf)], "%s%d", first, value);
+            }
+            
+            first = ",";
+        }
+        
+        sprintf(&buf[strlen(buf)], "}");
+        mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRIORITY_ARRAY,
+            MQTT_TOPIC_VALUE_STRING, buf);
+    }
 }
 
 /**
@@ -524,6 +576,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 #if defined(MQTT)
                     mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_PRESENT_VALUE,
                         MQTT_TOPIC_VALUE_INTEGER, &level);
+                    publish_bv_priority_array(wp_data->object_instance);
 #endif /* defined(MQTT) */
                 } else if (priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
@@ -584,10 +637,53 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         case PROP_OBJECT_TYPE:
         case PROP_STATUS_FLAGS:
         case PROP_EVENT_STATE:
-        case PROP_PRIORITY_ARRAY:
-        case PROP_RELINQUISH_DEFAULT:
             wp_data->error_class = ERROR_CLASS_PROPERTY;
             wp_data->error_code = ERROR_CODE_WRITE_ACCESS_DENIED;
+            break;
+        case PROP_PRIORITY_ARRAY:
+            status = write_property_type_valid(wp_data, &value,
+                BACNET_APPLICATION_TAG_ENUMERATED);
+            if (status) {
+                if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
+                    if (value.type.Enumerated <= MAX_BINARY_PV) {
+                        object_index = Binary_Value_Instance_To_Index(
+                            wp_data->object_instance);
+                        level = (BACNET_BINARY_PV)value.type.Enumerated;
+                        Binary_Value_Level[object_index][wp_data->array_index - 1] = level;
+#if defined(MQTT)
+                        publish_bv_priority_array(wp_data->object_instance);
+#endif /* defined(MQTT) */
+                    } else {
+                        status = false;
+                        wp_data->error_class = ERROR_CLASS_PROPERTY;
+                        wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                    }
+                } else {
+                    status = false;
+                    wp_data->error_class = ERROR_CLASS_PROPERTY;
+                    wp_data->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
+                }
+            }
+            break;
+        case PROP_RELINQUISH_DEFAULT:
+            status = write_property_type_valid(wp_data, &value,
+                BACNET_APPLICATION_TAG_ENUMERATED);
+            if (status) {
+                if (value.type.Enumerated <= MAX_BINARY_PV) {
+                    level = (BACNET_BINARY_PV)value.type.Enumerated;
+                    object_index = Binary_Value_Instance_To_Index(
+                        wp_data->object_instance);
+                    Binary_Value_Relinquish_Defaults[object_index] = level;
+#if defined(MQTT)
+                    mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
+                        MQTT_TOPIC_VALUE_INTEGER, &level);
+#endif /* defined(MQTT) */
+                } else {
+                    status = false;
+                    wp_data->error_class = ERROR_CLASS_PROPERTY;
+                    wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                }
+            }
             break;
         default:
             wp_data->error_class = ERROR_CLASS_PROPERTY;

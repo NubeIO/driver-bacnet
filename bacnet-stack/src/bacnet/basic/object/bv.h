@@ -185,6 +185,13 @@ extern "C" {
     void Binary_Value_Cleanup(
         void);
 
+    BACNET_STACK_EXPORT
+    BACNET_BINARY_PV Binary_Value_Relinquish_Default(
+        uint32_t object_instance);
+    BACNET_STACK_EXPORT
+    void publish_bv_priority_array(
+        uint32_t object_instance);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
