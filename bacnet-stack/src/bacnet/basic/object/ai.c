@@ -116,7 +116,7 @@ void Analog_Input_Init(void)
     for (i = 0; i < Analog_Input_Instances; i++) {
         AI_Descr[i].Present_Value = 0.0f;
         AI_Descr[i].Out_Of_Service = false;
-        AI_Descr[i].Units = UNITS_PERCENT;
+        AI_Descr[i].Units = UNITS_NO_UNITS;
         AI_Descr[i].Reliability = RELIABILITY_NO_FAULT_DETECTED;
         AI_Descr[i].Prior_Value = 0.0f;
         AI_Descr[i].COV_Increment = 1.0f;

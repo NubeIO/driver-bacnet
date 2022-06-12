@@ -390,7 +390,7 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
             apdu_len = encode_application_boolean(&apdu[0], state);
             break;
         case PROP_UNITS:
-            apdu_len = encode_application_enumerated(&apdu[0], UNITS_PERCENT);
+            apdu_len = encode_application_enumerated(&apdu[0], UNITS_NO_UNITS);
             break;
         case PROP_PRIORITY_ARRAY:
             /* Array element zero is the number of elements in the array */
