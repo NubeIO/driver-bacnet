@@ -120,6 +120,10 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
       object_type_str = "device";
       break;
 
+    case OBJECT_PROGRAM:
+      object_type_str = "program";
+      break;
+
     default:
       return(NULL);
   }
@@ -139,6 +143,10 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
 
     case PROP_RELINQUISH_DEFAULT:
       property_id_str = "rel";
+      break;
+
+    case PROP_PROGRAM_STATE:
+      property_id_str = "state";
       break;
 
     default:

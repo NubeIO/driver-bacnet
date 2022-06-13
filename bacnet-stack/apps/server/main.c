@@ -149,6 +149,14 @@ static void Init_Service_Handlers(void)
 #endif
 }
 
+#if defined(MQTT)
+static void publish_stack_startup()
+{
+    mqtt_publish_topic(OBJECT_PROGRAM, Device_Object_Instance_Number(), PROP_PROGRAM_STATE,
+        MQTT_TOPIC_VALUE_STRING, "started");
+}
+#endif
+
 static void print_usage(const char *filename)
 {
     printf("Usage: %s [device-instance [device-name]]\n", filename);
@@ -282,6 +290,7 @@ int main(int argc, char *argv[])
     Send_I_Am(&Handler_Transmit_Buffer[0]);
 #if defined(MQTT)
     mqtt_client_init();
+    publish_stack_startup();
 #endif /* defined(MQTT) */
     /* loop forever */
     for (;;) {
