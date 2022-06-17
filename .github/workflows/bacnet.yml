@@ -13,5 +13,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: checkout mqtt
+      uses: actions/checkout@v3
+      with:
+        repository: eclipse/paho.mqtt.c
+        path: './mqttlib'
+    - name: install mqttlib
+      run: cd mqttlib && make && sudo make install
     - name: make all
       run: cd bacnet-stack && make clean all
