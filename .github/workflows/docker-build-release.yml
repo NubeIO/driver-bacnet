@@ -52,15 +52,56 @@ jobs:
 
     runs-on: ubuntu-latest
     needs: context
+    if: needs.context.outputs.shouldBuild == 'true'
+    services:
+      registry:
+        image: zero88/gh-registry:latest
+        ports:
+          - 5000:5000
+        options: >-
+          -v /home/runner:/var/lib/registry
+          --name registry
 
     steps:
-    - uses: actions/checkout@v3
-    - name: checkout mqtt
-      uses: actions/checkout@v3
-      with:
-        repository: eclipse/paho.mqtt.c
-        path: './mqttlib'
-    - name: install mqttlib
-      run: cd mqttlib && make && sudo make install
-    - name: make all
-      run: cd bacnet-stack && make clean all
+      - uses: actions/checkout@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/docker
+          key: ${{ runner.os }}-docker-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
+      - name: Validate cache
+        run: |
+          docker buildx imagetools inspect localhost:5000/${{ env.APP_NAME }}:buildcache || echo "Not Found"
+
+      - name: Docker meta
+        id: docker_meta
+        uses: crazy-max/ghaction-docker-meta@v1
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tag-latest: true
+          tag-sha: true
+          tag-semver: |
+            {{version}}
+            {{major}}.{{minor}}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          driver-opts: network=host
+
+      - name: checkout mqtt
+        uses: actions/checkout@v3
+        with:
+          repository: eclipse/paho.mqtt.c
+          path: './mqttlib'
+      - name: install mqttlib
+        run: cd mqttlib && make && sudo make install
+      - name: make all
+        run: cd bacnet-stack && make clean all
