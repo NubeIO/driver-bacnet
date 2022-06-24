@@ -1,0 +1,66 @@
+name: build-release
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  APP_NAME: bacnet-server-c
+  GHCR_IMAGE: ghcr.io/nubeio/bacnet-server-c
+  PLATFORMS: linux/amd64,linux/arm/v7
+
+jobs:
+
+  context:
+    runs-on: ubuntu-latest
+
+    outputs:
+      shouldBuild: ${{ steps.context.outputs.decision_build }}
+      shouldPublish: ${{ steps.context.outputs.decision_publish }}
+      isRelease: ${{ steps.context.outputs.isTag }}
+      afterRelease: ${{ steps.context.outputs.isAfterMergedReleasePR }}
+      sha: ${{ steps.context.outputs.commitId }}
+      version: ${{ steps.context.outputs.version }}
+      fqn: ${{ env.APP_NAME }}-${{ steps.context.outputs.version }}-${{ steps.context.outputs.shortCommitId }}
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.NUBEIO_CI_GITHUBPROJECT_TOKEN }}
+
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@v3
+        with:
+          git-user-signingkey: true
+          git-commit-gpgsign: true
+          git-tag-gpgsign: true
+          git-push-gpgsign: false
+          gpg-private-key: ${{ secrets.NUBEIO_CI_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.NUBEIO_CI_GPG_PASSPHARSE }}
+
+      - name: Project context
+        id: context
+        uses: zero88/gh-project-context@v1
+        with:
+          dry: false
+          mustSign: true
+          defaultBranch: master
+
+  build:
+
+    runs-on: ubuntu-latest
+    needs: context
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: checkout mqtt
+      uses: actions/checkout@v3
+      with:
+        repository: eclipse/paho.mqtt.c
+        path: './mqttlib'
+    - name: install mqttlib
+      run: cd mqttlib && make && sudo make install
+    - name: make all
+      run: cd bacnet-stack && make clean all
