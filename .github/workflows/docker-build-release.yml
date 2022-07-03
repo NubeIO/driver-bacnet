@@ -96,12 +96,16 @@ jobs:
         with:
           driver-opts: network=host
 
-      - name: checkout mqtt
-        uses: actions/checkout@v3
+      - name: Build artifact by docker
+        uses: docker/build-push-action@v2
         with:
-          repository: eclipse/paho.mqtt.c
-          path: './mqttlib'
-      - name: install mqttlib
-        run: cd mqttlib && make && sudo make install
-      - name: make all
-        run: cd bacnet-stack && make clean all
+          context: .
+          file: docker/build.Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          build-args: |
+            APP_VERSION=${{ needs.context.outputs.version }}
+            COMMIT_SHA=${{ needs.context.outputs.sha }}
+          tags: localhost:5000/${{ env.APP_NAME }}:${{ needs.context.outputs.sha }}
+          pull: true
+          push: true
+
