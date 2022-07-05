@@ -112,7 +112,7 @@ jobs:
       - name: Zip artifacts
         run: |
           image=localhost:5000/${{ env.APP_NAME }}:${{ needs.context.outputs.sha }}
-          output=/opt/bacnet-stack/bin/bacserv
+          output=/opt/bacnet-stack/bin/
           mkdir -p /tmp/zip /tmp/images
           IFS=',' read -ra ARR <<< "${{ env.PLATFORMS }}"
           for plat in "${ARR[@]}"; do
