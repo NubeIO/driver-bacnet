@@ -3,6 +3,8 @@ FROM ubuntu:18.04 as base
 RUN apt update -qq \
     && apt install build-essential net-tools git libssl-dev -y
 
+WORKDIR /
+
 COPY bacnet-stack /opt/bacnet-stack
 
 RUN mkdir -p /opt/mqtt && cd /opt/mqtt \
