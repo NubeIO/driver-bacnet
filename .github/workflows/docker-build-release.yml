@@ -125,3 +125,22 @@ jobs:
             cd $folder; zip -r /tmp/zip/$artifact.zip ./; cd -
           done
 
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.NUBEIO_CI_GITHUB_PACKAGES_PAT }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.context.outputs.version }}
+          name: Release v${{ needs.context.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            /tmp/zip/${{ needs.context.outputs.fqn }}.*.zip
+
