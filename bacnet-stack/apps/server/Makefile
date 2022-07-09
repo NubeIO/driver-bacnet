@@ -46,7 +46,7 @@ TARGET_BIN = ${TARGET}$(TARGET_EXT)
 OBJS += ${SRC:.c=.o} ${MQTT_SRC:.c=.o}
 
 MQTT_CFLAGS = -DMQTT -DMQTT_PUBLISH -I/usr/local/include -I${BACNET_SRC_DIR}/../apps/server
-MQTT_LFLAGS = -L/usr/local/lib -lpaho-mqtt3c
+MQTT_LFLAGS = /usr/local/lib/libpaho-mqtt3c.a
 
 all: ${BACNET_LIB_TARGET} Makefile ${TARGET_BIN}
 
