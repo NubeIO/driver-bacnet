@@ -1,0 +1,18 @@
+# Bacnet server YAML configuration file
+
+server_name: My Bacnet Server
+device_id: 11122
+iface: eth1
+
+bi_max: 10
+bo_max: 10
+bv_max: 10
+ai_max: 10
+ao_max: 10
+av_max: 10
+
+mqtt:
+  broker_ip: 104.219.42.42
+  broker_port: 1883
+  debug: true
+

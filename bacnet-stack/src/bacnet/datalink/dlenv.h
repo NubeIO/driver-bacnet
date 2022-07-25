@@ -31,6 +31,10 @@
 
 #include "bacnet/bacnet_stack_exports.h"
 
+#if defined(YAML_CONFIG)
+#include "bacnet/datalink/dlparams.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -38,6 +42,12 @@ extern "C" {
     BACNET_STACK_EXPORT
     void dlenv_init(
         void);
+
+#if defined(YAML_CONFIG)
+    BACNET_STACK_EXPORT
+    void dlenv_init_with_params(
+        BACNET_DATALINK_PARAMS *params);
+#endif
 
     BACNET_STACK_EXPORT
     int dlenv_register_as_foreign_device(

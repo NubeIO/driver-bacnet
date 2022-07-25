@@ -61,6 +61,9 @@
 #if defined(MQTT)
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 /** @file server/main.c  Example server application using the BACnet Stack. */
 
@@ -81,6 +84,7 @@ static uint8_t Rx_Buf[MAX_MPDU] = { 0 };
 static void Init_Service_Handlers(void)
 {
     Device_Init(NULL);
+
     /* we need to handle who-is to support dynamic device binding */
     apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_IS, handler_who_is);
     apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_HAS, handler_who_has);
@@ -214,6 +218,11 @@ int main(int argc, char *argv[])
 #endif
     int argi = 0;
     const char *filename = NULL;
+#if defined(YAML_CONFIG)
+    BACNET_DATALINK_PARAMS dl_params = {0};
+    const char *val_cptr;
+    uint32_t val_uint32;
+#endif
 
     filename = filename_remove_path(argv[0]);
     for (argi = 1; argi < argc; argi++) {
@@ -251,6 +260,14 @@ int main(int argc, char *argv[])
     ucix_cleanup(ctx);
 #endif /* defined(BAC_UCI) */
 
+#if defined(YAML_CONFIG)
+    yaml_config_init();
+    val_uint32 = strtoul(yaml_config_service_id(), NULL, 10);
+    if (val_uint32 > 0) {
+        Device_Set_Object_Instance_Number(val_uint32);
+    }
+#endif /* defined(YAML_CONFIG) */
+
     printf("BACnet Server Demo\n"
            "BACnet Stack Version %s\n"
            "BACnet Device ID: %u\n"
@@ -272,6 +289,13 @@ int main(int argc, char *argv[])
 #endif /* defined(BAC_UCI) */
         if (argc > 2) {
             Device_Object_Name_ANSI_Init(argv[2]);
+        } else {
+#if defined(YAML_CONFIG)
+          val_cptr = yaml_config_server_name();
+          if (val_cptr) {
+              Device_Object_Name_ANSI_Init(val_cptr);
+          }
+#endif
         }
 #if defined(BAC_UCI)
     }
@@ -282,7 +306,10 @@ int main(int argc, char *argv[])
         printf("BACnet Device Name: %s\n", DeviceName.value);
 }
 
-    dlenv_init();
+#if defined(YAML_CONFIG)
+    dl_params.iface = (char *)yaml_config_iface();
+    dlenv_init_with_params(&dl_params);
+#endif
     atexit(datalink_cleanup);
     /* configure the timeout values */
     last_seconds = time(NULL);
@@ -292,6 +319,7 @@ int main(int argc, char *argv[])
     mqtt_client_init();
     publish_stack_startup();
 #endif /* defined(MQTT) */
+
     /* loop forever */
     for (;;) {
         /* input */

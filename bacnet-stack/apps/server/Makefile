@@ -39,19 +39,23 @@ SRC = main.c \
 	$(BACNET_OBJECT_DIR)/bacfile.c
 
 MQTT_SRC = mqtt_client.c
+YAML_CONFIG_SRC = yaml_config.c
 
 # TARGET_EXT is defined in apps/Makefile as .exe or nothing
 TARGET_BIN = ${TARGET}$(TARGET_EXT)
 
-OBJS += ${SRC:.c=.o} ${MQTT_SRC:.c=.o}
+OBJS += ${SRC:.c=.o} ${MQTT_SRC:.c=.o} ${YAML_CONFIG_SRC:.c=.o}
 
 MQTT_CFLAGS = -DMQTT -DMQTT_PUBLISH -I/usr/local/include -I${BACNET_SRC_DIR}/../apps/server
 MQTT_LFLAGS = /usr/local/lib/libpaho-mqtt3c.a
 
+YAML_CONFIG_CFLAGS = -DYAML_CONFIG
+YAML_CONFIG_LFLAGS = /usr/local/lib/libcyaml.a /usr/lib/x86_64-linux-gnu/libyaml.a
+
 all: ${BACNET_LIB_TARGET} Makefile ${TARGET_BIN}
 
 ${TARGET_BIN}: ${OBJS} Makefile ${BACNET_LIB_TARGET}
-	${CC} ${PFLAGS} ${OBJS} ${LFLAGS} ${MQTT_LFLAGS} -o $@
+	${CC} ${PFLAGS} ${OBJS} ${LFLAGS} ${MQTT_LFLAGS} ${YAML_CONFIG_LFLAGS} -o $@
 	size $@
 	cp $@ ../../bin
 
@@ -59,7 +63,7 @@ ${BACNET_LIB_TARGET}:
 	( cd ${BACNET_LIB_DIR} ; $(MAKE) clean ; $(MAKE) -s )
 
 .c.o:
-	${CC} -c ${CFLAGS} ${MQTT_CFLAGS} $*.c -o $@
+	${CC} -c ${CFLAGS} ${MQTT_CFLAGS} ${YAML_CONFIG_CFLAGS} $*.c -o $@
 
 .PHONY: depend
 depend:
