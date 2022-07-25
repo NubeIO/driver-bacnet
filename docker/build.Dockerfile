@@ -14,6 +14,8 @@ RUN mkdir -p /opt/mqtt && cd /opt/mqtt \
     && cd /opt/cyaml/libcyaml \
     && make install VARIANT=release
 
+RUN find / -name libyaml.a -print
+
 RUN cd /opt/bacnet-stack \
     && make clean all
 
