@@ -50,7 +50,7 @@ MQTT_CFLAGS = -DMQTT -DMQTT_PUBLISH -I/usr/local/include -I${BACNET_SRC_DIR}/../
 MQTT_LFLAGS = /usr/local/lib/libpaho-mqtt3c.a
 
 YAML_CONFIG_CFLAGS = -DYAML_CONFIG
-YAML_CONFIG_LFLAGS = /usr/local/lib/libcyaml.a /usr/lib/x86_64-linux-gnu/libyaml.a
+YAML_CONFIG_LFLAGS = /usr/local/lib/libcyaml.a /usr/lib/libyaml.a
 
 all: ${BACNET_LIB_TARGET} Makefile ${TARGET_BIN}
 
