@@ -122,7 +122,7 @@ jobs:
             artifact=${{ needs.context.outputs.fqn }}.$p
             folder=/tmp/images/$artifact
             docker create --name $artifact $perImage && docker cp $artifact:$output $folder && docker rm $artifact
-            cd $folder; zip -r /tmp/zip/$artifact.zip ./; cd -
+            cd $folder; mv bacserv app-$p; zip -r /tmp/zip/$artifact.zip ./; cd -
           done
 
       - name: Login to GitHub Container Registry
