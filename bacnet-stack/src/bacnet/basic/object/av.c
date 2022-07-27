@@ -43,6 +43,9 @@
 #if defined(MQTT)
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_ANALOG_VALUES
 #define MAX_ANALOG_VALUES 4
@@ -108,10 +111,17 @@ void Analog_Value_Init(void)
     unsigned j;
 #endif
 
+#if defined(YAML_CONFIG)
+    Analog_Value_Instances = yaml_config_av_max();
+    if (Analog_Value_Instances == 0) {
+#endif
     pEnv = getenv("AV");
     if (pEnv) {
         Analog_Value_Instances = atoi(pEnv);
     }
+#if defined(YAML_CONFIG)
+    }
+#endif
 
     if (Analog_Value_Instances > 0) {
         AV_Descr = malloc(Analog_Value_Instances * sizeof(ANALOG_VALUE_DESCR));

@@ -42,6 +42,9 @@
 #if defined(MQTT)
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_BINARY_VALUES
 #define MAX_BINARY_VALUES 10
@@ -109,10 +112,17 @@ void Binary_Value_Init(void)
     if (!initialized) {
         initialized = true;
 
+#if defined(YAML_CONFIG)
+        Binary_Value_Instances = yaml_config_bv_max();
+        if (Binary_Value_Instances == 0) {
+#endif
         pEnv = getenv("BV");
         if (pEnv) {
             Binary_Value_Instances = atoi(pEnv);
         }
+#if defined(YAML_CONFIG)
+        }
+#endif
 
         /* initialize all the analog output priority arrays to NULL */
         if (Binary_Value_Instances > 0) {

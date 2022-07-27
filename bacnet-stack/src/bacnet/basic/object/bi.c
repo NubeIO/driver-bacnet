@@ -42,6 +42,9 @@
 #if defined(MQTT)
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_BINARY_INPUTS
 #define MAX_BINARY_INPUTS 5
@@ -125,10 +128,17 @@ void Binary_Input_Init(void)
     if (!initialized) {
         initialized = true;
 
+#if defined(YAML_CONFIG)
+        Binary_Input_Instances = yaml_config_bi_max();
+        if (Binary_Input_Instances == 0) {
+#endif
         pEnv = getenv("BI");
         if (pEnv) {
             Binary_Input_Instances = atoi(pEnv);
         }
+#if defined(YAML_CONFIG)
+        }
+#endif
 
         /* initialize all the values */
         if (Binary_Input_Instances > 0) {

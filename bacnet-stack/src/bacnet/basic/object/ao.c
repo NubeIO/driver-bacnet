@@ -41,6 +41,9 @@
 #if defined(MQTT)
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_ANALOG_OUTPUTS
 #define MAX_ANALOG_OUTPUTS 4
@@ -105,10 +108,17 @@ void Analog_Output_Init(void)
     if (!Analog_Output_Initialized) {
         Analog_Output_Initialized = true;
 
+#if defined(YAML_CONFIG)
+        Analog_Output_Instances = yaml_config_ao_max();
+        if (Analog_Output_Instances == 0) {
+#endif
         pEnv = getenv("AO");
         if (pEnv) {
             Analog_Output_Instances = atoi(pEnv);
         }
+#if defined(YAML_CONFIG)
+        }
+#endif
 
         /* initialize all the analog output priority arrays to NULL */
         if (Analog_Output_Instances > 0) {

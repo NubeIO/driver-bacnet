@@ -274,7 +274,7 @@ int yaml_config_mqtt_broker_port(void)
 int yaml_config_mqtt_debug(void)
 {
   return ((bacnet_config->mqtt && bacnet_config->mqtt->debug &&
-    strcmp(bacnet_config->mqtt->debug, "true")) ? true : false);
+    !strcmp(bacnet_config->mqtt->debug, "true")) ? true : false);
 }
 
 

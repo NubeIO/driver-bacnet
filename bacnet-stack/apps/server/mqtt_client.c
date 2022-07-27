@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include "mqtt_client.h"
 #include "MQTTClient.h"
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 #include "bacnet/basic/object/device.h"
 
@@ -26,22 +29,45 @@ int mqtt_client_init(void)
   char buf[100];
   char *pEnv;
 
+#if defined(YAML_CONFIG)
+  mqtt_debug = yaml_config_mqtt_debug();
+  if (!mqtt_debug) {
+#endif
   pEnv = getenv("MQTT_DEBUG");
   if (pEnv) {
     mqtt_debug = true;
   }
+#if defined(YAML_CONFIG)
+  }
+#endif
 
+#if defined(YAML_CONFIG)
+  pEnv = (char *)yaml_config_mqtt_broker_ip();
+  if (pEnv) {
+    strncpy(mqtt_broker_ip, pEnv, sizeof(mqtt_broker_ip) -1);
+  } else {
+#endif
   pEnv = getenv("MQTT_BROKER_IP");
   if (pEnv) {
     strncpy(mqtt_broker_ip, pEnv, sizeof(mqtt_broker_ip) -1);
   } else {
     strcpy(mqtt_broker_ip, DEFAULT_MQTT_BROKER_IP);
   }
+#if defined(YAML_CONFIG)
+  }     
+#endif
 
+#if defined(YAML_CONFIG)
+  mqtt_broker_port = yaml_config_mqtt_broker_port();
+  if (!mqtt_broker_port) {
+#endif
   pEnv = getenv("MQTT_BROKER_PORT");
   if (pEnv) {
     mqtt_broker_port = atoi(pEnv);
   }
+#if defined(YAML_CONFIG)
+  }
+#endif
 
   sprintf(mqtt_broker_endpoint, "%s:%d", mqtt_broker_ip, mqtt_broker_port);
 

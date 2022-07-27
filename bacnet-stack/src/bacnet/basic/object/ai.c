@@ -43,6 +43,9 @@
 #if defined(MQTT)
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 #if PRINT_ENABLED
 #include <stdio.h>
@@ -103,10 +106,17 @@ void Analog_Input_Init(void)
     unsigned j;
 #endif
 
+#if defined(YAML_CONFIG)
+    Analog_Input_Instances = yaml_config_ai_max();
+    if (Analog_Input_Instances == 0) {
+#endif
     pEnv = getenv("AI");
     if (pEnv) {
         Analog_Input_Instances = atoi(pEnv);
     }
+#if defined(YAML_CONFIG)
+    }
+#endif
 
     if (Analog_Input_Instances> 0) {
         AI_Descr = malloc(Analog_Input_Instances * sizeof(ANALOG_INPUT_DESCR));
