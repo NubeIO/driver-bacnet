@@ -3,10 +3,15 @@
  */
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <cyaml/cyaml.h>
 #include "yaml_config.h"
 
 #include "bacnet/basic/object/device.h"
+
+#define DEFAULT_YAML_CONFIG   "/data/bacnet-server-driver/config/config.yml"
 
 /* mqtt struct */
 struct _mqtt {
@@ -109,6 +114,7 @@ static const cyaml_config_t yaml_config = {
  */
 int yaml_config_init(void)
 {
+  struct stat statbuf;
   char *pEnv;
   char *config_file;
   cyaml_err_t err;
@@ -118,9 +124,14 @@ int yaml_config_init(void)
     yaml_config_debug = true;
   }
 
-  config_file = getenv("YAML_CONFIG");
-  if (!config_file) {
-    return(0);
+  if (!stat(DEFAULT_YAML_CONFIG, &statbuf)) {
+    config_file = DEFAULT_YAML_CONFIG;
+  } else {
+    config_file = getenv("YAML_CONFIG");
+    if (!config_file) {
+      printf("No YAML Config file found. Exiting!\n");
+      exit(0);
+    }
   }
 
   if (yaml_config_debug) {

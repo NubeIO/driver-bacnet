@@ -4,12 +4,12 @@ server_name: My Bacnet Server
 device_id: 1234
 iface: eth1
 
-bi_max: 10
-bo_max: 10
-bv_max: 10
-ai_max: 10
-ao_max: 10
-av_max: 10
+bi_max: 0
+bo_max: 0
+bv_max: 100
+ai_max: 0
+ao_max: 0
+av_max: 100
 
 mqtt:
   broker_ip: 127.0.0.1
