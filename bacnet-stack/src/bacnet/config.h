@@ -70,10 +70,10 @@
 
 /* Define your Vendor Identifier assigned by ASHRAE */
 #if !defined(BACNET_VENDOR_ID)
-#define BACNET_VENDOR_ID 260
+#define BACNET_VENDOR_ID 1173
 #endif
 #if !defined(BACNET_VENDOR_NAME)
-#define BACNET_VENDOR_NAME "BACnet Stack at SourceForge"
+#define BACNET_VENDOR_NAME "Nube iO Operations Pty Ltd"
 #endif
 
 /* Max number of bytes in an APDU. */
