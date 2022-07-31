@@ -63,7 +63,7 @@ static uint8_t *Analog_Output_Relinquish_Defaults = NULL;
 /* Here is our Priority Array.  They are supposed to be Real, but */
 /* we don't have that kind of memory, so we will use a single byte */
 /* and load a Real for returning the value when asked. */
-static uint8_t **Analog_Output_Level = NULL;
+static float **Analog_Output_Level = NULL;
 /* Writable out-of-service allows others to play with our Present Value */
 /* without changing the physical output */
 static bool *Out_Of_Service = NULL;
@@ -122,9 +122,9 @@ void Analog_Output_Init(void)
 
         /* initialize all the analog output priority arrays to NULL */
         if (Analog_Output_Instances > 0) {
-            Analog_Output_Level = malloc(Analog_Output_Instances * sizeof(uint8_t*));
+            Analog_Output_Level = malloc(Analog_Output_Instances * sizeof(float *));
             for (i = 0; i < Analog_Output_Instances; i++) {
-                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(uint8_t));
+                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
             }
 
             for (i = 0; i < Analog_Output_Instances; i++) {
@@ -202,7 +202,7 @@ float Analog_Output_Present_Value(uint32_t object_instance)
         value = Analog_Output_Relinquish_Defaults[index];
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Analog_Output_Level[index][i] != AO_LEVEL_NULL) {
-                value = (float)Analog_Output_Level[index][i];
+                value = Analog_Output_Level[index][i];
                 break;
             }
         }
@@ -241,7 +241,7 @@ bool Analog_Output_Present_Value_Set(
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */) && (value >= 0.0) &&
             (value <= 100.0)) {
-            Analog_Output_Level[index][priority - 1] = (uint8_t)value;
+            Analog_Output_Level[index][priority - 1] = value;
             /* Note: you could set the physical output here to the next
                highest priority, or to the relinquish default if no
                priorities are set.
@@ -419,7 +419,7 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                         len = encode_application_null(&apdu[apdu_len]);
                     } else {
                         real_value =
-                            (float)Analog_Output_Level[object_index][i];
+                            Analog_Output_Level[object_index][i];
                         len = encode_application_real(
                             &apdu[apdu_len], real_value);
                     }
@@ -442,7 +442,7 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                         apdu_len = encode_application_null(&apdu[0]);
                     } else {
                         real_value =
-                            (float)Analog_Output_Level[object_index]
+                            Analog_Output_Level[object_index]
                                                [rpdata->array_index - 1];
                         apdu_len =
                             encode_application_real(&apdu[0], real_value);
@@ -479,7 +479,7 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 /* publish the values of priority array over mqtt */
 void publish_ao_priority_array(uint32_t object_instance)
 {
-    uint8_t value;
+    float value;
     char buf[1024] = {0};
     char *first = "";
     unsigned index = 0;
@@ -494,7 +494,7 @@ void publish_ao_priority_array(uint32_t object_instance)
             if (value == AO_LEVEL_NULL) {
                 sprintf(&buf[strlen(buf)], "%sNull", first);
             } else {
-                sprintf(&buf[strlen(buf)], "%s%.6f", first, (float)value);
+                sprintf(&buf[strlen(buf)], "%s%.6f", first, value);
             }
 
             first = ",";
