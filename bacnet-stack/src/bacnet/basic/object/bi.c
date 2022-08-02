@@ -156,6 +156,7 @@ void Binary_Input_Init(void)
 
         for (i = 0; i < Binary_Input_Instances; i++) {
             Present_Value[i] = BINARY_INACTIVE;
+            Out_Of_Service[i] = false;
         }
     }
 
