@@ -683,18 +683,12 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             status = write_property_type_valid(wp_data, &value,
                 BACNET_APPLICATION_TAG_REAL);
             if (status) {
-                if (CurrentAI->Out_Of_Service == true) {
-                    Analog_Input_Present_Value_Set(
-                        wp_data->object_instance, value.type.Real);
+                Analog_Input_Present_Value_Set(
+                    wp_data->object_instance, value.type.Real);
 #if defined(MQTT)
-                    mqtt_publish_topic(OBJECT_ANALOG_INPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
-                        MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+                mqtt_publish_topic(OBJECT_ANALOG_INPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                    MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
 #endif /* defined(MQTT) */
-                } else {
-                    wp_data->error_class = ERROR_CLASS_PROPERTY;
-                    wp_data->error_code = ERROR_CODE_WRITE_ACCESS_DENIED;
-                    status = false;
-                }
             }
             break;
 
