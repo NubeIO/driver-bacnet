@@ -116,7 +116,7 @@ int yaml_config_init(void)
 {
   struct stat statbuf;
   char *pEnv;
-  char *config_file;
+  char config_file[255];
   cyaml_err_t err;
 
   pEnv = getenv("YAML_CONFIG_DEBUG");
@@ -124,18 +124,29 @@ int yaml_config_init(void)
     yaml_config_debug = true;
   }
 
-  if (!stat(DEFAULT_YAML_CONFIG, &statbuf)) {
-    config_file = DEFAULT_YAML_CONFIG;
+  pEnv = getenv("g");
+  if (pEnv) {
+    sprintf(config_file, "%s/config/", pEnv);
   } else {
-    config_file = getenv("YAML_CONFIG");
-    if (!config_file) {
-      printf("No YAML Config file found. Exiting!\n");
-      exit(0);
-    }
+    printf("Global configuration directory not specified. Exiting!\n");
+    exit(0);
+  }
+
+  pEnv = getenv("c");
+  if (pEnv) {
+    sprintf(&config_file[strlen(config_file)], "%s", pEnv);
+  } else {
+    printf("Configuration file not specified. Exiting!\n");
+    exit(0);
   }
 
   if (yaml_config_debug) {
     printf("YAML Config: configuration file: %s\n", config_file);
+  }
+
+  if (stat(config_file, &statbuf) < 0) {
+    printf("Configuration file (%s) not found. Exiting!\n", config_file);
+    exit(0);
   }
 
   err = cyaml_load_file(config_file, &yaml_config,
