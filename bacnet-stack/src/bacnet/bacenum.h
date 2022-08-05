@@ -587,6 +587,7 @@ typedef enum {
     /* do the max range inside of enum so that
        compilers will allocate adequate sized datatype for enum
        which is used to store decoding */
+    PROP_PRODUCT_NAME = 4194338,
     MAX_BACNET_PROPERTY_ID = 16777215
 } BACNET_PROPERTY_ID;
 

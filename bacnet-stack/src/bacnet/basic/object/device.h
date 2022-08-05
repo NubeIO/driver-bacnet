@@ -360,6 +360,14 @@ extern "C" {
         size_t length);
 
     BACNET_STACK_EXPORT
+    const char *Device_Product_Name(
+        void);
+    BACNET_STACK_EXPORT
+    bool Device_Set_Product_Name(
+        const char *name,
+        size_t length);
+
+    BACNET_STACK_EXPORT
     const char *Device_Firmware_Revision(
         void);
 

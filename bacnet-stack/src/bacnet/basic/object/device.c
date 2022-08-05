@@ -400,7 +400,7 @@ static const int Device_Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
     PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED, PROP_OBJECT_LIST,
     PROP_MAX_APDU_LENGTH_ACCEPTED, PROP_SEGMENTATION_SUPPORTED,
     PROP_APDU_TIMEOUT, PROP_NUMBER_OF_APDU_RETRIES, PROP_DEVICE_ADDRESS_BINDING,
-    PROP_DATABASE_REVISION, -1 };
+    PROP_DATABASE_REVISION, PROP_PRODUCT_NAME, -1 };
 
 static const int Device_Properties_Optional[] = {
 #if defined(BACDL_MSTP)
@@ -443,11 +443,12 @@ static BACNET_CHARACTER_STRING My_Object_Name;
 static BACNET_DEVICE_STATUS System_Status = STATUS_OPERATIONAL;
 static char *Vendor_Name = BACNET_VENDOR_NAME;
 static uint16_t Vendor_Identifier = BACNET_VENDOR_ID;
-static char Model_Name[MAX_DEV_MOD_LEN + 1] = "GNU";
+static char Product_Name[MAX_DEV_MOD_LEN + 1] = "Nube iO rubix";
+static char Model_Name[MAX_DEV_MOD_LEN + 1] = "rubix";
 static char Application_Software_Version[MAX_DEV_VER_LEN + 1] = "1.0";
 static const char *BACnet_Version = BACNET_VERSION_TEXT;
 static char Location[MAX_DEV_LOC_LEN + 1] = "USA";
-static char Description[MAX_DEV_DESC_LEN + 1] = "server";
+static char Description[MAX_DEV_DESC_LEN + 1] = "nube bacnet server";
 /* static uint8_t Protocol_Version = 1; - constant, not settable */
 /* static uint8_t Protocol_Revision = 4; - constant, not settable */
 /* Protocol_Services_Supported - dynamically generated */
@@ -727,6 +728,24 @@ bool Device_Set_Model_Name(const char *name, size_t length)
     if (length < sizeof(Model_Name)) {
         memmove(Model_Name, name, length);
         Model_Name[length] = 0;
+        status = true;
+    }
+
+    return status;
+}
+
+const char *Device_Product_Name(void)
+{
+    return Product_Name;
+}
+
+bool Device_Set_Product_Name(const char *name, size_t length)
+{
+    bool status = false; /*return value */
+
+    if (length < sizeof(Product_Name)) {
+        memmove(Product_Name, name, length);
+        Product_Name[length] = 0;
         status = true;
     }
 
@@ -1328,6 +1347,11 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
         case PROP_ACTIVE_COV_SUBSCRIPTIONS:
             apdu_len = handler_cov_encode_subscriptions(&apdu[0], apdu_max);
             break;
+        case PROP_PRODUCT_NAME:
+            characterstring_init_ansi(&char_string, Product_Name);
+            apdu_len =
+                encode_application_character_string(&apdu[0], &char_string);
+            break;
         default:
             rpdata->error_class = ERROR_CLASS_PROPERTY;
             rpdata->error_code = ERROR_CODE_UNKNOWN_PROPERTY;
@@ -1628,6 +1652,15 @@ bool Device_Write_Property_Local(BACNET_WRITE_PROPERTY_DATA *wp_data)
             wp_data->error_code = ERROR_CODE_UNKNOWN_PROPERTY;
             break;
 #endif
+        case PROP_PRODUCT_NAME:
+            status = write_property_empty_string_valid(wp_data, &value,
+                MAX_DEV_MOD_LEN);
+            if (status) {
+                Device_Set_Product_Name(
+                    characterstring_value(&value.type.Character_String),
+                    characterstring_length(&value.type.Character_String));
+            }
+            break;
         case PROP_OBJECT_TYPE:
         case PROP_VENDOR_NAME:
         case PROP_FIRMWARE_REVISION:

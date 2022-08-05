@@ -140,6 +140,7 @@ static struct property_value_list_t Property_Value_List[] = {
     { PROP_MAX_APDU_LENGTH_ACCEPTED, NULL },
     { PROP_PROTOCOL_SERVICES_SUPPORTED, NULL },
     { PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED, NULL }, { PROP_DESCRIPTION, NULL },
+    { PROP_PRODUCT_NAME, NULL },
     { -1, NULL }
 };
 
@@ -1185,16 +1186,22 @@ static void PrintHeading(void)
         printf("Vendor Name: \"your vendor name here\"\n");
     }
 
-    value = object_property_value(PROP_MODEL_NAME);
+    value = object_property_value(PROP_PRODUCT_NAME);
     /* Best we can do with Product Name and Model Number is use the same text */
     if ((value != NULL) &&
         (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
         printf("Product Name: \"%s\"\n",
             characterstring_value(&value->type.Character_String));
+    } else {
+        printf("Product Name: \"your product name here\"\n");
+    }
+
+    value = object_property_value(PROP_MODEL_NAME);
+    if ((value != NULL) &&
+        (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
         printf("Product Model Number: \"%s\"\n",
             characterstring_value(&value->type.Character_String));
     } else {
-        printf("Product Name: \"your product name here\"\n");
         printf("Product Model Number: \"your model number here\"\n");
     }
 
