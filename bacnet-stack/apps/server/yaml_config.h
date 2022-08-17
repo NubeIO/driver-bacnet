@@ -33,6 +33,8 @@ extern "C" {
 
   int yaml_config_mqtt_debug(void);
 
+  int yaml_config_mqtt_enable(void);
+
   int yaml_config_cleanup(void);
 
 #ifdef __cplusplus

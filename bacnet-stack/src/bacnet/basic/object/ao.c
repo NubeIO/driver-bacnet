@@ -501,8 +501,10 @@ void publish_ao_priority_array(uint32_t object_instance)
         }
 
         sprintf(&buf[strlen(buf)], "}");
-        mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRIORITY_ARRAY,
-            MQTT_TOPIC_VALUE_STRING, buf);
+        if (yaml_config_mqtt_enable()) {
+            mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRIORITY_ARRAY,
+                MQTT_TOPIC_VALUE_STRING, buf);
+        }
     }
 }
 
@@ -553,8 +555,10 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
                 } else {
 #if defined(MQTT)
-                    mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
-                        MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+                    if (yaml_config_mqtt_enable()) {
+                        mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                            MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+                    }
                     publish_ao_priority_array(wp_data->object_instance);
 #endif /* defined(MQTT) */
                 }
@@ -587,8 +591,10 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 Analog_Output_Set_Object_Name(wp_data->object_instance,
                     &value.type.Character_String);
 #if defined(MQTT)
-                mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_OBJECT_NAME,
-                    MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+                if (yaml_config_mqtt_enable()) {
+                    mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_OBJECT_NAME,
+                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+                }
 #endif /* defined(MQTT) */
             }
             break;
@@ -636,8 +642,10 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                         wp_data->object_instance);
                     Analog_Output_Relinquish_Defaults[object_index] = f_value;
 #if defined(MQTT)
-                    mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
-                        MQTT_TOPIC_VALUE_FLOAT, &f_value);
+                    if (yaml_config_mqtt_enable()) {
+                        mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
+                            MQTT_TOPIC_VALUE_FLOAT, &f_value);
+                    }
 #endif /* defined(MQTT) */
                 } else {
                     status = false;
