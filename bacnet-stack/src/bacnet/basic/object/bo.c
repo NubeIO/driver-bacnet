@@ -435,8 +435,10 @@ void publish_priority_array(uint32_t object_instance)
         }
 
         sprintf(&buf[strlen(buf)], "}");
-        mqtt_publish_topic(OBJECT_BINARY_OUTPUT, object_instance, PROP_PRIORITY_ARRAY,
-            MQTT_TOPIC_VALUE_STRING, buf);
+        if (yaml_config_mqtt_enable()) {
+            mqtt_publish_topic(OBJECT_BINARY_OUTPUT, object_instance, PROP_PRIORITY_ARRAY,
+                MQTT_TOPIC_VALUE_STRING, buf);
+        }
     }
 }
 
@@ -492,8 +494,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                        output) */
                     status = true;
 #if defined(MQTT)
-                    mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
-                        MQTT_TOPIC_VALUE_INTEGER, &level);
+                    if (yaml_config_mqtt_enable()) {
+                        mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                            MQTT_TOPIC_VALUE_INTEGER, &level);
+                    }
                     publish_priority_array(wp_data->object_instance);
 #endif /* defined(MQTT) */
                 } else if (priority == 6) {
@@ -525,8 +529,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                            main loop (i.e. check out of service before changing
                            output) */
 #if defined(MQTT)
-                        mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
-                            MQTT_TOPIC_VALUE_INTEGER, &level);
+                        if (yaml_config_mqtt_enable()) {
+                            mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
+                                MQTT_TOPIC_VALUE_INTEGER, &level);
+                        }
                         publish_priority_array(wp_data->object_instance);
 #endif /* defined(MQTT) */
                     } else {
@@ -554,8 +560,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 Binary_Output_Set_Object_Name(wp_data->object_instance,
                     &value.type.Character_String);
 #if defined(MQTT)
-                mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_OBJECT_NAME,
-                    MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+                if (yaml_config_mqtt_enable()) {
+                    mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_OBJECT_NAME,
+                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+                }
 #endif /* defined(MQTT) */
             }
             break;
@@ -605,8 +613,10 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                         wp_data->object_instance);
                     Binary_Output_Relinquish_Defaults[object_index] = level;
 #if defined(MQTT)
-                    mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
-                        MQTT_TOPIC_VALUE_INTEGER, &level);
+                    if (yaml_config_mqtt_enable()) {
+                        mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
+                            MQTT_TOPIC_VALUE_INTEGER, &level);
+                    }
 #endif /* defined(MQTT) */
                 } else {
                     status = false;

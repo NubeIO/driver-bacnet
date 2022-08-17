@@ -316,8 +316,10 @@ int main(int argc, char *argv[])
     /* broadcast an I-Am on startup */
     Send_I_Am(&Handler_Transmit_Buffer[0]);
 #if defined(MQTT)
-    mqtt_client_init();
-    publish_stack_startup();
+    if (yaml_config_mqtt_enable()) {
+      mqtt_client_init();
+      publish_stack_startup();
+    }
 #endif /* defined(MQTT) */
 
     /* loop forever */

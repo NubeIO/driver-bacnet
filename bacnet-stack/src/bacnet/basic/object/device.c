@@ -78,6 +78,9 @@
 #if defined(MQTT)
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 /* local forward (semi-private) and external prototypes */
 int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata);
@@ -1523,8 +1526,10 @@ bool Device_Write_Property_Local(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 } else {
                     Device_Set_Object_Name(&value.type.Character_String);
 #if defined(MQTT)
-                    mqtt_publish_topic(OBJECT_DEVICE, wp_data->object_instance, PROP_OBJECT_NAME,
-                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+                    if (yaml_config_mqtt_enable()) {
+                        mqtt_publish_topic(OBJECT_DEVICE, wp_data->object_instance, PROP_OBJECT_NAME,
+                            MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
+                    }
 #endif /* defined(MQTT) */
                 }
             }

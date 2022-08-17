@@ -18,6 +18,7 @@ struct _mqtt {
   const char *broker_ip;
   uint16_t broker_port;
   const char *debug;
+  const char *enable;
 };
 
 /* top level struct for storing the configuration */
@@ -37,6 +38,7 @@ struct _bacnet_config {
 /* globals */
 static struct _bacnet_config *bacnet_config = NULL;
 static int yaml_config_debug = false;
+static int yaml_config_mqtt_disable = false;
 
 static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
@@ -50,6 +52,10 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
     "debug", CYAML_FLAG_POINTER,
     struct _mqtt, debug, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "enable", CYAML_FLAG_POINTER,
+    struct _mqtt, enable, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -124,6 +130,11 @@ int yaml_config_init(void)
     yaml_config_debug = true;
   }
 
+  pEnv = getenv("MQTT_DISABLE");
+  if (pEnv) {
+    yaml_config_mqtt_disable = true;
+  }
+
   pEnv = getenv("g");
   if (pEnv) {
     sprintf(config_file, "%s/config/", pEnv);
@@ -187,6 +198,8 @@ void yaml_config_dump(void)
     printf("YAML Config: mqtt->broker_port: %d\n", bacnet_config->mqtt->broker_port);
     printf("YAML Config: mqtt->debug: %s\n", (bacnet_config->mqtt->debug) ?
       bacnet_config->mqtt->debug: "null");
+    printf("YAML Config: mqtt->enable: %s\n", (bacnet_config->mqtt->enable) ?
+      bacnet_config->mqtt->enable: "null");
   }
 }
 
@@ -297,6 +310,20 @@ int yaml_config_mqtt_debug(void)
 {
   return ((bacnet_config->mqtt && bacnet_config->mqtt->debug &&
     !strcmp(bacnet_config->mqtt->debug, "true")) ? true : false);
+}
+
+
+/*
+ * Get MQTT enable flag.
+ */
+int yaml_config_mqtt_enable(void)
+{
+  if (yaml_config_mqtt_disable) {
+    return(false);
+  }
+
+  return ((bacnet_config->mqtt && bacnet_config->mqtt->enable &&
+    !strcmp(bacnet_config->mqtt->enable, "true")) ? true : false);
 }
 
 
