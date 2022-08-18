@@ -1,10 +1,17 @@
 name: build-release
 
 on:
-  push:
-    branches: [ "master" ]
   pull_request:
-    branches: [ "master" ]
+    types: [ opened, synchronize, reopened, closed ]
+    branches:
+      - main
+      - master
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
 
 env:
   APP_NAME: bacnet-server-c
