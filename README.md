@@ -3,6 +3,37 @@ This is a fork of [Bacnet](https://github.com/bacnet-stack/bacnet-stack). This i
 1. A write/set operation is performed on the server's object properties.
 2. An new event is triggered or state changes.
 
+**Running BACnet Server**
+
+Config File:
+The bacnet server is configured by a config file located in `config/config.yml` which is located in the directory of `app-amd64`
+Config File Example:
+```
+server_name: My Bacnet Server
+device_id: 2508
+iface: wlp4s0
+
+bi_max: 10
+bo_max: 10
+bv_max: 10
+ai_max: 10
+ao_max: 10
+av_max: 10
+
+mqtt:
+  broker_ip: 127.0.0.1
+  broker_port: 1883
+  debug: false
+```
+
+
+Start Command:
+```
+g=<path to app.amd64 file> c=config.yml ./app-amd64
+for example:
+g=/home/user/Documents/Nube/BACnet_Server c=config.yml ./app-amd64 
+```
+
 MQTT Library
 --
 The MQTT C libary is the Eclipse Paho C Client Library for MQTT protocol. The source can be downloaded from https://github.com/eclipse/paho.mqtt.c. Please follow the install instructions to install the library.
