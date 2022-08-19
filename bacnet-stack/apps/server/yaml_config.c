@@ -143,7 +143,7 @@ int yaml_config_init(void)
     exit(0);
   }
 
-  pEnv = getenv("c");
+  pEnv = getenv("s");
   if (pEnv) {
     sprintf(&config_file[strlen(config_file)], "%s", pEnv);
   } else {

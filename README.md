@@ -3,35 +3,19 @@ This is a fork of [Bacnet](https://github.com/bacnet-stack/bacnet-stack). This i
 1. A write/set operation is performed on the server's object properties.
 2. An new event is triggered or state changes.
 
-**Running BACnet Server**
 
-Config File:
-The bacnet server is configured by a config file located in `config/config.yml` which is located in the directory of `app-amd64`
-Config File Example:
-```
-server_name: My Bacnet Server
-device_id: 2508
-iface: wlp4s0
-
-bi_max: 10
-bo_max: 10
-bv_max: 10
-ai_max: 10
-ao_max: 10
-av_max: 10
-
-mqtt:
-  broker_ip: 127.0.0.1
-  broker_port: 1883
-  debug: false
-```
-
+Running BACnet Server
+--
+Configure [config](config.example.yml) on location: `<g>/config/<s>` 
 
 Start Command:
 ```
-g=<path to app.amd64 file> c=config.yml ./app-amd64
-for example:
-g=/home/user/Documents/Nube/BACnet_Server c=config.yml ./app-amd64 
+g=<path for global_directory> s=config.yml ./app
+```
+
+For example:
+```
+g=/data/bacnet-server-c s=config.yml ./app 
 ```
 
 MQTT Library
