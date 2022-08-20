@@ -15,6 +15,8 @@ extern "C" {
 
   const char *yaml_config_iface(void);
 
+  int yaml_config_port(void);
+
   int yaml_config_bi_max(void);
 
   int yaml_config_bo_max(void);

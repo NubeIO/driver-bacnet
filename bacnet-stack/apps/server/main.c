@@ -308,6 +308,7 @@ int main(int argc, char *argv[])
 
 #if defined(YAML_CONFIG)
     dl_params.iface = (char *)yaml_config_iface();
+    dl_params.ip_port = yaml_config_port();
     dlenv_init_with_params(&dl_params);
 #endif
     atexit(datalink_cleanup);

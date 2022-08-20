@@ -644,18 +644,22 @@ void dlenv_init_with_params(BACNET_DATALINK_PARAMS *params)
         bvlc_debug_enable();
         BIP_DL_Debug = true;
     }
-    pEnv = getenv("BACNET_IP_PORT");
-    if (pEnv) {
-        bip_set_port((uint16_t)strtol(pEnv, NULL, 0));
+    if (params && params->ip_port) {
+        bip_set_port(params->ip_port);
     } else {
-        /* BIP_Port is statically initialized to 0xBAC0,
-         * so if it is different, then it was programmatically altered,
-         * and we shouldn't just stomp on it here.
-         * Unless it is set below 1024, since:
-         * "The range for well-known ports managed by the IANA is 0-1023."
-         */
-        if (bip_get_port() < 1024) {
-            bip_set_port(0xBAC0);
+        pEnv = getenv("BACNET_IP_PORT");
+        if (pEnv) {
+            bip_set_port((uint16_t)strtol(pEnv, NULL, 0));
+        } else {
+            /* BIP_Port is statically initialized to 0xBAC0,
+             * so if it is different, then it was programmatically altered,
+             * and we shouldn't just stomp on it here.
+             * Unless it is set below 1024, since:
+             * "The range for well-known ports managed by the IANA is 0-1023."
+             */
+            if (bip_get_port() < 1024) {
+                bip_set_port(0xBAC0);
+            }
         }
     }
     pEnv = getenv("BACNET_IP_NAT_ADDR");
