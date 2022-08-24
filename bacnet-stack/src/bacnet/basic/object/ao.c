@@ -123,11 +123,9 @@ void Analog_Output_Init(void)
         /* initialize all the analog output priority arrays to NULL */
         if (Analog_Output_Instances > 0) {
             Analog_Output_Level = malloc(Analog_Output_Instances * sizeof(float *));
-            for (i = 0; i < Analog_Output_Instances; i++) {
-                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
-            }
 
             for (i = 0; i < Analog_Output_Instances; i++) {
+                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
                 for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
                     Analog_Output_Level[i][j] = AO_LEVEL_NULL;
                 }
@@ -136,7 +134,7 @@ void Analog_Output_Init(void)
             Out_Of_Service = malloc(Analog_Output_Instances * sizeof(bool));
             Analog_Output_Instance_Names = malloc(Analog_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Analog_Output_Instances; i++) {
-                sprintf(buf, "ANALOG OUTPUT %d", i);
+                sprintf(buf, "AO_%d_SPARE", i);
                 characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
             }
 

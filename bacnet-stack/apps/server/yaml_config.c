@@ -26,6 +26,7 @@ struct _bacnet_config {
   const char *server_name;
   const char *device_id;
   const char *iface;
+  uint16_t port;
   uint8_t bi_max;
   uint8_t bo_max;
   uint8_t bv_max;
@@ -72,6 +73,10 @@ static const cyaml_schema_field_t config_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
     "iface", CYAML_FLAG_POINTER,
     struct _bacnet_config, iface, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_UINT(
+    "port", CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, port),
 
   CYAML_FIELD_UINT(
     "bi_max", CYAML_FLAG_DEFAULT,
@@ -186,6 +191,7 @@ void yaml_config_dump(void)
     bacnet_config->device_id : "null");
   printf("YAML Config: iface: %s\n", (bacnet_config->iface) ?
     bacnet_config->iface : "null");
+  printf("YAML Config: port: %d\n", bacnet_config->port);
   printf("YAML Config: bi_max: %d\n", bacnet_config->bi_max);
   printf("YAML Config: bo_max: %d\n", bacnet_config->bo_max);
   printf("YAML Config: bv_max: %d\n", bacnet_config->bv_max);
@@ -228,6 +234,15 @@ const char *yaml_config_service_id(void)
 const char *yaml_config_iface(void)
 {
   return(bacnet_config->iface);
+}
+
+
+/*
+ * Get port.
+ */
+int yaml_config_port(void)
+{
+  return(bacnet_config->port);
 }
 
 

@@ -149,7 +149,7 @@ void Binary_Input_Init(void)
 
             Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Input_Instances; i++) {
-                sprintf(buf, "BINARY INPUT %d", i);
+                sprintf(buf, "BI_%d_SPARE", i);
                 characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
             }
         }

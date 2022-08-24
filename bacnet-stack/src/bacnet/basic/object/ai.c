@@ -152,7 +152,7 @@ void Analog_Input_Init(void)
             OBJECT_ANALOG_INPUT, Analog_Input_Alarm_Summary);
 #endif
 
-       sprintf(buf, "ANALOG INPUT %d", i);
+       sprintf(buf, "AI_%d_SPARE", i);
        characterstring_init_ansi(&Analog_Input_Instance_Names[i], buf);
     }
 }
