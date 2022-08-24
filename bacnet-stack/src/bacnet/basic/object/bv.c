@@ -127,11 +127,9 @@ void Binary_Value_Init(void)
         /* initialize all the analog output priority arrays to NULL */
         if (Binary_Value_Instances > 0) {
             Binary_Value_Level = malloc(Binary_Value_Instances * sizeof(BACNET_BINARY_PV*));
-            for (i = 0; i < Binary_Value_Instances; i++) {
-                Binary_Value_Level [i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
-            }
 
             for (i = 0; i < Binary_Value_Instances; i++) {
+                Binary_Value_Level [i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
                 for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
                     Binary_Value_Level[i][j] = BINARY_NULL;
                 }
@@ -140,7 +138,7 @@ void Binary_Value_Init(void)
             Out_Of_Service = malloc(Binary_Value_Instances * sizeof(bool));
             Binary_Value_Instance_Names = malloc(Binary_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Value_Instances; i++) {
-                sprintf(buf, "BINARY VALUE %d", i);
+                sprintf(buf, "BV_%d_SPARE", i);
                 characterstring_init_ansi(&Binary_Value_Instance_Names[i], buf);
             }
 

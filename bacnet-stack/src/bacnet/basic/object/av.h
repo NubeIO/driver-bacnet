@@ -49,6 +49,7 @@ extern "C" {
         bool Out_Of_Service;
         uint16_t Units;
         float Present_Value;
+        float Present_Value_Level[BACNET_MAX_PRIORITY];
         float Prior_Value;
         float COV_Increment;
         bool Changed;

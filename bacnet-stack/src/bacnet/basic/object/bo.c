@@ -130,7 +130,7 @@ void Binary_Output_Init(void)
             Out_Of_Service = malloc(Binary_Output_Instances * sizeof(bool));
             Binary_Output_Instance_Names = malloc(Binary_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Output_Instances; i++) {
-                sprintf(buf, "BINARY OUTPUT %d", i);
+                sprintf(buf, "BO_%d_SPARE", i);
                 characterstring_init_ansi(&Binary_Output_Instance_Names[i], buf);
             }
 

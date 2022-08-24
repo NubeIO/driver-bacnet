@@ -55,11 +55,15 @@
 static int Analog_Value_Instances = 0;
 
 static ANALOG_VALUE_DESCR *AV_Descr = NULL;
+static float **Analog_Value_Level = NULL;
+
+#define AV_LEVEL_NULL 255
+#define AV_RELINQUISH_DEFAULT 0
 
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Analog_Value_Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
     PROP_OBJECT_NAME, PROP_OBJECT_TYPE, PROP_PRESENT_VALUE, PROP_STATUS_FLAGS,
-    PROP_EVENT_STATE, PROP_OUT_OF_SERVICE, PROP_UNITS, -1 };
+    PROP_EVENT_STATE, PROP_OUT_OF_SERVICE, PROP_UNITS, PROP_PRIORITY_ARRAY, -1 };
 
 static const int Analog_Value_Properties_Optional[] = { PROP_DESCRIPTION,
     PROP_COV_INCREMENT,
@@ -126,6 +130,8 @@ void Analog_Value_Init(void)
     if (Analog_Value_Instances > 0) {
         AV_Descr = malloc(Analog_Value_Instances * sizeof(ANALOG_VALUE_DESCR));
         Analog_Value_Instance_Names = malloc(Analog_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
+
+        Analog_Value_Level = malloc(Analog_Value_Instances * sizeof(float *));
     }
 
     for (i = 0; i < Analog_Value_Instances; i++) {
@@ -156,8 +162,13 @@ void Analog_Value_Init(void)
             OBJECT_ANALOG_VALUE, Analog_Value_Alarm_Summary);
 #endif
 
-        sprintf(buf, "ANALOG VALUE %d", i);
+        sprintf(buf, "AV_%d_SPARE", i);
         characterstring_init_ansi(&Analog_Value_Instance_Names[i], buf);
+
+        Analog_Value_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
+        for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
+            Analog_Value_Level[i][j] = AV_LEVEL_NULL;
+        }
     }
 }
 
@@ -720,6 +731,59 @@ int Analog_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
             }
             break;
 #endif
+
+        case PROP_PRIORITY_ARRAY:
+            /* Array element zero is the number of elements in the array */
+            if (rpdata->array_index == 0) {
+                apdu_len =
+                    encode_application_unsigned(&apdu[0], BACNET_MAX_PRIORITY);
+                /* if no index was specified, then try to encode the entire list
+                 */
+                /* into one packet. */
+            } else if (rpdata->array_index == BACNET_ARRAY_ALL) {
+                object_index =
+                    Analog_Value_Instance_To_Index(rpdata->object_instance);
+                for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
+                    /* FIXME: check if we have room before adding it to APDU */
+                    if (Analog_Value_Level[object_index][i] == AV_LEVEL_NULL) {
+                        len = encode_application_null(&apdu[apdu_len]);
+                    } else {
+                        real_value =
+                            Analog_Value_Level[object_index][i];
+                        len = encode_application_real(
+                            &apdu[apdu_len], real_value);
+                    }
+                    /* add it if we have room */
+                    if ((apdu_len + len) < MAX_APDU) {
+                        apdu_len += len;
+                    } else {
+                        rpdata->error_code =
+                            ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED;
+                        apdu_len = BACNET_STATUS_ABORT;
+                        break;
+                    }
+                }
+            } else {
+                object_index =
+                    Analog_Value_Instance_To_Index(rpdata->object_instance);
+                if (rpdata->array_index <= BACNET_MAX_PRIORITY) {
+                    if (Analog_Value_Level[object_index][rpdata->array_index -
+                            1] == AV_LEVEL_NULL) {
+                        apdu_len = encode_application_null(&apdu[0]);
+                    } else {
+                        real_value =
+                            Analog_Value_Level[object_index]
+                                               [rpdata->array_index - 1];
+                        apdu_len =
+                            encode_application_real(&apdu[0], real_value);
+                    }
+                } else {
+                    rpdata->error_class = ERROR_CLASS_PROPERTY;
+                    rpdata->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
+                    apdu_len = BACNET_STATUS_ERROR;
+                }
+            }
+            break;
 
         default:
             rpdata->error_class = ERROR_CLASS_PROPERTY;
