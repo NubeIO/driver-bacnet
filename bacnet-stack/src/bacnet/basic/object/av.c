@@ -55,7 +55,6 @@
 static int Analog_Value_Instances = 0;
 
 static ANALOG_VALUE_DESCR *AV_Descr = NULL;
-static float **Analog_Value_Level = NULL;
 
 #define AV_LEVEL_NULL 255
 #define AV_RELINQUISH_DEFAULT 0
@@ -130,8 +129,6 @@ void Analog_Value_Init(void)
     if (Analog_Value_Instances > 0) {
         AV_Descr = malloc(Analog_Value_Instances * sizeof(ANALOG_VALUE_DESCR));
         Analog_Value_Instance_Names = malloc(Analog_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
-
-        Analog_Value_Level = malloc(Analog_Value_Instances * sizeof(float *));
     }
 
     for (i = 0; i < Analog_Value_Instances; i++) {
@@ -165,9 +162,8 @@ void Analog_Value_Init(void)
         sprintf(buf, "AV_%d_SPARE", i);
         characterstring_init_ansi(&Analog_Value_Instance_Names[i], buf);
 
-        Analog_Value_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
         for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
-            Analog_Value_Level[i][j] = AV_LEVEL_NULL;
+            AV_Descr[i].Present_Value_Level[j] = AV_LEVEL_NULL;
         }
     }
 }
@@ -283,10 +279,14 @@ bool Analog_Value_Present_Value_Set(
 
     index = Analog_Value_Instance_To_Index(object_instance);
     if (index < Analog_Value_Instances) {
-        Analog_Value_COV_Detect(index, value);
-        AV_Descr[index].Present_Value = value;
-        status = true;
+        if (priority && (priority <= BACNET_MAX_PRIORITY) &&
+            (value >= 0.0) && (value <= 100.0)) {
+            Analog_Value_COV_Detect(index, value);
+            AV_Descr[index].Present_Value_Level[priority - 1] = value;
+            status = true;
+        }
     }
+
     return status;
 }
 
@@ -299,12 +299,18 @@ bool Analog_Value_Present_Value_Set(
  */
 float Analog_Value_Present_Value(uint32_t object_instance)
 {
-    float value = 0;
+    float value = AV_RELINQUISH_DEFAULT;
     unsigned index = 0;
+    unsigned i = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
     if (index < Analog_Value_Instances) {
-        value = AV_Descr[index].Present_Value;
+        for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
+            if (AV_Descr[index].Present_Value_Level[i] != AV_LEVEL_NULL) {
+                value = AV_Descr[index].Present_Value_Level[i];
+                break;
+            }
+        }
     }
 
     return value;
@@ -485,7 +491,7 @@ void Analog_Value_COV_Increment_Set(uint32_t object_instance, float value)
     index = Analog_Value_Instance_To_Index(object_instance);
     if (index < Analog_Value_Instances) {
         AV_Descr[index].COV_Increment = value;
-        Analog_Value_COV_Detect(index, AV_Descr[index].Present_Value);
+        Analog_Value_COV_Detect(index, Analog_Value_Present_Value(object_instance));
     }
 }
 
@@ -745,11 +751,11 @@ int Analog_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                     Analog_Value_Instance_To_Index(rpdata->object_instance);
                 for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
                     /* FIXME: check if we have room before adding it to APDU */
-                    if (Analog_Value_Level[object_index][i] == AV_LEVEL_NULL) {
+                    if (AV_Descr[object_index].Present_Value_Level[i] == AV_LEVEL_NULL) {
                         len = encode_application_null(&apdu[apdu_len]);
                     } else {
                         real_value =
-                            Analog_Value_Level[object_index][i];
+                            AV_Descr[object_index].Present_Value_Level[i];
                         len = encode_application_real(
                             &apdu[apdu_len], real_value);
                     }
@@ -767,12 +773,12 @@ int Analog_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                 object_index =
                     Analog_Value_Instance_To_Index(rpdata->object_instance);
                 if (rpdata->array_index <= BACNET_MAX_PRIORITY) {
-                    if (Analog_Value_Level[object_index][rpdata->array_index -
+                    if (AV_Descr[object_index].Present_Value_Level[rpdata->array_index -
                             1] == AV_LEVEL_NULL) {
                         apdu_len = encode_application_null(&apdu[0]);
                     } else {
                         real_value =
-                            Analog_Value_Level[object_index]
+                            AV_Descr[object_index].Present_Value_Level
                                                [rpdata->array_index - 1];
                         apdu_len =
                             encode_application_real(&apdu[0], real_value);
@@ -801,6 +807,39 @@ int Analog_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
     }
 
     return apdu_len;
+}
+
+/*
+ * Publish the values of priority array over mqtt
+ */
+void publish_av_priority_array(uint32_t object_instance)
+{
+    float value;
+    char buf[1024] = {0};
+    char *first = "";
+    unsigned index = 0;
+    unsigned i;
+
+    index = Analog_Value_Instance_To_Index(object_instance);
+    if (index < Analog_Value_Instances) {
+        strcpy(buf, "{");
+        for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
+            value = AV_Descr[index].Present_Value_Level[i];
+            if (value == AV_LEVEL_NULL) {
+                sprintf(&buf[strlen(buf)], "%sNull", first);
+            } else {
+                sprintf(&buf[strlen(buf)], "%s%.6f", first, value);
+            }
+
+            first = ",";
+        }
+
+        sprintf(&buf[strlen(buf)], "}");
+        if (yaml_config_mqtt_enable()) {
+            mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRIORITY_ARRAY,
+                MQTT_TOPIC_VALUE_STRING, buf);
+        }
+    }
 }
 
 /**
@@ -864,24 +903,25 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 /* Command priority 6 is reserved for use by Minimum On/Off
                    algorithm and may not be used for other purposes in any
                    object. */
-                if (Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority)) {
-                    status = true;
-#if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
-                        mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_PRESENT_VALUE,
-                            MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
-                    }
-#endif /* defined(MQTT) */
-                } else if (wp_data->priority == 6) {
+                status = Analog_Value_Present_Value_Set(wp_data->object_instance,
+                        value.type.Real, wp_data->priority);
+                if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
                        object. */
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_WRITE_ACCESS_DENIED;
-                } else {
+                } else if (!status) {
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                } else {
+#if defined(MQTT)
+                    if (yaml_config_mqtt_enable()) {
+                        mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_PRESENT_VALUE,
+                            MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+                    }
+                    publish_av_priority_array(wp_data->object_instance);
+#endif /* defined(MQTT) */
                 }
             } else {
                 status = false;

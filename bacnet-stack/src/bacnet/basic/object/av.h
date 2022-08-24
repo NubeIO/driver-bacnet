@@ -216,6 +216,10 @@ extern "C" {
     void Analog_Value_Init(
         void);
 
+    BACNET_STACK_EXPORT
+    void publish_av_priority_array(
+        uint32_t object_instance);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
