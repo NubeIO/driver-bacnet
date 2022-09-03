@@ -50,6 +50,7 @@ extern "C" {
         uint16_t Units;
         float Present_Value;
         float Present_Value_Level[BACNET_MAX_PRIORITY];
+        float Relinquish_Default;
         float Prior_Value;
         float COV_Increment;
         bool Changed;
@@ -102,7 +103,11 @@ extern "C" {
     bool Analog_Value_Name_Set(
         uint32_t object_instance,
         char *new_name);
+    BACNET_STACK_EXPORT
     char *Analog_Value_Name(
+        uint32_t object_instance);
+    BACNET_STACK_EXPORT
+    float Analog_Value_Relinquish_Default(
         uint32_t object_instance);
 
     BACNET_STACK_EXPORT

@@ -62,7 +62,8 @@ static ANALOG_VALUE_DESCR *AV_Descr = NULL;
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Analog_Value_Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
     PROP_OBJECT_NAME, PROP_OBJECT_TYPE, PROP_PRESENT_VALUE, PROP_STATUS_FLAGS,
-    PROP_EVENT_STATE, PROP_OUT_OF_SERVICE, PROP_UNITS, PROP_PRIORITY_ARRAY, -1 };
+    PROP_EVENT_STATE, PROP_OUT_OF_SERVICE, PROP_UNITS, PROP_PRIORITY_ARRAY,
+    PROP_RELINQUISH_DEFAULT, -1 };
 
 static const int Analog_Value_Properties_Optional[] = { PROP_DESCRIPTION,
     PROP_COV_INCREMENT,
@@ -165,6 +166,8 @@ void Analog_Value_Init(void)
         for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
             AV_Descr[i].Present_Value_Level[j] = AV_LEVEL_NULL;
         }
+
+        AV_Descr[i].Relinquish_Default = AV_RELINQUISH_DEFAULT;
     }
 }
 
@@ -279,8 +282,7 @@ bool Analog_Value_Present_Value_Set(
 
     index = Analog_Value_Instance_To_Index(object_instance);
     if (index < Analog_Value_Instances) {
-        if (priority && (priority <= BACNET_MAX_PRIORITY) &&
-            (value >= 0.0) && (value <= 100.0)) {
+        if (priority && (priority <= BACNET_MAX_PRIORITY)) {
             Analog_Value_COV_Detect(index, value);
             AV_Descr[index].Present_Value_Level[priority - 1] = value;
             status = true;
@@ -305,6 +307,7 @@ float Analog_Value_Present_Value(uint32_t object_instance)
 
     index = Analog_Value_Instance_To_Index(object_instance);
     if (index < Analog_Value_Instances) {
+        value = AV_Descr[index].Relinquish_Default;
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (AV_Descr[index].Present_Value_Level[i] != AV_LEVEL_NULL) {
                 value = AV_Descr[index].Present_Value_Level[i];
@@ -519,6 +522,19 @@ void Analog_Value_Out_Of_Service_Set(uint32_t object_instance, bool value)
         }
         AV_Descr[index].Out_Of_Service = value;
     }
+}
+
+float Analog_Value_Relinquish_Default(uint32_t object_instance)
+{
+    float value = AV_RELINQUISH_DEFAULT;
+    unsigned index = 0;
+
+    index = Analog_Value_Instance_To_Index(object_instance);
+    if (index < Analog_Value_Instances) {
+        value = AV_Descr[index].Relinquish_Default;
+    }
+
+    return value;
 }
 
 /**
@@ -791,6 +807,12 @@ int Analog_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
             }
             break;
 
+        case PROP_RELINQUISH_DEFAULT:
+            real_value =
+                Analog_Value_Relinquish_Default(rpdata->object_instance);
+            apdu_len = encode_application_real(&apdu[0], real_value);
+            break;
+
         default:
             rpdata->error_class = ERROR_CLASS_PROPERTY;
             rpdata->error_code = ERROR_CODE_UNKNOWN_PROPERTY;
@@ -919,8 +941,8 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     if (yaml_config_mqtt_enable()) {
                         mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_PRESENT_VALUE,
                             MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
+                        publish_av_priority_array(wp_data->object_instance);
                     }
-                    publish_av_priority_array(wp_data->object_instance);
 #endif /* defined(MQTT) */
                 }
             } else {
@@ -1078,7 +1100,44 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             wp_data->error_code = ERROR_CODE_WRITE_ACCESS_DENIED;
             break;
         case PROP_RELINQUISH_DEFAULT:
+            status = write_property_type_valid(wp_data, &value,
+                BACNET_APPLICATION_TAG_REAL);
+            if (status) {
+                float f_value;
+                f_value = value.type.Real;
+                object_index = Analog_Value_Instance_To_Index(
+                    wp_data->object_instance);
+                AV_Descr[object_index].Relinquish_Default = f_value;
+#if defined(MQTT)
+                if (yaml_config_mqtt_enable()) {
+                    mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
+                        MQTT_TOPIC_VALUE_FLOAT, &f_value);
+                }
+#endif /* defined(MQTT) */
+            }
+            break;
         case PROP_PRIORITY_ARRAY:
+            status = write_property_type_valid(wp_data, &value,
+                BACNET_APPLICATION_TAG_REAL);
+            if (status) {
+                if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
+                    float f_value;
+                    f_value = value.type.Real;
+                    object_index = Analog_Value_Instance_To_Index(
+                        wp_data->object_instance);
+                    AV_Descr[object_index].Present_Value_Level[wp_data->array_index - 1] = f_value;
+#if defined(MQTT)
+                    if (yaml_config_mqtt_enable()) {
+                        publish_av_priority_array(wp_data->object_instance);
+                    }
+#endif /* defined(MQTT) */
+                } else {
+                    status = false;
+                    wp_data->error_class = ERROR_CLASS_PROPERTY;
+                    wp_data->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
+                }
+            }
+            break;
         default:
             wp_data->error_class = ERROR_CLASS_PROPERTY;
             wp_data->error_code = ERROR_CODE_UNKNOWN_PROPERTY;
