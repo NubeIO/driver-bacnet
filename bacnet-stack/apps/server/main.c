@@ -72,6 +72,9 @@
 /** @addtogroup ServerDemo */
 /*@{*/
 
+/* shutdown flag */
+static int running = true;
+
 /* current version of the BACnet stack */
 static const char *BACnet_Version = BACNET_VERSION_TEXT;
 
@@ -189,11 +192,17 @@ static void print_help(const char *filename)
  */
 static void sig_handler(int signo)
 {
+    running = false;
+}
+
+/*
+ * Clean up.
+ */
+static void clean_up(void)
+{
     printf("Shutting down ...\n");
     yaml_config_cleanup();
     mqtt_client_shutdown();
-
-    exit(0);
 }
 
 /** Main function of server demo.
@@ -339,7 +348,7 @@ int main(int argc, char *argv[])
 #endif /* defined(MQTT) */
 
     /* loop forever */
-    for (;;) {
+    for (; running ;) {
         /* input */
         current_seconds = time(NULL);
 
@@ -389,6 +398,8 @@ int main(int argc, char *argv[])
 
         /* blink LEDs, Turn on or off outputs, etc */
     }
+
+    clean_up();
 
     return 0;
 }
