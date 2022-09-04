@@ -59,7 +59,7 @@ static int Analog_Output_Instances = 0;
 /* When all the priorities are level null, the present value returns */
 /* the Relinquish Default value */
 #define AO_RELINQUISH_DEFAULT 0
-static uint8_t *Analog_Output_Relinquish_Defaults = NULL;
+static float *Analog_Output_Relinquish_Defaults = NULL;
 /* Here is our Priority Array.  They are supposed to be Real, but */
 /* we don't have that kind of memory, so we will use a single byte */
 /* and load a Real for returning the value when asked. */
@@ -138,7 +138,7 @@ void Analog_Output_Init(void)
                 characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
             }
 
-            Analog_Output_Relinquish_Defaults = malloc(Analog_Output_Instances * sizeof(uint8_t));
+            Analog_Output_Relinquish_Defaults = malloc(Analog_Output_Instances * sizeof(float));
             for (i = 0; i < Analog_Output_Instances; i++) {
                 Analog_Output_Relinquish_Defaults[i] = AO_RELINQUISH_DEFAULT;
             }
@@ -237,8 +237,7 @@ bool Analog_Output_Present_Value_Set(
     index = Analog_Output_Instance_To_Index(object_instance);
     if (index < Analog_Output_Instances) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
-            (priority != 6 /* reserved */) && (value >= 0.0) &&
-            (value <= 100.0)) {
+            (priority != 6 /* reserved */)) {
             Analog_Output_Level[index][priority - 1] = value;
             /* Note: you could set the physical output here to the next
                highest priority, or to the relinquish default if no
@@ -333,7 +332,7 @@ void Analog_Output_Out_Of_Service_Set(uint32_t instance, bool oos_flag)
 
 float Analog_Output_Relinquish_Default(uint32_t object_instance)
 {
-    BACNET_BINARY_PV value = AO_RELINQUISH_DEFAULT;
+    float value = AO_RELINQUISH_DEFAULT;
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
@@ -610,18 +609,14 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
                     float f_value;
                     f_value = value.type.Real;
-                    if ((f_value >= 0.0) && (f_value <= 100.0)) {
-                        object_index = Analog_Output_Instance_To_Index(
-                            wp_data->object_instance);
-                        Analog_Output_Level[object_index][wp_data->array_index - 1] = f_value;
+                    object_index = Analog_Output_Instance_To_Index(
+                        wp_data->object_instance);
+                    Analog_Output_Level[object_index][wp_data->array_index - 1] = f_value;
 #if defined(MQTT)
+                    if (yaml_config_mqtt_enable()) {
                         publish_ao_priority_array(wp_data->object_instance);
-#endif /* defined(MQTT) */
-                    } else {
-                        status = false;
-                        wp_data->error_class = ERROR_CLASS_PROPERTY;
-                        wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
                     }
+#endif /* defined(MQTT) */
                 } else {
                     status = false;
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
@@ -635,21 +630,15 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             if (status) {
                 float f_value;
                 f_value = value.type.Real;
-                if ((f_value >= 0.0) && (f_value <= 100.0)) {
-                    object_index = Analog_Output_Instance_To_Index(
-                        wp_data->object_instance);
-                    Analog_Output_Relinquish_Defaults[object_index] = f_value;
+                object_index = Analog_Output_Instance_To_Index(
+                    wp_data->object_instance);
+                Analog_Output_Relinquish_Defaults[object_index] = f_value;
 #if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
-                        mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
-                            MQTT_TOPIC_VALUE_FLOAT, &f_value);
-                    }
-#endif /* defined(MQTT) */
-                } else {
-                    status = false;
-                    wp_data->error_class = ERROR_CLASS_PROPERTY;
-                    wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                if (yaml_config_mqtt_enable()) {
+                    mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
+                        MQTT_TOPIC_VALUE_FLOAT, &f_value);
                 }
+#endif /* defined(MQTT) */
             }
             break;
         default:
