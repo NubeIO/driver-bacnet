@@ -184,6 +184,18 @@ static void print_help(const char *filename)
         filename);
 }
 
+/*
+ * Signal handler.
+ */
+static void sig_handler(int signo)
+{
+    printf("Shutting down ...\n");
+    yaml_config_cleanup();
+    mqtt_client_shutdown();
+
+    exit(0);
+}
+
 /** Main function of server demo.
  *
  * @see Device_Set_Object_Instance_Number, dlenv_init, Send_I_Am,
@@ -223,6 +235,9 @@ int main(int argc, char *argv[])
     const char *val_cptr;
     uint32_t val_uint32;
 #endif
+
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
 
     filename = filename_remove_path(argv[0]);
     for (argi = 1; argi < argc; argi++) {
