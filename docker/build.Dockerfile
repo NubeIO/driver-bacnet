@@ -8,6 +8,10 @@ COPY bacnet-stack /opt/bacnet-stack
 RUN mkdir -p /opt/mqtt && cd /opt/mqtt \
     && git clone https://github.com/eclipse/paho.mqtt.c paho.mqtt.c \
     && cd /opt/mqtt/paho.mqtt.c && cmake -DPAHO_BUILD_STATIC=TRUE && make install \
+    && mkdir -p /opt/json && cd /opt/json \
+    && git clone https://github.com/json-c/json-c json-c \
+    && cd /opt/json/json-c && mkdir -p /opt/json/json-c/json-c-build && cmake ../json-c \
+    && make && make install \
     && apt-get install libyaml-dev -y \
     && mkdir -p /opt/cyaml && cd /opt/cyaml \
     && git clone https://github.com/tlsa/libcyaml.git \
