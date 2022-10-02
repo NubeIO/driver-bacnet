@@ -70,7 +70,8 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Binary_Value_Set_Object_Name(
         uint32_t object_instance,
-        BACNET_CHARACTER_STRING *object_name);
+        BACNET_CHARACTER_STRING *object_name,
+        char *uuid);
     BACNET_STACK_EXPORT
     bool Binary_Value_Name_Set(
         uint32_t object_instance,
@@ -135,7 +136,9 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Binary_Value_Present_Value_Set(
         uint32_t instance,
-        BACNET_BINARY_PV value);
+        BACNET_BINARY_PV value,
+        unsigned int priority,
+        char *uuid);
 
     BACNET_STACK_EXPORT
     bool Binary_Value_Out_Of_Service(
@@ -190,7 +193,8 @@ extern "C" {
         uint32_t object_instance);
     BACNET_STACK_EXPORT
     void publish_bv_priority_array(
-        uint32_t object_instance);
+        uint32_t object_instance,
+        char *uuid);
 
 #ifdef __cplusplus
 }

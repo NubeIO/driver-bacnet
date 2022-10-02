@@ -37,6 +37,12 @@ extern "C" {
 
   int yaml_config_mqtt_enable(void);
 
+  int yaml_config_mqtt_write_via_subscribe(void);
+
+  const char **yaml_config_objects(int *length);
+
+  const char **yaml_config_properties(int *length);
+
   int yaml_config_cleanup(void);
 
 #ifdef __cplusplus

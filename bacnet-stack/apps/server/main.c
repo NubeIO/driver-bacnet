@@ -59,6 +59,7 @@
 #include "bacnet/basic/ucix/ucix.h"
 #endif /* defined(BAC_UCI) */
 #if defined(MQTT)
+#include "MQTTClient.h"
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
 #if defined(YAML_CONFIG)
@@ -160,7 +161,7 @@ static void Init_Service_Handlers(void)
 static void publish_stack_startup()
 {
     mqtt_publish_topic(OBJECT_PROGRAM, Device_Object_Instance_Number(), PROP_PROGRAM_STATE,
-        MQTT_TOPIC_VALUE_STRING, "started");
+        MQTT_TOPIC_VALUE_STRING, "started", NULL);
 }
 #endif
 

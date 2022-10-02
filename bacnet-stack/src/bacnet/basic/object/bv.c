@@ -40,6 +40,7 @@
 #include "bacnet/basic/object/bv.h"
 #include "bacnet/basic/services.h"
 #if defined(MQTT)
+#include "MQTTClient.h"
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
 #if defined(YAML_CONFIG)
@@ -266,7 +267,7 @@ bool Binary_Value_Object_Name(
 }
 
 bool Binary_Value_Set_Object_Name(
-    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid)
 {
     bool status = false;
     unsigned index = 0;
@@ -275,6 +276,12 @@ bool Binary_Value_Set_Object_Name(
     if (index < Binary_Value_Instances) {
         if (!characterstring_same(&Binary_Value_Instance_Names[index], object_name)) {
             status = characterstring_copy(&Binary_Value_Instance_Names[index], object_name);
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
+            }
+#endif /* defined(MQTT) */
         }
     }
 
@@ -479,7 +486,7 @@ int Binary_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 }
 
 /* publish the values of priority array over mqtt */
-void publish_bv_priority_array(uint32_t object_instance)
+void publish_bv_priority_array(uint32_t object_instance, char *uuid)
 {   
     BACNET_BINARY_PV value;
     char buf[1024] = {0};
@@ -505,10 +512,34 @@ void publish_bv_priority_array(uint32_t object_instance)
         sprintf(&buf[strlen(buf)], "}");
         if (yaml_config_mqtt_enable()) {
             mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRIORITY_ARRAY,
-                MQTT_TOPIC_VALUE_STRING, buf);
+                MQTT_TOPIC_VALUE_STRING, buf, uuid);
         }
     }
 }
+
+
+bool Binary_Value_Present_Value_Set(
+    uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid)
+{
+    unsigned index = 0;
+    bool status = false;
+
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index < Binary_Value_Instances) {
+        Binary_Value_Level[index][priority - 1] = value;
+        status = true;
+#if defined(MQTT)
+        if (yaml_config_mqtt_enable()) {
+            mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRESENT_VALUE,
+                MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
+            publish_bv_priority_array(object_instance, uuid);
+        }
+#endif /* defined(MQTT) */
+    }
+
+    return status;
+}
+
 
 /**
  * Set the requested property of the binary value.
@@ -573,23 +604,18 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 if (priority && (priority <= BACNET_MAX_PRIORITY) &&
                     (priority != 6 /* reserved */) &&
                     (value.type.Enumerated <= MAX_BINARY_PV)) {
-                    level = (BACNET_BINARY_PV)value.type.Enumerated;
+                    /* level = (BACNET_BINARY_PV)value.type.Enumerated;
                     priority--;
-                    Binary_Value_Level[object_index][priority] = level;
+                    Binary_Value_Level[object_index][priority] = level; */
                     /* Note: you could set the physical output here if we
                        are the highest priority.
                        However, if Out of Service is TRUE, then don't set the
                        physical output.  This comment may apply to the
                        main loop (i.e. check out of service before changing
                        output) */
+                    Binary_Value_Present_Value_Set(wp_data->object_instance,
+                        (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL);
                     status = true;
-#if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
-                        mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_PRESENT_VALUE,
-                            MQTT_TOPIC_VALUE_INTEGER, &level);
-                    }
-                    publish_bv_priority_array(wp_data->object_instance);
-#endif /* defined(MQTT) */
                 } else if (priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -607,8 +633,8 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     level = BINARY_NULL;
                     priority = wp_data->priority;
                     if (priority && (priority <= BACNET_MAX_PRIORITY)) {
-                        priority--;
-                        Binary_Value_Level[object_index][priority] = level;
+                        /* priority--;
+                        Binary_Value_Level[object_index][priority] = level; */
                         /* Note: you could set the physical output here to the
                            next highest priority, or to the relinquish default
                            if no priorities are set. However, if Out of Service
@@ -616,6 +642,8 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                            comment may apply to the
                            main loop (i.e. check out of service before changing
                            output) */
+                        Binary_Value_Present_Value_Set(wp_data->object_instance,
+                            (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL);
                     } else {
                         status = false;
                         wp_data->error_class = ERROR_CLASS_PROPERTY;
@@ -638,13 +666,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Binary_Value_Instance_Names[0]));
             if (status) {
                 Binary_Value_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String);
-#if defined(MQTT)
-                if (yaml_config_mqtt_enable()) {
-                    mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_OBJECT_NAME,
-                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
-                }
-#endif /* defined(MQTT) */
+                    &value.type.Character_String, NULL);
             }
             break;
         case PROP_DESCRIPTION:
@@ -665,7 +687,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                         level = (BACNET_BINARY_PV)value.type.Enumerated;
                         Binary_Value_Level[object_index][wp_data->array_index - 1] = level;
 #if defined(MQTT)
-                        publish_bv_priority_array(wp_data->object_instance);
+                        publish_bv_priority_array(wp_data->object_instance, NULL);
 #endif /* defined(MQTT) */
                     } else {
                         status = false;
@@ -691,7 +713,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 #if defined(MQTT)
                     if (yaml_config_mqtt_enable()) {
                         mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
-                            MQTT_TOPIC_VALUE_INTEGER, &level);
+                            MQTT_TOPIC_VALUE_INTEGER, &level, NULL);
                     }
 #endif /* defined(MQTT) */
                 } else {

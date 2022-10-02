@@ -41,6 +41,7 @@
 #include "bacnet/timestamp.h"
 #include "bacnet/basic/object/ai.h"
 #if defined(MQTT)
+#include "MQTTClient.h"
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
 #if defined(YAML_CONFIG)
@@ -235,7 +236,7 @@ static void Analog_Input_COV_Detect(unsigned int index, float value)
     }
 }
 
-void Analog_Input_Present_Value_Set(uint32_t object_instance, float value)
+void Analog_Input_Present_Value_Set(uint32_t object_instance, float value, char *uuid)
 {
     unsigned int index = 0;
 
@@ -243,6 +244,13 @@ void Analog_Input_Present_Value_Set(uint32_t object_instance, float value)
     if (index < Analog_Input_Instances) {
         Analog_Input_COV_Detect(index, value);
         AI_Descr[index].Present_Value = value;
+
+#if defined(MQTT)
+        if (yaml_config_mqtt_enable()) {
+            mqtt_publish_topic(OBJECT_ANALOG_INPUT, object_instance, PROP_PRESENT_VALUE,
+            MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
+        }
+#endif /* defined(MQTT) */
     }
 }
 
@@ -261,7 +269,7 @@ bool Analog_Input_Object_Name(
 }
 
 bool Analog_Input_Set_Object_Name(
-    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid)
 {
     bool status = false;
     unsigned index = 0;
@@ -270,6 +278,12 @@ bool Analog_Input_Set_Object_Name(
     if (index < Analog_Input_Instances) {
         if (!characterstring_same(&Analog_Input_Instance_Names[index], object_name)) {
             status = characterstring_copy(&Analog_Input_Instance_Names[index], object_name);
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                mqtt_publish_topic(OBJECT_ANALOG_INPUT, object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
+            }
+#endif /* defined(MQTT) */
         }
     }
 
@@ -684,13 +698,7 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 BACNET_APPLICATION_TAG_REAL);
             if (status) {
                 Analog_Input_Present_Value_Set(
-                    wp_data->object_instance, value.type.Real);
-#if defined(MQTT)
-                if (yaml_config_mqtt_enable()) {
-                    mqtt_publish_topic(OBJECT_ANALOG_INPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
-                        MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
-                }
-#endif /* defined(MQTT) */
+                    wp_data->object_instance, value.type.Real, NULL);
             }
             break;
 
@@ -822,13 +830,7 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Input_Instance_Names[0]));
             if (status) {
                 Analog_Input_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String);
-#if defined(MQTT)
-                if (yaml_config_mqtt_enable()) {
-                    mqtt_publish_topic(OBJECT_ANALOG_INPUT, wp_data->object_instance, PROP_OBJECT_NAME,
-                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
-                }
-#endif /* defined(MQTT) */
+                    &value.type.Character_String, NULL);
             }
             break;
         case PROP_OBJECT_TYPE:

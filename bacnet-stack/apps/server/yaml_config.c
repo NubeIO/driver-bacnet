@@ -19,6 +19,7 @@ struct _mqtt {
   uint16_t broker_port;
   const char *debug;
   const char *enable;
+  const char *write_via_subscribe;
 };
 
 /* top level struct for storing the configuration */
@@ -34,12 +35,21 @@ struct _bacnet_config {
   uint8_t ao_max;
   uint8_t av_max;
   struct _mqtt *mqtt;
+  const char **objects;
+  unsigned n_objects;
+  const char **properties;
+  unsigned n_properties;
 };
 
 /* globals */
 static struct _bacnet_config *bacnet_config = NULL;
 static int yaml_config_debug = false;
 static int yaml_config_mqtt_disable = false;
+
+/* Schema for string pointer values (used in sequences of strings). */
+static const cyaml_schema_value_t string_ptr_schema = {
+  CYAML_VALUE_STRING(CYAML_FLAG_POINTER, char, 0, CYAML_UNLIMITED),
+};
 
 static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
@@ -57,6 +67,10 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
     "enable", CYAML_FLAG_POINTER,
     struct _mqtt, enable, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "write_via_subscribe", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _mqtt, write_via_subscribe, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -105,6 +119,16 @@ static const cyaml_schema_field_t config_fields_schema[] = {
   CYAML_FIELD_MAPPING_PTR(
     "mqtt", CYAML_FLAG_POINTER,
     struct _bacnet_config, mqtt, mqtt_fields_schema),
+
+  CYAML_FIELD_SEQUENCE_COUNT(
+    "objects", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, objects, n_objects,
+    &string_ptr_schema, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_SEQUENCE_COUNT(
+    "properties", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, properties, n_properties,
+    &string_ptr_schema, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -185,6 +209,8 @@ int yaml_config_init(void)
  */
 void yaml_config_dump(void)
 {
+  int i;
+
   printf("YAML Config: server_name: %s\n", (bacnet_config->server_name) ?
     bacnet_config->server_name : "null");
   printf("YAML Config: device_id: %s\n", (bacnet_config->device_id) ?
@@ -206,6 +232,22 @@ void yaml_config_dump(void)
       bacnet_config->mqtt->debug: "null");
     printf("YAML Config: mqtt->enable: %s\n", (bacnet_config->mqtt->enable) ?
       bacnet_config->mqtt->enable: "null");
+  }
+
+  if (bacnet_config->n_objects > 0) {
+    printf("YAML Config: Objects\n");
+  
+    for(i = 0; i < bacnet_config->n_objects; i++) {
+      printf("[%d]: %s\n", i, bacnet_config->objects[i]);
+    }
+  }
+
+  if (bacnet_config->n_properties> 0) {
+    printf("YAML Config: Properties\n");
+
+    for(i = 0; i < bacnet_config->n_properties; i++) {
+      printf("[%d]: %s\n", i, bacnet_config->properties[i]);
+    }
   }
 }
 
@@ -339,6 +381,36 @@ int yaml_config_mqtt_enable(void)
 
   return ((bacnet_config->mqtt && bacnet_config->mqtt->enable &&
     !strcmp(bacnet_config->mqtt->enable, "true")) ? true : false);
+}
+
+
+/*
+ * Get MQTT write via subscribe flag.
+ */
+int yaml_config_mqtt_write_via_subscribe(void)
+{
+  return ((bacnet_config->mqtt && bacnet_config->mqtt->write_via_subscribe &&
+    !strcmp(bacnet_config->mqtt->write_via_subscribe, "true")) ? true : false);
+}
+
+
+/*
+ * Get objects.
+ */
+const char **yaml_config_objects(int *length)
+{
+  *length = bacnet_config->n_objects;
+  return(bacnet_config->objects);
+}
+
+
+/*
+ * Get properties.
+ */
+const char **yaml_config_properties(int *length)
+{
+  *length = bacnet_config->n_properties;
+  return(bacnet_config->properties);
 }
 
 

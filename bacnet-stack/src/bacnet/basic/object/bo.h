@@ -102,7 +102,8 @@ extern "C" {
     bool Binary_Output_Present_Value_Set(
         uint32_t instance,
         BACNET_BINARY_PV binary_value,
-        unsigned priority);
+        unsigned priority,
+        char *uuid);
     BACNET_STACK_EXPORT
     bool Binary_Output_Present_Value_Relinquish(
         uint32_t instance,
@@ -149,14 +150,16 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Binary_Output_Set_Object_Name(
         uint32_t object_instance,
-        BACNET_CHARACTER_STRING *object_name);
+        BACNET_CHARACTER_STRING *object_name,
+        char *uuid);
 
     BACNET_STACK_EXPORT
     int Binary_Output_Read_Property(
         BACNET_READ_PROPERTY_DATA * rpdata);
     BACNET_STACK_EXPORT
     void publish_priority_array(
-        uint32_t object_instance);
+        uint32_t object_instance,
+        char *uuid);
     BACNET_STACK_EXPORT
     bool Binary_Output_Write_Property(
         BACNET_WRITE_PROPERTY_DATA * wp_data);
