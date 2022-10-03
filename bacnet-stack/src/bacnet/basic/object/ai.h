@@ -99,7 +99,8 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Analog_Input_Set_Object_Name(
         uint32_t object_instance,
-        BACNET_CHARACTER_STRING *object_name);
+        BACNET_CHARACTER_STRING *object_name,
+        char *uuid);
     BACNET_STACK_EXPORT
     bool Analog_Input_Name_Set(
         uint32_t object_instance,
@@ -134,7 +135,8 @@ extern "C" {
     BACNET_STACK_EXPORT
     void Analog_Input_Present_Value_Set(
         uint32_t object_instance,
-        float value);
+        float value,
+        char *uuid);
 
     BACNET_STACK_EXPORT
     bool Analog_Input_Out_Of_Service(

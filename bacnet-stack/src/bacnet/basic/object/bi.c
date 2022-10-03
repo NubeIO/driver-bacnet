@@ -40,6 +40,7 @@
 #include "bacnet/basic/object/bi.h"
 #include "bacnet/basic/services.h"
 #if defined(MQTT)
+#include "MQTTClient.h"
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
 #if defined(YAML_CONFIG)
@@ -288,7 +289,7 @@ bool Binary_Input_Encode_Value_List(
 }
 
 bool Binary_Input_Present_Value_Set(
-    uint32_t object_instance, BACNET_BINARY_PV value)
+    uint32_t object_instance, BACNET_BINARY_PV value, char *uuid)
 {
     unsigned index = 0;
     bool status = false;
@@ -307,6 +308,12 @@ bool Binary_Input_Present_Value_Set(
         }
         Present_Value[index] = value;
         status = true;
+#if defined(MQTT)
+        if (yaml_config_mqtt_enable()) {
+            mqtt_publish_topic(OBJECT_BINARY_INPUT, object_instance, PROP_PRESENT_VALUE,
+                MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
+        }
+#endif /* defined(MQTT) */
     }
 
     return status;
@@ -342,7 +349,7 @@ bool Binary_Input_Object_Name(
 }
 
 bool Binary_Input_Set_Object_Name(
-    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid)
 {   
     bool status = false;
     unsigned index = 0;
@@ -351,6 +358,12 @@ bool Binary_Input_Set_Object_Name(
     if (index < Binary_Input_Instances) {
         if (!characterstring_same(&Binary_Input_Instance_Names[index], object_name)) {
             status = characterstring_copy(&Binary_Input_Instance_Names[index], object_name);
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                mqtt_publish_topic(OBJECT_BINARY_INPUT, object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
+            }
+#endif /* defined(MQTT) */
         }
     }
 
@@ -489,13 +502,7 @@ bool Binary_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             if (status) {
                 if (value.type.Enumerated <= MAX_BINARY_PV) {
                     Binary_Input_Present_Value_Set(wp_data->object_instance,
-                        (BACNET_BINARY_PV)value.type.Enumerated);
-#if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
-                        mqtt_publish_topic(OBJECT_BINARY_INPUT, wp_data->object_instance, PROP_PRESENT_VALUE,
-                            MQTT_TOPIC_VALUE_INTEGER, &value.type.Enumerated);
-                    }
-#endif /* defined(MQTT) */
+                        (BACNET_BINARY_PV)value.type.Enumerated, NULL);
                 } else {
                     status = false;
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
@@ -530,13 +537,7 @@ bool Binary_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 MAX_BINARY_INPUT_OBJECT_NAME_LEN);
             if (status) {
                 Binary_Input_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String);
-#if defined(MQTT)
-                if (yaml_config_mqtt_enable()) {
-                    mqtt_publish_topic(OBJECT_BINARY_INPUT, wp_data->object_instance, PROP_OBJECT_NAME,
-                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
-                }
-#endif /* defined(MQTT) */
+                    &value.type.Character_String, NULL);
             }
             break;
         case PROP_OBJECT_IDENTIFIER:

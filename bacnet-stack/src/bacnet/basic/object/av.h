@@ -98,7 +98,8 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Analog_Value_Set_Object_Name(
         uint32_t object_instance,
-        BACNET_CHARACTER_STRING *object_name);
+        BACNET_CHARACTER_STRING *object_name,
+        char *uuid);
     BACNET_STACK_EXPORT
     bool Analog_Value_Name_Set(
         uint32_t object_instance,
@@ -122,7 +123,8 @@ extern "C" {
     bool Analog_Value_Present_Value_Set(
         uint32_t object_instance,
         float value,
-        uint8_t priority);
+        uint8_t priority,
+        char *uuid);
     BACNET_STACK_EXPORT
     float Analog_Value_Present_Value(
         uint32_t object_instance);
@@ -223,7 +225,8 @@ extern "C" {
 
     BACNET_STACK_EXPORT
     void publish_av_priority_array(
-        uint32_t object_instance);
+        uint32_t object_instance,
+        char *uuid);
 
 #ifdef __cplusplus
 }

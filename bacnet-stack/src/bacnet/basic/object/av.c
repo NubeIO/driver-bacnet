@@ -41,6 +41,7 @@
 #include "bacnet/basic/services.h"
 #include "bacnet/basic/object/av.h"
 #if defined(MQTT)
+#include "MQTTClient.h"
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
 #if defined(YAML_CONFIG)
@@ -275,7 +276,7 @@ static void Analog_Value_COV_Detect(unsigned int index, float value)
  * @return  true if values are within range and present-value is set.
  */
 bool Analog_Value_Present_Value_Set(
-    uint32_t object_instance, float value, uint8_t priority)
+    uint32_t object_instance, float value, uint8_t priority, char *uuid)
 {
     unsigned index = 0;
     bool status = false;
@@ -286,6 +287,14 @@ bool Analog_Value_Present_Value_Set(
             Analog_Value_COV_Detect(index, value);
             AV_Descr[index].Present_Value_Level[priority - 1] = value;
             status = true;
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                
+                mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE,
+                    MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
+                publish_av_priority_array(object_instance, uuid);
+            }
+#endif /* defined(MQTT) */
         }
     }
 
@@ -344,7 +353,7 @@ bool Analog_Value_Object_Name(
 }
 
 bool Analog_Value_Set_Object_Name(
-    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name)
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid)
 {
     bool status = false;
     unsigned index = 0;
@@ -353,6 +362,12 @@ bool Analog_Value_Set_Object_Name(
     if (index < Analog_Value_Instances) {
         if (!characterstring_same(&Analog_Value_Instance_Names[index], object_name)) {
             status = characterstring_copy(&Analog_Value_Instance_Names[index], object_name);
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_OBJECT_NAME,
+                    MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
+            }
+#endif /* defined(MQTT) */
         }
     }
 
@@ -834,7 +849,7 @@ int Analog_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 /*
  * Publish the values of priority array over mqtt
  */
-void publish_av_priority_array(uint32_t object_instance)
+void publish_av_priority_array(uint32_t object_instance, char *uuid)
 {
     float value;
     char buf[1024] = {0};
@@ -859,7 +874,7 @@ void publish_av_priority_array(uint32_t object_instance)
         sprintf(&buf[strlen(buf)], "}");
         if (yaml_config_mqtt_enable()) {
             mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRIORITY_ARRAY,
-                MQTT_TOPIC_VALUE_STRING, buf);
+                MQTT_TOPIC_VALUE_STRING, buf, uuid);
         }
     }
 }
@@ -926,7 +941,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                    algorithm and may not be used for other purposes in any
                    object. */
                 status = Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority);
+                        value.type.Real, wp_data->priority, NULL);
                 if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -936,14 +951,6 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 } else if (!status) {
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
-                } else {
-#if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
-                        mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_PRESENT_VALUE,
-                            MQTT_TOPIC_VALUE_FLOAT, &value.type.Real);
-                        publish_av_priority_array(wp_data->object_instance);
-                    }
-#endif /* defined(MQTT) */
                 }
             } else {
                 status = false;
@@ -1079,13 +1086,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Value_Instance_Names[0]));
             if (status) {
                 Analog_Value_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String);
-#if defined(MQTT)
-                if (yaml_config_mqtt_enable()) {
-                    mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_OBJECT_NAME,
-                        MQTT_TOPIC_VALUE_BACNET_STRING, &value.type.Character_String);
-                }
-#endif /* defined(MQTT) */
+                    &value.type.Character_String, NULL);
             }
             break;
         case PROP_OBJECT_TYPE:
@@ -1111,7 +1112,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 #if defined(MQTT)
                 if (yaml_config_mqtt_enable()) {
                     mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
-                        MQTT_TOPIC_VALUE_FLOAT, &f_value);
+                        MQTT_TOPIC_VALUE_FLOAT, &f_value, NULL);
                 }
 #endif /* defined(MQTT) */
             }
@@ -1128,7 +1129,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     AV_Descr[object_index].Present_Value_Level[wp_data->array_index - 1] = f_value;
 #if defined(MQTT)
                     if (yaml_config_mqtt_enable()) {
-                        publish_av_priority_array(wp_data->object_instance);
+                        publish_av_priority_array(wp_data->object_instance, NULL);
                     }
 #endif /* defined(MQTT) */
                 } else {

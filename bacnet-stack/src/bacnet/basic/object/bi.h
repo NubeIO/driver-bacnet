@@ -66,7 +66,8 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Binary_Input_Set_Object_Name(
         uint32_t object_instance,
-        BACNET_CHARACTER_STRING * object_name);
+        BACNET_CHARACTER_STRING * object_name,
+        char *uuid);
     BACNET_STACK_EXPORT
     bool Binary_Input_Name_Set(
         uint32_t object_instance,
@@ -78,7 +79,8 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Binary_Input_Present_Value_Set(
         uint32_t object_instance,
-        BACNET_BINARY_PV value);
+        BACNET_BINARY_PV value,
+        char *uuid);
 
     BACNET_STACK_EXPORT
     char *Binary_Input_Description(

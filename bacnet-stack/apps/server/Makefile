@@ -52,10 +52,12 @@ MQTT_LFLAGS = /usr/local/lib/libpaho-mqtt3c.a
 YAML_CONFIG_CFLAGS = -DYAML_CONFIG
 YAML_CONFIG_LFLAGS = /usr/local/lib/libcyaml.a /usr/lib/libyaml.a
 
+JSON_LFLAGS = /usr/local/lib/libjson-c.a
+
 all: ${BACNET_LIB_TARGET} Makefile ${TARGET_BIN}
 
 ${TARGET_BIN}: ${OBJS} Makefile ${BACNET_LIB_TARGET}
-	${CC} ${PFLAGS} ${OBJS} ${LFLAGS} ${MQTT_LFLAGS} ${YAML_CONFIG_LFLAGS} -o $@
+	${CC} ${PFLAGS} ${OBJS} ${LFLAGS} ${MQTT_LFLAGS} ${YAML_CONFIG_LFLAGS} ${JSON_LFLAGS} -o $@
 	size $@
 	cp $@ ../../bin
 

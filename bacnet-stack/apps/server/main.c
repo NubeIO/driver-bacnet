@@ -59,6 +59,7 @@
 #include "bacnet/basic/ucix/ucix.h"
 #endif /* defined(BAC_UCI) */
 #if defined(MQTT)
+#include "MQTTClient.h"
 #include "mqtt_client.h"
 #endif /* defined(MQTT) */
 #if defined(YAML_CONFIG)
@@ -71,6 +72,9 @@
  *  into the ServerDemo module.) */
 /** @addtogroup ServerDemo */
 /*@{*/
+
+/* shutdown flag */
+static int running = true;
 
 /* current version of the BACnet stack */
 static const char *BACnet_Version = BACNET_VERSION_TEXT;
@@ -157,7 +161,7 @@ static void Init_Service_Handlers(void)
 static void publish_stack_startup()
 {
     mqtt_publish_topic(OBJECT_PROGRAM, Device_Object_Instance_Number(), PROP_PROGRAM_STATE,
-        MQTT_TOPIC_VALUE_STRING, "started");
+        MQTT_TOPIC_VALUE_STRING, "started", NULL);
 }
 #endif
 
@@ -189,11 +193,17 @@ static void print_help(const char *filename)
  */
 static void sig_handler(int signo)
 {
+    running = false;
+}
+
+/*
+ * Clean up.
+ */
+static void clean_up(void)
+{
     printf("Shutting down ...\n");
     yaml_config_cleanup();
     mqtt_client_shutdown();
-
-    exit(0);
 }
 
 /** Main function of server demo.
@@ -339,7 +349,7 @@ int main(int argc, char *argv[])
 #endif /* defined(MQTT) */
 
     /* loop forever */
-    for (;;) {
+    for (; running ;) {
         /* input */
         current_seconds = time(NULL);
 
@@ -389,6 +399,8 @@ int main(int argc, char *argv[])
 
         /* blink LEDs, Turn on or off outputs, etc */
     }
+
+    clean_up();
 
     return 0;
 }
