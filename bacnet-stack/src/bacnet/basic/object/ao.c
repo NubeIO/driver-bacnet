@@ -249,16 +249,66 @@ bool Analog_Output_Present_Value_Set(
             status = true;
 #if defined(MQTT)
             if (yaml_config_mqtt_enable()) {
-                mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRESENT_VALUE,
-                    MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
+                if (value == AO_LEVEL_NULL) {
+                  mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRESENT_VALUE,
+                      MQTT_TOPIC_VALUE_STRING, "null", uuid);
+                } else {
+                  mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRESENT_VALUE,
+                      MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
+                }
+
+                publish_ao_priority_array(object_instance, uuid);
             }
-            publish_ao_priority_array(object_instance, uuid);
 #endif /* defined(MQTT) */
         }
     }
 
     return status;
 }
+
+
+bool Analog_Output_Priority_Array_Set(
+    uint32_t object_instance, float value, unsigned priority, char *uuid)
+{
+    unsigned index = 0;
+    bool status = false;
+
+    index = Analog_Output_Instance_To_Index(object_instance);
+    if (index < Analog_Output_Instances) {
+        if (priority && (priority <= BACNET_MAX_PRIORITY) &&
+            (priority != 6 /* reserved */)) {
+            Analog_Output_Level[index][priority - 1] = value;
+            status = true;
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                publish_ao_priority_array(object_instance, uuid);
+            }
+#endif /* defined(MQTT) */
+        }
+    }
+
+    return status;
+}
+
+
+bool Analog_Output_Priority_Array_Set2(
+    uint32_t object_instance, float value, unsigned priority)
+{
+    unsigned index = 0;
+    bool status = false;
+
+    index = Analog_Output_Instance_To_Index(object_instance);
+    if (index < Analog_Output_Instances) {
+        if (priority && (priority <= BACNET_MAX_PRIORITY) &&
+            (priority != 6 /* reserved */)) {
+            Analog_Output_Level[index][priority - 1] = value;
+            status = true;
+        }
+    }
+
+    return status;
+}
+
 
 bool Analog_Output_Present_Value_Relinquish(
     uint32_t object_instance, unsigned priority)
@@ -609,14 +659,9 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
                     float f_value;
                     f_value = value.type.Real;
-                    object_index = Analog_Output_Instance_To_Index(
-                        wp_data->object_instance);
-                    Analog_Output_Level[object_index][wp_data->array_index - 1] = f_value;
-#if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
-                        publish_ao_priority_array(wp_data->object_instance, NULL);
-                    }
-#endif /* defined(MQTT) */
+
+                    Analog_Output_Priority_Array_Set(wp_data->object_instance, f_value,
+                        wp_data->array_index, NULL);
                 } else {
                     status = false;
                     wp_data->error_class = ERROR_CLASS_PROPERTY;

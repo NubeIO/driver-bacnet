@@ -25,11 +25,19 @@ extern bool Analog_Output_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
 extern bool Analog_Output_Present_Value_Set(
   uint32_t object_instance, float value, unsigned priority, char *uuid);
+extern bool Analog_Output_Priority_Array_Set(
+  uint32_t object_instance, float value, unsigned priority, char *uuid);
+extern bool Analog_Output_Priority_Array_Set2(
+  uint32_t object_instance, float value, unsigned priority);
 
 extern bool Analog_Value_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
 extern bool Analog_Value_Present_Value_Set(
   uint32_t object_instance, float value, uint8_t priority, char *uuid);
+extern bool Analog_Value_Priority_Array_Set(
+  uint32_t object_instance, float value, uint8_t priority, char *uuid);
+extern bool Analog_Value_Priority_Array_Set2(
+  uint32_t object_instance, float value, uint8_t priority);
 
 extern bool Binary_Input_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
@@ -40,11 +48,19 @@ extern bool Binary_Output_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
 extern bool Binary_Output_Present_Value_Set(
   uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid);
+extern bool Binary_Output_Priority_Array_Set(
+  uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid);
+extern bool Binary_Output_Priority_Array_Set2(
+  uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority);
 
 extern bool Binary_Value_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
 extern bool Binary_Value_Present_Value_Set(
   uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid);
+extern bool Binary_Value_Priority_Array_Set(
+  uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid);
+extern bool Binary_Value_Priority_Array_Set2(
+  uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority);
 
 int tokenize_topic(char *topic, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
 void dump_topic_tokens(int n_topic_tokens, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
@@ -155,17 +171,55 @@ int process_ai_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 int process_ao_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid)
 { 
   BACNET_CHARACTER_STRING bacnet_string;
+  float f;
   char *prop_name = topic_tokens[4];
+  char *endptr;
   
   if (!strcasecmp(prop_name, "name")) {
     characterstring_init_ansi(&bacnet_string, value);
     Analog_Output_Set_Object_Name(index, &bacnet_string, uuid);
   } else if (!strcasecmp(prop_name, "pv")) {
-    float f;
-    char *endptr;
-
-    f = strtof(value, &endptr);
+    f = (!strcasecmp(value, "null")) ? 255 :  strtof(value, &endptr);
     Analog_Output_Present_Value_Set(index, f, BACNET_MAX_PRIORITY, uuid);
+  } else if (!strcasecmp(prop_name, "pri")) {
+    int pri_idx = atoi(topic_tokens[5]);
+    int all_items = false;
+
+    if (mqtt_debug) {
+      printf("- pri_idx: [%d]\n", pri_idx);
+    }
+
+    if ((pri_idx < 1) || (pri_idx > BACNET_MAX_PRIORITY)) {
+      if (mqtt_debug) {
+        printf("MQTT Invalid Priority Array index for Analog Output (AO): [%d]\n", pri_idx);
+      }
+      return(1);
+    }
+
+    if (strlen(topic_tokens[6]) > 0) {
+      if (strcasecmp(topic_tokens[6], "all")) {
+        if (mqtt_debug) {
+          printf("MQTT Invalid Priority Array value attribute for Analog Output (AO): [%s]\n", topic_tokens[6]);
+        }
+
+        return(1);
+      }
+
+      all_items = true;
+    }
+
+    f = (!strcasecmp(value, "null")) ? 255 :  strtof(value, &endptr);
+    if (all_items) {
+      for (int i = 1; i <= pri_idx; i++) {
+        if (i != pri_idx) {
+          Analog_Output_Priority_Array_Set2(index, f, i);
+        } else {
+          Analog_Output_Priority_Array_Set(index, f, i, uuid);
+        }
+      }
+    } else {
+      Analog_Output_Priority_Array_Set(index, f, pri_idx, uuid);
+    }
   } else {
     if (mqtt_debug) {
       printf("MQTT Invalid Property for Analog Output (AO): [%s]\n", prop_name);
@@ -184,17 +238,55 @@ int process_ao_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 int process_av_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid)
 {
   BACNET_CHARACTER_STRING bacnet_string;
+  float f;
   char *prop_name = topic_tokens[4];
+  char *endptr;
 
   if (!strcasecmp(prop_name, "name")) {
     characterstring_init_ansi(&bacnet_string, value);
     Analog_Value_Set_Object_Name(index, &bacnet_string, uuid);
   } else if (!strcasecmp(prop_name, "pv")) {
-    float f;
-    char *endptr;
+    f = (!strcasecmp(value, "null")) ? 255 :  strtof(value, &endptr);
+    Analog_Value_Present_Value_Set(index, f, BACNET_MAX_PRIORITY, uuid);
+  } else if (!strcasecmp(prop_name, "pri")) {
+    int pri_idx = atoi(topic_tokens[5]);
+    int all_items = false;
 
-    f = strtof(value, &endptr);
-    Analog_Output_Present_Value_Set(index, f, BACNET_MAX_PRIORITY, uuid);
+    if (mqtt_debug) {
+      printf("- pri_idx: [%d]\n", pri_idx);
+    }
+
+    if ((pri_idx < 1) || (pri_idx > BACNET_MAX_PRIORITY)) {
+      if (mqtt_debug) {
+        printf("MQTT Invalid Priority Array index for Analog Value (AV): [%d]\n", pri_idx);
+      }
+      return(1);
+    }
+
+    if (strlen(topic_tokens[6]) > 0) {
+      if (strcasecmp(topic_tokens[6], "all")) {
+        if (mqtt_debug) {
+          printf("MQTT Invalid Priority Array value attribute for Analog Value (AV): [%s]\n", topic_tokens[6]);
+        }
+
+        return(1);
+      }
+
+      all_items = true;
+    }
+
+    f = (!strcasecmp(value, "null")) ? 255 :  strtof(value, &endptr);
+    if (all_items) {
+      for (int i = 1; i <= pri_idx; i++) {
+        if (i != pri_idx) {
+          Analog_Value_Priority_Array_Set2(index, f, i);
+        } else {
+          Analog_Value_Priority_Array_Set(index, f, i, uuid);
+        }
+      }
+    } else {
+      Analog_Value_Priority_Array_Set(index, f, pri_idx, uuid);
+    }
   } else {
     if (mqtt_debug) {
       printf("MQTT Invalid Property for Analog Value (AV): [%s]\n", prop_name);
@@ -240,17 +332,56 @@ int process_bi_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
  */
 int process_bo_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid)
 {
+  BACNET_BINARY_PV pv;
   BACNET_CHARACTER_STRING bacnet_string;
   char *prop_name = topic_tokens[4];
+  int i_val = atoi(value);
 
   if (!strcasecmp(prop_name, "name")) {
     characterstring_init_ansi(&bacnet_string, value);
     Binary_Output_Set_Object_Name(index, &bacnet_string, uuid);
   } else if (!strcasecmp(prop_name, "pv")) {
-    BACNET_BINARY_PV pv;
-    int i_val = atoi(value);
-    pv = (i_val == 0) ? 0 : 1;
+    pv = (!strcasecmp(value, "null")) ? 255 : (i_val == 0) ? 0 : 1;
     Binary_Output_Present_Value_Set(index, pv, BACNET_MAX_PRIORITY, uuid);
+  } else if (!strcasecmp(prop_name, "pri")) {
+    int pri_idx = atoi(topic_tokens[5]);
+    int all_items = false;
+
+    if (mqtt_debug) {
+      printf("- pri_idx: [%d]\n", pri_idx);
+    }
+
+    if ((pri_idx < 1) || (pri_idx > BACNET_MAX_PRIORITY)) {
+      if (mqtt_debug) {
+        printf("MQTT Invalid Priority Array index for Binary Output (BO): [%d]\n", pri_idx);
+      }
+      return(1);
+    }
+
+    if (strlen(topic_tokens[6]) > 0) {
+      if (strcasecmp(topic_tokens[6], "all")) {
+        if (mqtt_debug) {
+          printf("MQTT Invalid Priority Array value attribute for Binary Output (BO): [%s]\n", topic_tokens[6]);
+        }
+
+        return(1);
+      }
+
+      all_items = true;
+    }
+
+    pv = (!strcasecmp(value, "null")) ? 255 : (i_val == 0) ? 0 : 1;
+    if (all_items) {
+      for (int i = 1; i <= pri_idx; i++) {
+        if (i != pri_idx) {
+          Binary_Output_Priority_Array_Set2(index, pv, i);
+        } else {
+          Binary_Output_Priority_Array_Set(index, pv, i, uuid);
+        }
+      }
+    } else {
+      Binary_Output_Priority_Array_Set(index, pv, pri_idx, uuid);
+    }
   } else {
     if (mqtt_debug) {
       printf("MQTT Invalid Property for Binary Output (BO): [%s]\n", prop_name);
@@ -268,17 +399,56 @@ int process_bo_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
  */
 int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid)
 {
+  BACNET_BINARY_PV pv;
   BACNET_CHARACTER_STRING bacnet_string;
   char *prop_name = topic_tokens[4];
+  int i_val = atoi(value);
 
   if (!strcasecmp(prop_name, "name")) {
     characterstring_init_ansi(&bacnet_string, value);
     Binary_Value_Set_Object_Name(index, &bacnet_string, uuid);
   } else if (!strcasecmp(prop_name, "pv")) {
-    BACNET_BINARY_PV pv;
-    int i_val = atoi(value);
-    pv = (i_val == 0) ? 0 : 1;
+    pv = (!strcasecmp(value, "null")) ? 255 : (i_val == 0) ? 0 : 1;
     Binary_Value_Present_Value_Set(index, pv, BACNET_MAX_PRIORITY, uuid);
+  } else if (!strcasecmp(prop_name, "pri")) {
+    int pri_idx = atoi(topic_tokens[5]);
+    int all_items = false;
+
+    if (mqtt_debug) {
+      printf("- pri_idx: [%d]\n", pri_idx);
+    }
+
+    if ((pri_idx < 1) || (pri_idx > BACNET_MAX_PRIORITY)) {
+      if (mqtt_debug) {
+        printf("MQTT Invalid Priority Array index for Binary Value (BV): [%d]\n", pri_idx);
+      }
+      return(1);
+    }
+
+    if (strlen(topic_tokens[6]) > 0) {
+      if (strcasecmp(topic_tokens[6], "all")) {
+        if (mqtt_debug) {
+          printf("MQTT Invalid Priority Array value attribute for Binary Value (BV): [%s]\n", topic_tokens[6]);
+        }
+
+        return(1);
+      }
+
+      all_items = true;
+    }
+
+    pv = (!strcasecmp(value, "null")) ? 255 : (i_val == 0) ? 0 : 1;
+    if (all_items) {
+      for (int i = 1; i <= pri_idx; i++) {
+        if (i != pri_idx) {
+          Binary_Value_Priority_Array_Set2(index, pv, i);
+        } else {
+          Binary_Value_Priority_Array_Set(index, pv, i, uuid);
+        }
+      }
+    } else {
+      Binary_Value_Priority_Array_Set(index, pv, pri_idx, uuid);
+    }
   } else {
     if (mqtt_debug) {
       printf("MQTT Invalid Property for Binary Value (BV): [%s]\n", prop_name);
@@ -316,6 +486,7 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_messa
      printf("- value  : [%s]\n", topic_value);
   }
 
+  memset(topic_tokens, 0, sizeof(topic_tokens));
   n_topic_tokens = tokenize_topic(topic, topic_tokens);
   if (n_topic_tokens == 0) {
     goto EXIT;

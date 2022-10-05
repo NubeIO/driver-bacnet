@@ -530,11 +530,53 @@ bool Binary_Value_Present_Value_Set(
         status = true;
 #if defined(MQTT)
         if (yaml_config_mqtt_enable()) {
-            mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRESENT_VALUE,
-                MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
+            if (value == BINARY_NULL) {
+                mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRESENT_VALUE,
+                    MQTT_TOPIC_VALUE_STRING, "null", uuid);
+            } else {
+                mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRESENT_VALUE,
+                    MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
+            }
             publish_bv_priority_array(object_instance, uuid);
         }
 #endif /* defined(MQTT) */
+    }
+
+    return status;
+}
+
+
+bool Binary_Value_Priority_Array_Set(
+    uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid)
+{
+    unsigned index = 0;
+    bool status = false;
+
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index < Binary_Value_Instances) {
+        Binary_Value_Level[index][priority - 1] = value;
+        status = true;
+#if defined(MQTT)
+        if (yaml_config_mqtt_enable()) {
+            publish_bv_priority_array(object_instance, uuid);
+        }
+#endif /* defined(MQTT) */
+    }
+
+    return status;
+}
+
+
+bool Binary_Value_Priority_Array_Set2(
+    uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority)
+{
+    unsigned index = 0;
+    bool status = false;
+
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index < Binary_Value_Instances) {
+        Binary_Value_Level[index][priority - 1] = value;
+        status = true;
     }
 
     return status;
@@ -682,13 +724,9 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             if (status) {
                 if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
                     if (value.type.Enumerated <= MAX_BINARY_PV) {
-                        object_index = Binary_Value_Instance_To_Index(
-                            wp_data->object_instance);
                         level = (BACNET_BINARY_PV)value.type.Enumerated;
-                        Binary_Value_Level[object_index][wp_data->array_index - 1] = level;
-#if defined(MQTT)
-                        publish_bv_priority_array(wp_data->object_instance, NULL);
-#endif /* defined(MQTT) */
+                        Binary_Value_Priority_Array_Set(wp_data->object_instance, level,
+                            wp_data->array_index, NULL);
                     } else {
                         status = false;
                         wp_data->error_class = ERROR_CLASS_PROPERTY;
