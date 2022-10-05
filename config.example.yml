@@ -17,3 +17,18 @@ mqtt:
   broker_ip: 127.0.0.1
   broker_port: 1883
   debug: false
+  enable: true
+  write_via_subscribe: true
+
+objects:
+  - ai
+  - ao
+  - av
+  - bi
+  - bo
+  - bv
+
+properties:
+  - name
+  - pv
+  - pri

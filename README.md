@@ -18,6 +18,65 @@ For example:
 g=/data/bacnet-server-c s=config.yml ./app 
 ```
 
+Updating BACnet Object Property Values Via MQTT
+--
+The values of the following object properties can be updated via MQTT publish command:
+1. Object Name (name) - applies to analog input (ai), analog output (ao), analog value (av), binary input (bi), binary output (bo) and binary value (bv) objects
+2. Present Value (pv) - applies to analog input (ai), analog output (ao), analog value (av), binary input (bi), binary output (bo) and binary value (bv) objects
+3. Priority Array (pri) - applies to analog output (ao), analog value (av), binary output (bo) and binary value (bv) objects
+
+The value of the publish message must be in JSON using the following format:
+``
+{"value" : "value here", "uuid" : "uuid here"}
+``
+
+Object Name topic format:
+```
+bacnet/object/address/write/name
+```
+
+Write ao_name1 into analog object (ao) name at instance (address) 1
+```
+topic: bacnet/ao/1/write/name
+json payload: {"value" : "ao_name1", "uuid" : "123456"}
+```
+
+Present Value topic format:
+```
+bacnet/object/address/write/pv
+```
+
+Write 10.50 to into analog object (ao) present value at instance (address) 1
+```
+topic: bacnet/ao/1/write/pv
+json payload: {"value" : "10.50", "uuid" : "123456"}
+```
+
+Priority Array topic formats:
+```
+bacnet/object/address/write/pri/priority_index
+bacnet/object/address/write/pri/priority_index/all
+```
+
+Write 50.20 into analog object (ao) at instance (address) 1 at priority index 10
+```
+topic: bacnet/ao/1/write/pri/10
+json payload: {"value" : "10.50", "uuid" : "123456"}
+```
+
+Write 99.99 into analog object (ao) at instance (address) 1 to all priority slots
+```
+topic: bacnet/ao/1/write/pri/16/all
+json payload: {"value" : "99.99", "uuid" : "123456"}
+```
+
+Reset all priority slots of analog object (ao) at instance (address) 1 
+```
+topic: bacnet/ao/1/write/pri/16/all
+json payload: {"value" : "null", "uuid" : "123456"}
+```
+
+
 MQTT Library
 --
 The MQTT C libary is the Eclipse Paho C Client Library for MQTT protocol. The source can be downloaded from https://github.com/eclipse/paho.mqtt.c. Please follow the install instructions to install the library.
