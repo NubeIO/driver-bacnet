@@ -71,6 +71,17 @@ extern "C" {
         unsigned priority,
         char *uuid);
     BACNET_STACK_EXPORT
+    bool Analog_Output_Priority_Array_Set(
+        uint32_t object_instance,
+        float value,
+        unsigned priority,
+        char *uuid);
+    BACNET_STACK_EXPORT
+    bool Analog_Output_Priority_Array_Set2(
+        uint32_t object_instance,
+        float value,
+        unsigned priority);
+    BACNET_STACK_EXPORT
     bool Analog_Output_Present_Value_Relinquish(
         uint32_t object_instance,
         unsigned priority);

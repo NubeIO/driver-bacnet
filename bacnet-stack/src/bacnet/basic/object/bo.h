@@ -105,6 +105,17 @@ extern "C" {
         unsigned priority,
         char *uuid);
     BACNET_STACK_EXPORT
+    bool Binary_Output_Priority_Array_Set(
+        uint32_t object_instance,
+        BACNET_BINARY_PV value,
+        unsigned int priority,
+        char *uuid);
+    BACNET_STACK_EXPORT
+    bool Binary_Output_Priority_Array_Set2(
+        uint32_t object_instance,
+        BACNET_BINARY_PV value,
+        unsigned int priority);
+    BACNET_STACK_EXPORT
     bool Binary_Output_Present_Value_Relinquish(
         uint32_t instance,
         unsigned priority);

@@ -126,6 +126,17 @@ extern "C" {
         uint8_t priority,
         char *uuid);
     BACNET_STACK_EXPORT
+    bool Analog_Value_Priority_Array_Set(
+        uint32_t object_instance,
+        float value,
+        uint8_t priority,
+        char *uuid);
+    BACNET_STACK_EXPORT
+    bool Analog_Value_Priority_Array_Set2(
+        uint32_t object_instance,
+        float value,
+        uint8_t priority);
+    BACNET_STACK_EXPORT
     float Analog_Value_Present_Value(
         uint32_t object_instance);
 

@@ -289,12 +289,55 @@ bool Analog_Value_Present_Value_Set(
             status = true;
 #if defined(MQTT)
             if (yaml_config_mqtt_enable()) {
-                
-                mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE,
-                    MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
+                if (value == AV_LEVEL_NULL) {
+                    mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE,
+                        MQTT_TOPIC_VALUE_STRING, "null", uuid);
+                } else {
+                    mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE,
+                        MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
+                }
                 publish_av_priority_array(object_instance, uuid);
             }
 #endif /* defined(MQTT) */
+        }
+    }
+
+    return status;
+}
+
+bool Analog_Value_Priority_Array_Set(
+    uint32_t object_instance, float value, uint8_t priority, char *uuid)
+{
+    unsigned index = 0;
+    bool status = false;
+
+    index = Analog_Value_Instance_To_Index(object_instance);
+    if (index < Analog_Value_Instances) {
+        if (priority && (priority <= BACNET_MAX_PRIORITY)) {
+            AV_Descr[index].Present_Value_Level[priority - 1] = value;
+            status = true;
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                publish_av_priority_array(object_instance, uuid);
+            }
+#endif /* defined(MQTT) */
+        }
+    }
+
+    return status;
+}
+
+bool Analog_Value_Priority_Array_Set2(
+    uint32_t object_instance, float value, uint8_t priority)
+{
+    unsigned index = 0;
+    bool status = false;
+
+    index = Analog_Value_Instance_To_Index(object_instance);
+    if (index < Analog_Value_Instances) {
+        if (priority && (priority <= BACNET_MAX_PRIORITY)) {
+            AV_Descr[index].Present_Value_Level[priority - 1] = value;
+            status = true;
         }
     }
 
@@ -1124,14 +1167,9 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
                     float f_value;
                     f_value = value.type.Real;
-                    object_index = Analog_Value_Instance_To_Index(
-                        wp_data->object_instance);
-                    AV_Descr[object_index].Present_Value_Level[wp_data->array_index - 1] = f_value;
-#if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
-                        publish_av_priority_array(wp_data->object_instance, NULL);
-                    }
-#endif /* defined(MQTT) */
+
+                    Analog_Value_Priority_Array_Set(wp_data->object_instance, f_value,
+                        wp_data->array_index, NULL);
                 } else {
                     status = false;
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
