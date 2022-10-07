@@ -996,9 +996,16 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
                 }
             } else {
-                status = false;
-                wp_data->error_class = ERROR_CLASS_PROPERTY;
-                wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                status = write_property_type_valid(wp_data, &value,
+                    BACNET_APPLICATION_TAG_NULL);
+                if (status) {
+                    status = Analog_Value_Present_Value_Set(wp_data->object_instance,
+                        AV_LEVEL_NULL, wp_data->priority, NULL);
+                    if (!status) {
+                        wp_data->error_class = ERROR_CLASS_PROPERTY;
+                        wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                    }
+                }
             }
             break;
 

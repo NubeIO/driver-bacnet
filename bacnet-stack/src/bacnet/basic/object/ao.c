@@ -328,6 +328,14 @@ bool Analog_Output_Present_Value_Relinquish(
                physical output.  This comment may apply to the
                main loop (i.e. check out of service before changing output) */
             status = true;
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable()) {
+                mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRESENT_VALUE,
+                    MQTT_TOPIC_VALUE_STRING, "null", NULL);
+
+                publish_ao_priority_array(object_instance, NULL);
+            }
+#endif /* defined(MQTT) */
         }
     }
 
