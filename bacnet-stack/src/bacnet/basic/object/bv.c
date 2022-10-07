@@ -685,7 +685,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                            main loop (i.e. check out of service before changing
                            output) */
                         Binary_Value_Present_Value_Set(wp_data->object_instance,
-                            (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL);
+                            level, wp_data->priority, NULL);
                     } else {
                         status = false;
                         wp_data->error_class = ERROR_CLASS_PROPERTY;

@@ -26,16 +26,16 @@ The values of the following object properties can be updated via MQTT publish co
 3. Priority Array (pri) - applies to analog output (ao), analog value (av), binary output (bo) and binary value (bv) objects
 
 The value of the publish message must be in JSON using the following format:
-``
+```
 {"value" : "value here", "uuid" : "uuid here"}
-``
+```
 
 Object Name topic format:
 ```
 bacnet/object/address/write/name
 ```
 
-Write ao_name1 into analog object (ao) name at instance (address) 1
+Write "ao_name1" into analog object (ao) name at instance (address) 1
 ```
 topic: bacnet/ao/1/write/name
 json payload: {"value" : "ao_name1", "uuid" : "123456"}
@@ -68,6 +68,12 @@ Write 99.99 into analog object (ao) at instance (address) 1 to all priority slot
 ```
 topic: bacnet/ao/1/write/pri/16/all
 json payload: {"value" : "99.99", "uuid" : "123456"}
+```
+
+Reset priority slots #10 of analog object (ao) at instance (address) 1. Reset applies only to analog ouput, analog value, binary output and binary value objects.
+```
+topic: bacnet/ao/1/write/pri/10
+json payload: {"value" : "null", "uuid" : "123456"}
 ```
 
 Reset all priority slots of analog object (ao) at instance (address) 1 
