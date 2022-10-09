@@ -135,7 +135,7 @@ void Analog_Output_Init(void)
             Out_Of_Service = malloc(Analog_Output_Instances * sizeof(bool));
             Analog_Output_Instance_Names = malloc(Analog_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Analog_Output_Instances; i++) {
-                sprintf(buf, "AO_%d_SPARE", i);
+                sprintf(buf, "AO_%d_SPARE", i + 1);
                 characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
             }
 
@@ -154,7 +154,7 @@ void Analog_Output_Init(void)
 /* given instance exists */
 bool Analog_Output_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance < Analog_Output_Instances) {
+    if (object_instance > 0 && object_instance <= Analog_Output_Instances) {
         return true;
     }
 
@@ -183,7 +183,7 @@ unsigned Analog_Output_Instance_To_Index(uint32_t object_instance)
 {
     unsigned index = Analog_Output_Instances;
 
-    if (object_instance < Analog_Output_Instances) {
+    if (object_instance > 0 && object_instance <= Analog_Output_Instances) {
         index = object_instance;
     }
 
@@ -197,11 +197,11 @@ float Analog_Output_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
-        value = Analog_Output_Relinquish_Defaults[index];
+    if (index > 0 && index <= Analog_Output_Instances) {
+        value = Analog_Output_Relinquish_Defaults[index - 1];
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
-            if (Analog_Output_Level[index][i] != AO_LEVEL_NULL) {
-                value = Analog_Output_Level[index][i];
+            if (Analog_Output_Level[index - 1][i] != AO_LEVEL_NULL) {
+                value = Analog_Output_Level[index - 1][i];
                 break;
             }
         }
@@ -217,9 +217,9 @@ unsigned Analog_Output_Present_Value_Priority(uint32_t object_instance)
     unsigned priority = 0; /* return value */
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
+    if (index > 0 && index <= Analog_Output_Instances) {
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
-            if (Analog_Output_Level[index][i] != AO_LEVEL_NULL) {
+            if (Analog_Output_Level[index - 1][i] != AO_LEVEL_NULL) {
                 priority = i + 1;
                 break;
             }
@@ -236,10 +236,10 @@ bool Analog_Output_Present_Value_Set(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
+    if (index > 0 && index <= Analog_Output_Instances) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
-            Analog_Output_Level[index][priority - 1] = value;
+            Analog_Output_Level[index - 1][priority - 1] = value;
             /* Note: you could set the physical output here to the next
                highest priority, or to the relinquish default if no
                priorities are set.
@@ -274,10 +274,10 @@ bool Analog_Output_Priority_Array_Set(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
+    if (index > 0 && index <= Analog_Output_Instances) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
-            Analog_Output_Level[index][priority - 1] = value;
+            Analog_Output_Level[index - 1][priority - 1] = value;
             status = true;
 #if defined(MQTT)
             if (yaml_config_mqtt_enable()) {
@@ -298,10 +298,10 @@ bool Analog_Output_Priority_Array_Set2(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
+    if (index > 0 && index <= Analog_Output_Instances) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
-            Analog_Output_Level[index][priority - 1] = value;
+            Analog_Output_Level[index - 1][priority - 1] = value;
             status = true;
         }
     }
@@ -317,10 +317,10 @@ bool Analog_Output_Present_Value_Relinquish(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
+    if (index > 0 && index <= Analog_Output_Instances) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
-            Analog_Output_Level[index][priority - 1] = AO_LEVEL_NULL;
+            Analog_Output_Level[index - 1][priority - 1] = AO_LEVEL_NULL;
             /* Note: you could set the physical output here to the next
                highest priority, or to the relinquish default if no
                priorities are set.
@@ -350,8 +350,8 @@ bool Analog_Output_Object_Name(
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
-        status = characterstring_copy(object_name, &Analog_Output_Instance_Names[index]);
+    if (index > 0 && index <= Analog_Output_Instances) {
+        status = characterstring_copy(object_name, &Analog_Output_Instance_Names[index - 1]);
     }
 
     return status;
@@ -364,9 +364,9 @@ bool Analog_Output_Set_Object_Name(
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
-        if (!characterstring_same(&Analog_Output_Instance_Names[index], object_name)) {
-            status = characterstring_copy(&Analog_Output_Instance_Names[index], object_name);
+    if (index > 0 && index <= Analog_Output_Instances) {
+        if (!characterstring_same(&Analog_Output_Instance_Names[index - 1], object_name)) {
+            status = characterstring_copy(&Analog_Output_Instance_Names[index - 1], object_name);
 #if defined(MQTT)
             if (yaml_config_mqtt_enable()) {
                 mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_OBJECT_NAME,
@@ -385,8 +385,8 @@ bool Analog_Output_Out_Of_Service(uint32_t instance)
     bool oos_flag = false;
 
     index = Analog_Output_Instance_To_Index(instance);
-    if (index < Analog_Output_Instances) {
-        oos_flag = Out_Of_Service[index];
+    if (index > 0 && index <= Analog_Output_Instances) {
+        oos_flag = Out_Of_Service[index - 1];
     }
 
     return oos_flag;
@@ -397,8 +397,8 @@ void Analog_Output_Out_Of_Service_Set(uint32_t instance, bool oos_flag)
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(instance);
-    if (index < Analog_Output_Instances) {
-        Out_Of_Service[index] = oos_flag;
+    if (index > 0 && index <= Analog_Output_Instances) {
+        Out_Of_Service[index - 1] = oos_flag;
     }
 }
 
@@ -408,8 +408,8 @@ float Analog_Output_Relinquish_Default(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
-        value = Analog_Output_Relinquish_Defaults[index];
+    if (index > 0 && index <= Analog_Output_Instances) {
+        value = Analog_Output_Relinquish_Defaults[index - 1];
     }
 
     return value;
@@ -484,11 +484,11 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                     Analog_Output_Instance_To_Index(rpdata->object_instance);
                 for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
                     /* FIXME: check if we have room before adding it to APDU */
-                    if (Analog_Output_Level[object_index][i] == AO_LEVEL_NULL) {
+                    if (Analog_Output_Level[object_index - 1][i] == AO_LEVEL_NULL) {
                         len = encode_application_null(&apdu[apdu_len]);
                     } else {
                         real_value =
-                            Analog_Output_Level[object_index][i];
+                            Analog_Output_Level[object_index - 1][i];
                         len = encode_application_real(
                             &apdu[apdu_len], real_value);
                     }
@@ -506,12 +506,12 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                 object_index =
                     Analog_Output_Instance_To_Index(rpdata->object_instance);
                 if (rpdata->array_index <= BACNET_MAX_PRIORITY) {
-                    if (Analog_Output_Level[object_index][rpdata->array_index -
+                    if (Analog_Output_Level[object_index - 1][rpdata->array_index -
                             1] == AO_LEVEL_NULL) {
                         apdu_len = encode_application_null(&apdu[0]);
                     } else {
                         real_value =
-                            Analog_Output_Level[object_index]
+                            Analog_Output_Level[object_index - 1]
                                                [rpdata->array_index - 1];
                         apdu_len =
                             encode_application_real(&apdu[0], real_value);
@@ -556,10 +556,10 @@ void publish_ao_priority_array(uint32_t object_instance, char *uuid)
 
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index < Analog_Output_Instances) {
+    if (index > 0 && index <= Analog_Output_Instances) {
         strcpy(buf, "{");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
-            value = Analog_Output_Level[index][i];
+            value = Analog_Output_Level[index - 1][i];
             if (value == AO_LEVEL_NULL) {
                 sprintf(&buf[strlen(buf)], "%sNull", first);
             } else {
@@ -685,7 +685,7 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 f_value = value.type.Real;
                 object_index = Analog_Output_Instance_To_Index(
                     wp_data->object_instance);
-                Analog_Output_Relinquish_Defaults[object_index] = f_value;
+                Analog_Output_Relinquish_Defaults[object_index - 1] = f_value;
 #if defined(MQTT)
                 if (yaml_config_mqtt_enable()) {
                     mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,

@@ -131,7 +131,7 @@ void Binary_Output_Init(void)
             Out_Of_Service = malloc(Binary_Output_Instances * sizeof(bool));
             Binary_Output_Instance_Names = malloc(Binary_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Output_Instances; i++) {
-                sprintf(buf, "BO_%d_SPARE", i);
+                sprintf(buf, "BO_%d_SPARE", i + 1);
                 characterstring_init_ansi(&Binary_Output_Instance_Names[i], buf);
             }
 
@@ -150,7 +150,7 @@ void Binary_Output_Init(void)
 /* given instance exists */
 bool Binary_Output_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance < Binary_Output_Instances) {
+    if (object_instance > 0 && object_instance <= Binary_Output_Instances) {
         return true;
     }
 
@@ -179,7 +179,7 @@ unsigned Binary_Output_Instance_To_Index(uint32_t object_instance)
 {
     unsigned index = Binary_Output_Instances;
 
-    if (object_instance < Binary_Output_Instances) {
+    if (object_instance > 0 && object_instance <= Binary_Output_Instances) {
         index = object_instance;
     }
 
@@ -193,11 +193,11 @@ BACNET_BINARY_PV Binary_Output_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        value = Binary_Output_Relinquish_Defaults[index];
+    if (index > 0 && index <= Binary_Output_Instances) {
+        value = Binary_Output_Relinquish_Defaults[index - 1];
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
-            if (Binary_Output_Level[index][i] != BINARY_NULL) {
-                value = Binary_Output_Level[index][i];
+            if (Binary_Output_Level[index - 1][i] != BINARY_NULL) {
+                value = Binary_Output_Level[index - 1][i];
                 break;
             }
         }
@@ -212,8 +212,8 @@ bool Binary_Output_Out_Of_Service(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        value = Out_Of_Service[index];
+    if (index > 0 && index <= Binary_Output_Instances) {
+        value = Out_Of_Service[index - 1];
     }
 
     return value;
@@ -227,8 +227,8 @@ bool Binary_Output_Object_Name(
     unsigned index = 0;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        status = characterstring_copy(object_name, &Binary_Output_Instance_Names[index]);
+    if (index > 0 && index <= Binary_Output_Instances) {
+        status = characterstring_copy(object_name, &Binary_Output_Instance_Names[index - 1]);
     }
 
     return status;
@@ -241,9 +241,9 @@ bool Binary_Output_Set_Object_Name(
     unsigned index = 0;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        if (!characterstring_same(&Binary_Output_Instance_Names[index], object_name)) {
-            status = characterstring_copy(&Binary_Output_Instance_Names[index], object_name);
+    if (index > 0 && index <= Binary_Output_Instances) {
+        if (!characterstring_same(&Binary_Output_Instance_Names[index - 1], object_name)) {
+            status = characterstring_copy(&Binary_Output_Instance_Names[index - 1], object_name);
 #if defined(MQTT)
             if (yaml_config_mqtt_enable()) {
                 mqtt_publish_topic(OBJECT_BINARY_OUTPUT, object_instance, PROP_OBJECT_NAME,
@@ -262,8 +262,8 @@ BACNET_BINARY_PV Binary_Output_Relinquish_Default(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        value = Binary_Output_Relinquish_Defaults[index];
+    if (index > 0 && index <= Binary_Output_Instances) {
+        value = Binary_Output_Relinquish_Defaults[index - 1];
     }
 
     return value;
@@ -327,7 +327,7 @@ int Binary_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
         case PROP_OUT_OF_SERVICE:
             object_index =
                 Binary_Output_Instance_To_Index(rpdata->object_instance);
-            state = Out_Of_Service[object_index];
+            state = Out_Of_Service[object_index - 1];
             apdu_len = encode_application_boolean(&apdu[0], state);
             break;
         case PROP_POLARITY:
@@ -346,10 +346,10 @@ int Binary_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                     Binary_Output_Instance_To_Index(rpdata->object_instance);
                 for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
                     /* FIXME: check if we have room before adding it to APDU */
-                    if (Binary_Output_Level[object_index][i] == BINARY_NULL) {
+                    if (Binary_Output_Level[object_index - 1][i] == BINARY_NULL) {
                         len = encode_application_null(&apdu[apdu_len]);
                     } else {
-                        present_value = Binary_Output_Level[object_index][i];
+                        present_value = Binary_Output_Level[object_index - 1][i];
                         len = encode_application_enumerated(
                             &apdu[apdu_len], present_value);
                     }
@@ -367,12 +367,12 @@ int Binary_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                 object_index =
                     Binary_Output_Instance_To_Index(rpdata->object_instance);
                 if (rpdata->array_index <= BACNET_MAX_PRIORITY) {
-                    if (Binary_Output_Level[object_index][rpdata->array_index -
+                    if (Binary_Output_Level[object_index - 1][rpdata->array_index -
                             1] == BINARY_NULL) {
                         apdu_len = encode_application_null(&apdu[apdu_len]);
                     } else {
                         present_value =
-                            Binary_Output_Level[object_index]
+                            Binary_Output_Level[object_index - 1]
                                                [rpdata->array_index - 1];
                         apdu_len = encode_application_enumerated(
                             &apdu[apdu_len], present_value);
@@ -428,10 +428,10 @@ void publish_priority_array(uint32_t object_instance, char *uuid)
     
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
+    if (index > 0 && index <= Binary_Output_Instances) {
         strcpy(buf, "{");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
-            value = Binary_Output_Level[index][i];
+            value = Binary_Output_Level[index - 1][i];
             if (value == BINARY_NULL) {
                 sprintf(&buf[strlen(buf)], "%sNull", first);
             } else {
@@ -456,8 +456,8 @@ bool Binary_Output_Present_Value_Set(
     bool status = false;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        Binary_Output_Level[index][priority - 1] = value;
+    if (index > 0 && index <= Binary_Output_Instances) {
+        Binary_Output_Level[index - 1][priority - 1] = value;
         status = true;
 #if defined(MQTT)
         if (yaml_config_mqtt_enable()) {
@@ -483,8 +483,8 @@ bool Binary_Output_Priority_Array_Set(
     bool status = false;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        Binary_Output_Level[index][priority - 1] = value;
+    if (index > 0 && index <= Binary_Output_Instances) {
+        Binary_Output_Level[index - 1][priority - 1] = value;
         status = true;
 #if defined(MQTT)
         if (yaml_config_mqtt_enable()) {
@@ -503,8 +503,8 @@ bool Binary_Output_Priority_Array_Set2(
     bool status = false;
 
     index = Binary_Output_Instance_To_Index(object_instance);
-    if (index < Binary_Output_Instances) {
-        Binary_Output_Level[index][priority - 1] = value;
+    if (index > 0 && index <= Binary_Output_Instances) {
+        Binary_Output_Level[index - 1][priority - 1] = value;
         status = true;
     }
 
@@ -610,7 +610,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             if (status) {
                 object_index =
                     Binary_Output_Instance_To_Index(wp_data->object_instance);
-                Out_Of_Service[object_index] = value.type.Boolean;
+                Out_Of_Service[object_index - 1] = value.type.Boolean;
             }
             break;
         case PROP_OBJECT_IDENTIFIER:
@@ -662,7 +662,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     level = (BACNET_BINARY_PV)value.type.Enumerated;
                     object_index = Binary_Output_Instance_To_Index(
                         wp_data->object_instance);
-                    Binary_Output_Relinquish_Defaults[object_index] = level;
+                    Binary_Output_Relinquish_Defaults[object_index - 1] = level;
 #if defined(MQTT)
                     if (yaml_config_mqtt_enable()) {
                         mqtt_publish_topic(OBJECT_BINARY_OUTPUT, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
