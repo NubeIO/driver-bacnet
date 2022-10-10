@@ -97,7 +97,7 @@ void Binary_Input_Property_Lists(
 /* given instance exists */
 bool Binary_Input_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance < Binary_Input_Instances) {
+    if (object_instance > 0 && object_instance <= Binary_Input_Instances) {
         return true;
     }
 
@@ -150,7 +150,7 @@ void Binary_Input_Init(void)
 
             Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Input_Instances; i++) {
-                sprintf(buf, "BI_%d_SPARE", i);
+                sprintf(buf, "BI_%d_SPARE", i + 1);
                 characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
             }
         }
@@ -171,7 +171,7 @@ unsigned Binary_Input_Instance_To_Index(uint32_t object_instance)
 {
     unsigned index = Binary_Input_Instances;
 
-    if (object_instance < Binary_Input_Instances) {
+    if (object_instance > 0 && object_instance <= Binary_Input_Instances) {
         index = object_instance;
     }
 
@@ -184,9 +184,9 @@ BACNET_BINARY_PV Binary_Input_Present_Value(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        value = Present_Value[index];
-        if (Polarity[index] != POLARITY_NORMAL) {
+    if (index > 0 && index <= Binary_Input_Instances) {
+        value = Present_Value[index - 1];
+        if (Polarity[index - 1] != POLARITY_NORMAL) {
             if (value == BINARY_INACTIVE) {
                 value = BINARY_ACTIVE;
             } else {
@@ -204,8 +204,8 @@ bool Binary_Input_Out_Of_Service(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        value = Out_Of_Service[index];
+    if (index > 0 && index <= Binary_Input_Instances) {
+        value = Out_Of_Service[index - 1];
     }
 
     return value;
@@ -217,8 +217,8 @@ bool Binary_Input_Change_Of_Value(uint32_t object_instance)
     unsigned index;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        status = Change_Of_Value[index];
+    if (index > 0 && index <= Binary_Input_Instances) {
+        status = Change_Of_Value[index - 1];
     }
 
     return status;
@@ -229,8 +229,8 @@ void Binary_Input_Change_Of_Value_Clear(uint32_t object_instance)
     unsigned index;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        Change_Of_Value[index] = false;
+    if (index > 0 && index <= Binary_Input_Instances) {
+        Change_Of_Value[index - 1] = false;
     }
 
     return;
@@ -295,18 +295,18 @@ bool Binary_Input_Present_Value_Set(
     bool status = false;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        if (Polarity[index] != POLARITY_NORMAL) {
+    if (index > 0 && index <= Binary_Input_Instances) {
+        if (Polarity[index - 1] != POLARITY_NORMAL) {
             if (value == BINARY_INACTIVE) {
                 value = BINARY_ACTIVE;
             } else {
                 value = BINARY_INACTIVE;
             }
         }
-        if (Present_Value[index] != value) {
-            Change_Of_Value[index] = true;
+        if (Present_Value[index - 1] != value) {
+            Change_Of_Value[index - 1] = true;
         }
-        Present_Value[index] = value;
+        Present_Value[index - 1] = value;
         status = true;
 #if defined(MQTT)
         if (yaml_config_mqtt_enable()) {
@@ -324,11 +324,11 @@ void Binary_Input_Out_Of_Service_Set(uint32_t object_instance, bool value)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        if (Out_Of_Service[index] != value) {
-            Change_Of_Value[index] = true;
+    if (index > 0 && index <= Binary_Input_Instances) {
+        if (Out_Of_Service[index - 1] != value) {
+            Change_Of_Value[index - 1] = true;
         }
-        Out_Of_Service[index] = value;
+        Out_Of_Service[index - 1] = value;
     }
 
     return;
@@ -341,8 +341,8 @@ bool Binary_Input_Object_Name(
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        status = characterstring_copy(object_name, &Binary_Input_Instance_Names[index]);
+    if (index > 0 && index <= Binary_Input_Instances) {
+        status = characterstring_copy(object_name, &Binary_Input_Instance_Names[index - 1]);
     }
 
     return status;
@@ -355,9 +355,9 @@ bool Binary_Input_Set_Object_Name(
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        if (!characterstring_same(&Binary_Input_Instance_Names[index], object_name)) {
-            status = characterstring_copy(&Binary_Input_Instance_Names[index], object_name);
+    if (index > 0 && index <= Binary_Input_Instances) {
+        if (!characterstring_same(&Binary_Input_Instance_Names[index - 1], object_name)) {
+            status = characterstring_copy(&Binary_Input_Instance_Names[index - 1], object_name);
 #if defined(MQTT)
             if (yaml_config_mqtt_enable()) {
                 mqtt_publish_topic(OBJECT_BINARY_INPUT, object_instance, PROP_OBJECT_NAME,
@@ -376,8 +376,8 @@ BACNET_POLARITY Binary_Input_Polarity(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        polarity = Polarity[index];
+    if (index > 0 && index <= Binary_Input_Instances) {
+        polarity = Polarity[index - 1];
     }
 
     return polarity;
@@ -390,8 +390,8 @@ bool Binary_Input_Polarity_Set(
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index < Binary_Input_Instances) {
-        Polarity[index] = polarity;
+    if (index > 0 && index <= Binary_Input_Instances) {
+        Polarity[index - 1] = polarity;
     }
 
     return status;

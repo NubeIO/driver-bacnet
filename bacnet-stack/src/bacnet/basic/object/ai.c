@@ -153,7 +153,7 @@ void Analog_Input_Init(void)
             OBJECT_ANALOG_INPUT, Analog_Input_Alarm_Summary);
 #endif
 
-       sprintf(buf, "AI_%d_SPARE", i);
+       sprintf(buf, "AI_%d_SPARE", i + 1);
        characterstring_init_ansi(&Analog_Input_Instance_Names[i], buf);
     }
 }
@@ -166,7 +166,7 @@ bool Analog_Input_Valid_Instance(uint32_t object_instance)
     unsigned int index;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
+    if (index > 0 && index <= Analog_Input_Instances) {
         return true;
     }
 
@@ -193,9 +193,9 @@ uint32_t Analog_Input_Index_To_Instance(unsigned index)
 /* that correlates to the correct instance number */
 unsigned Analog_Input_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = Analog_Input_Instances;
+    unsigned index = 0;
 
-    if (object_instance < Analog_Input_Instances) {
+    if (object_instance > 0 && object_instance <= Analog_Input_Instances) {
         index = object_instance;
     }
 
@@ -208,8 +208,8 @@ float Analog_Input_Present_Value(uint32_t object_instance)
     unsigned int index;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        value = AI_Descr[index].Present_Value;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        value = AI_Descr[index - 1].Present_Value;
     }
 
     return value;
@@ -221,17 +221,17 @@ static void Analog_Input_COV_Detect(unsigned int index, float value)
     float cov_increment = 0.0;
     float cov_delta = 0.0;
 
-    if (index < Analog_Input_Instances) {
-        prior_value = AI_Descr[index].Prior_Value;
-        cov_increment = AI_Descr[index].COV_Increment;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        prior_value = AI_Descr[index - 1].Prior_Value;
+        cov_increment = AI_Descr[index - 1].COV_Increment;
         if (prior_value > value) {
             cov_delta = prior_value - value;
         } else {
             cov_delta = value - prior_value;
         }
         if (cov_delta >= cov_increment) {
-            AI_Descr[index].Changed = true;
-            AI_Descr[index].Prior_Value = value;
+            AI_Descr[index - 1].Changed = true;
+            AI_Descr[index - 1].Prior_Value = value;
         }
     }
 }
@@ -241,9 +241,9 @@ void Analog_Input_Present_Value_Set(uint32_t object_instance, float value, char 
     unsigned int index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        Analog_Input_COV_Detect(index, value);
-        AI_Descr[index].Present_Value = value;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        Analog_Input_COV_Detect(index - 1, value);
+        AI_Descr[index - 1].Present_Value = value;
 
 #if defined(MQTT)
         if (yaml_config_mqtt_enable()) {
@@ -261,8 +261,8 @@ bool Analog_Input_Object_Name(
     bool status = false;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        status = characterstring_copy(object_name, &Analog_Input_Instance_Names[index]);
+    if (index > 0 && index <= Analog_Input_Instances) {
+        status = characterstring_copy(object_name, &Analog_Input_Instance_Names[index - 1]);
     }
 
     return status;
@@ -275,9 +275,9 @@ bool Analog_Input_Set_Object_Name(
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        if (!characterstring_same(&Analog_Input_Instance_Names[index], object_name)) {
-            status = characterstring_copy(&Analog_Input_Instance_Names[index], object_name);
+    if (index > 0 && index <= Analog_Input_Instances) {
+        if (!characterstring_same(&Analog_Input_Instance_Names[index - 1], object_name)) {
+            status = characterstring_copy(&Analog_Input_Instance_Names[index - 1], object_name);
 #if defined(MQTT)
             if (yaml_config_mqtt_enable()) {
                 mqtt_publish_topic(OBJECT_ANALOG_INPUT, object_instance, PROP_OBJECT_NAME,
@@ -304,8 +304,8 @@ unsigned Analog_Input_Event_State(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        state = AI_Descr[index].Event_State;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        state = AI_Descr[index - 1].Event_State;
     }
 #endif
 
@@ -318,8 +318,8 @@ bool Analog_Input_Change_Of_Value(uint32_t object_instance)
     bool changed = false;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        changed = AI_Descr[index].Changed;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        changed = AI_Descr[index - 1].Changed;
     }
 
     return changed;
@@ -330,8 +330,8 @@ void Analog_Input_Change_Of_Value_Clear(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        AI_Descr[index].Changed = false;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        AI_Descr[index - 1].Changed = false;
     }
 }
 
@@ -355,12 +355,12 @@ bool Analog_Input_Encode_Value_List(
     unsigned index = 0; /* offset from instance lookup */
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        if (AI_Descr[index].Event_State != EVENT_STATE_NORMAL) {
+    if (index > 0 && index <= Analog_Input_Instances) {
+        if (AI_Descr[index - 1].Event_State != EVENT_STATE_NORMAL) {
             in_alarm = true;
         }
-        out_of_service = AI_Descr[index].Out_Of_Service;
-        present_value = AI_Descr[index].Present_Value;
+        out_of_service = AI_Descr[index - 1].Out_Of_Service;
+        present_value = AI_Descr[index - 1].Present_Value;
         status = cov_value_list_encode_real(value_list, present_value,
             in_alarm, fault, overridden, out_of_service);
     }
@@ -374,8 +374,8 @@ float Analog_Input_COV_Increment(uint32_t object_instance)
     float value = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        value = AI_Descr[index].COV_Increment;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        value = AI_Descr[index - 1].COV_Increment;
     }
 
     return value;
@@ -386,9 +386,9 @@ void Analog_Input_COV_Increment_Set(uint32_t object_instance, float value)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        AI_Descr[index].COV_Increment = value;
-        Analog_Input_COV_Detect(index, AI_Descr[index].Present_Value);
+    if (index > 0 && index <= Analog_Input_Instances) {
+        AI_Descr[index - 1].COV_Increment = value;
+        Analog_Input_COV_Detect(index - 1, AI_Descr[index - 1].Present_Value);
     }
 }
 
@@ -398,8 +398,8 @@ bool Analog_Input_Out_Of_Service(uint32_t object_instance)
     bool value = false;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
-        value = AI_Descr[index].Out_Of_Service;
+    if (index > 0 && index <= Analog_Input_Instances) {
+        value = AI_Descr[index - 1].Out_Of_Service;
     }
 
     return value;
@@ -410,7 +410,7 @@ void Analog_Input_Out_Of_Service_Set(uint32_t object_instance, bool value)
     unsigned index = 0;
 
     index = Analog_Input_Instance_To_Index(object_instance);
-    if (index < Analog_Input_Instances) {
+    if (index > 0 && index <= Analog_Input_Instances) {
         /* 	BACnet Testing Observed Incident oi00104
                 The Changed flag was not being set when a client wrote to the
         Out-of-Service bit. Revealed by BACnet Test Client v1.8.16 (
@@ -419,10 +419,10 @@ void Analog_Input_Out_Of_Service_Set(uint32_t object_instance, bool value)
         Please feel free to remove this comment when my changes accepted after
         suitable time for review by all interested parties. Say 6 months ->
         September 2016 */
-        if (AI_Descr[index].Out_Of_Service != value) {
-            AI_Descr[index].Changed = true;
+        if (AI_Descr[index - 1].Out_Of_Service != value) {
+            AI_Descr[index - 1].Changed = true;
         }
-        AI_Descr[index].Out_Of_Service = value;
+        AI_Descr[index - 1].Out_Of_Service = value;
     }
 }
 
@@ -447,8 +447,8 @@ int Analog_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
     }
 
     object_index = Analog_Input_Instance_To_Index(rpdata->object_instance);
-    if (object_index < Analog_Input_Instances) {
-        CurrentAI = &AI_Descr[object_index];
+    if (object_index > 0 && object_index <= Analog_Input_Instances) {
+        CurrentAI = &AI_Descr[object_index - 1];
     } else {
         return BACNET_STATUS_ERROR;
     }
@@ -686,8 +686,8 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         return false;
     }
     object_index = Analog_Input_Instance_To_Index(wp_data->object_instance);
-    if (object_index < Analog_Input_Instances) {
-        CurrentAI = &AI_Descr[object_index];
+    if (object_index > 0 && object_index <= Analog_Input_Instances) {
+        CurrentAI = &AI_Descr[object_index - 1];
     } else {
         return false;
     }
@@ -871,8 +871,8 @@ void Analog_Input_Intrinsic_Reporting(uint32_t object_instance)
     bool SendNotify = false;
 
     object_index = Analog_Input_Instance_To_Index(object_instance);
-    if (object_index < Analog_Input_Instances) {
-        CurrentAI = &AI_Descr[object_index];
+    if (object_index > 0 && object_index <= Analog_Input_Instances) {
+        CurrentAI = &AI_Descr[object_index - 1];
     } else {
         return;
     }
@@ -1202,19 +1202,19 @@ int Analog_Input_Event_Information(
     int i;
 
     /* check index */
-    if (index < Analog_Input_Instances) {
+    if (index > 0 && index <= Analog_Input_Instances) {
         /* Event_State not equal to NORMAL */
-        IsActiveEvent = (AI_Descr[index].Event_State != EVENT_STATE_NORMAL);
+        IsActiveEvent = (AI_Descr[index - 1].Event_State != EVENT_STATE_NORMAL);
 
         /* Acked_Transitions property, which has at least one of the bits
            (TO-OFFNORMAL, TO-FAULT, TONORMAL) set to FALSE. */
         IsNotAckedTransitions =
-            (AI_Descr[index]
+            (AI_Descr[index - 1]
                     .Acked_Transitions[TRANSITION_TO_OFFNORMAL]
                     .bIsAcked == false) |
-            (AI_Descr[index].Acked_Transitions[TRANSITION_TO_FAULT].bIsAcked ==
+            (AI_Descr[index - 1].Acked_Transitions[TRANSITION_TO_FAULT].bIsAcked ==
                 false) |
-            (AI_Descr[index].Acked_Transitions[TRANSITION_TO_NORMAL].bIsAcked ==
+            (AI_Descr[index - 1].Acked_Transitions[TRANSITION_TO_NORMAL].bIsAcked ==
                 false);
     } else
         return -1; /* end of list  */
@@ -1223,44 +1223,44 @@ int Analog_Input_Event_Information(
         /* Object Identifier */
         getevent_data->objectIdentifier.type = OBJECT_ANALOG_INPUT;
         getevent_data->objectIdentifier.instance =
-            Analog_Input_Index_To_Instance(index);
+            Analog_Input_Index_To_Instance(index - 1);
         /* Event State */
-        getevent_data->eventState = AI_Descr[index].Event_State;
+        getevent_data->eventState = AI_Descr[index - 1].Event_State;
         /* Acknowledged Transitions */
         bitstring_init(&getevent_data->acknowledgedTransitions);
         bitstring_set_bit(&getevent_data->acknowledgedTransitions,
             TRANSITION_TO_OFFNORMAL,
-            AI_Descr[index]
+            AI_Descr[index - 1]
                 .Acked_Transitions[TRANSITION_TO_OFFNORMAL]
                 .bIsAcked);
         bitstring_set_bit(&getevent_data->acknowledgedTransitions,
             TRANSITION_TO_FAULT,
-            AI_Descr[index].Acked_Transitions[TRANSITION_TO_FAULT].bIsAcked);
+            AI_Descr[index - 1].Acked_Transitions[TRANSITION_TO_FAULT].bIsAcked);
         bitstring_set_bit(&getevent_data->acknowledgedTransitions,
             TRANSITION_TO_NORMAL,
-            AI_Descr[index].Acked_Transitions[TRANSITION_TO_NORMAL].bIsAcked);
+            AI_Descr[index - 1].Acked_Transitions[TRANSITION_TO_NORMAL].bIsAcked);
         /* Event Time Stamps */
         for (i = 0; i < 3; i++) {
             getevent_data->eventTimeStamps[i].tag = TIME_STAMP_DATETIME;
             getevent_data->eventTimeStamps[i].value.dateTime =
-                AI_Descr[index].Event_Time_Stamps[i];
+                AI_Descr[index - 1].Event_Time_Stamps[i];
         }
         /* Notify Type */
-        getevent_data->notifyType = AI_Descr[index].Notify_Type;
+        getevent_data->notifyType = AI_Descr[index - 1].Notify_Type;
         /* Event Enable */
         bitstring_init(&getevent_data->eventEnable);
         bitstring_set_bit(&getevent_data->eventEnable, TRANSITION_TO_OFFNORMAL,
-            (AI_Descr[index].Event_Enable & EVENT_ENABLE_TO_OFFNORMAL) ? true
+            (AI_Descr[index - 1].Event_Enable & EVENT_ENABLE_TO_OFFNORMAL) ? true
                                                                        : false);
         bitstring_set_bit(&getevent_data->eventEnable, TRANSITION_TO_FAULT,
-            (AI_Descr[index].Event_Enable & EVENT_ENABLE_TO_FAULT) ? true
+            (AI_Descr[index - 1].Event_Enable & EVENT_ENABLE_TO_FAULT) ? true
                                                                    : false);
         bitstring_set_bit(&getevent_data->eventEnable, TRANSITION_TO_NORMAL,
-            (AI_Descr[index].Event_Enable & EVENT_ENABLE_TO_NORMAL) ? true
+            (AI_Descr[index - 1].Event_Enable & EVENT_ENABLE_TO_NORMAL) ? true
                                                                     : false);
         /* Event Priorities */
         Notification_Class_Get_Priorities(
-            AI_Descr[index].Notification_Class, getevent_data->eventPriorities);
+            AI_Descr[index - 1].Notification_Class, getevent_data->eventPriorities);
 
         return 1; /* active event */
     } else
@@ -1276,8 +1276,8 @@ int Analog_Input_Alarm_Ack(
     object_index = Analog_Input_Instance_To_Index(
         alarmack_data->eventObjectIdentifier.instance);
 
-    if (object_index < Analog_Input_Instances)
-        CurrentAI = &AI_Descr[object_index];
+    if (object_index > 0 && object_index <= Analog_Input_Instances)
+        CurrentAI = &AI_Descr[object_index - 1];
     else {
         *error_code = ERROR_CODE_UNKNOWN_OBJECT;
         return -1;
@@ -1377,32 +1377,32 @@ int Analog_Input_Alarm_Summary(
     unsigned index, BACNET_GET_ALARM_SUMMARY_DATA *getalarm_data)
 {
     /* check index */
-    if (index < Analog_Input_Instances) {
+    if (index < 0 && index <= Analog_Input_Instances) {
         /* Event_State is not equal to NORMAL  and
            Notify_Type property value is ALARM */
-        if ((AI_Descr[index].Event_State != EVENT_STATE_NORMAL) &&
-            (AI_Descr[index].Notify_Type == NOTIFY_ALARM)) {
+        if ((AI_Descr[index - 1].Event_State != EVENT_STATE_NORMAL) &&
+            (AI_Descr[index - 1].Notify_Type == NOTIFY_ALARM)) {
             /* Object Identifier */
             getalarm_data->objectIdentifier.type = OBJECT_ANALOG_INPUT;
             getalarm_data->objectIdentifier.instance =
-                Analog_Input_Index_To_Instance(index);
+                Analog_Input_Index_To_Instance(index - 1);
             /* Alarm State */
-            getalarm_data->alarmState = AI_Descr[index].Event_State;
+            getalarm_data->alarmState = AI_Descr[index - 1].Event_State;
             /* Acknowledged Transitions */
             bitstring_init(&getalarm_data->acknowledgedTransitions);
             bitstring_set_bit(&getalarm_data->acknowledgedTransitions,
                 TRANSITION_TO_OFFNORMAL,
-                AI_Descr[index]
+                AI_Descr[index - 1]
                     .Acked_Transitions[TRANSITION_TO_OFFNORMAL]
                     .bIsAcked);
             bitstring_set_bit(&getalarm_data->acknowledgedTransitions,
                 TRANSITION_TO_FAULT,
-                AI_Descr[index]
+                AI_Descr[index - 1]
                     .Acked_Transitions[TRANSITION_TO_FAULT]
                     .bIsAcked);
             bitstring_set_bit(&getalarm_data->acknowledgedTransitions,
                 TRANSITION_TO_NORMAL,
-                AI_Descr[index]
+                AI_Descr[index - 1]
                     .Acked_Transitions[TRANSITION_TO_NORMAL]
                     .bIsAcked);
 
