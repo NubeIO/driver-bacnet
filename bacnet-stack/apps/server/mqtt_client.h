@@ -29,6 +29,7 @@
 extern "C" {
 #endif /* __cplusplus */
 
+  void mqtt_check_reconnect(void);
   int mqtt_client_init(void);
   void mqtt_client_shutdown(void);
   char *mqtt_form_publish_topic(char *device_id, char *object_name);
