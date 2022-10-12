@@ -405,13 +405,13 @@ bool Analog_Value_Set_Object_Name(
     if (index > 0 && index <= Analog_Value_Instances) {
         if (!characterstring_same(&Analog_Value_Instance_Names[index - 1], object_name)) {
             status = characterstring_copy(&Analog_Value_Instance_Names[index - 1], object_name);
-#if defined(MQTT)
-            if (yaml_config_mqtt_enable()) {
-                mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_OBJECT_NAME,
-                    MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
-            }
-#endif /* defined(MQTT) */
         }
+#if defined(MQTT)
+        if (yaml_config_mqtt_enable()) {
+            mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_OBJECT_NAME,
+                MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
+        }
+#endif /* defined(MQTT) */
     }
 
     return status;
