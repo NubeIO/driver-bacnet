@@ -73,6 +73,7 @@ int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 void mqtt_connection_lost(void *context, char *cause);
 int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_message *message);
 void mqtt_msg_delivered(void *context, MQTTClient_deliveryToken dt);
+int mqtt_connect_to_broker(void);
 int subscribe_write_prop_name(void);
 int subscribe_write_prop_present_value(void);
 int subscribe_write_prop_priority_array(void);
@@ -84,6 +85,7 @@ static char mqtt_broker_ip[51] = {0};
 static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[124] = {0};
 static MQTTClient mqtt_client;
+static int mqtt_client_connected = false;
 
 
 /*
@@ -94,6 +96,8 @@ void mqtt_connection_lost(void *context, char *cause)
   if (mqtt_debug) {
      printf("MQTT connection lost: %s\n", cause);
   }
+
+  mqtt_client_connected = false;
 }
 
 
@@ -594,15 +598,72 @@ void mqtt_msg_delivered(void *context, MQTTClient_deliveryToken dt)
 
 
 /*
+ * Connect to MQTT broker.
+ */
+int mqtt_connect_to_broker(void)
+{
+  MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer5;
+  MQTTProperties props = MQTTProperties_initializer;
+  MQTTProperties willProps = MQTTProperties_initializer;
+  MQTTResponse response = MQTTResponse_initializer;
+  int rc;
+
+  conn_opts.keepAliveInterval = 30;
+  conn_opts.MQTTVersion = MQTTVERSION_5;
+  conn_opts.cleanstart = 1;
+  response = MQTTClient_connect5(mqtt_client, &conn_opts, &props, &willProps);
+  rc = response.reasonCode;
+  MQTTResponse_free(response);
+  if (rc != MQTTCLIENT_SUCCESS)
+  {
+    printf("MQTT failed to connect to server: %s\n", MQTTClient_strerror(rc));
+    return(1);
+  }
+
+  return(0);
+}
+
+
+/*
+ * Check and reconnect to MQTT broker.
+ */
+void mqtt_check_reconnect(void)
+{
+  int rc;
+
+  if (!mqtt_client_connected) {
+    if (mqtt_debug) {
+      printf("MQTT connection was lost. Reconnecting to MQTT broker...\n");
+    }
+
+    if (mqtt_connect_to_broker()) {
+      if (mqtt_debug) {
+        printf("Failed to connect to MQTT broker. Please check network connection.\n");
+      }
+
+      return;
+    }
+
+    mqtt_client_connected = true;
+
+    if (yaml_config_mqtt_write_via_subscribe()) {
+      printf("MQTT write via subscribe enabled\n");
+      rc = mqtt_subscribe_to_topics();
+      if (rc) {
+        printf("- Failed to subscribe to one of the topics\n");
+        return;
+      }
+    }
+  }
+}
+
+
+/*
  * Initialize mqtt client module.
  */
 int mqtt_client_init(void)
 {
   MQTTClient_createOptions createOpts = MQTTClient_createOptions_initializer;
-  MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer5;
-  MQTTProperties props = MQTTProperties_initializer;
-  MQTTProperties willProps = MQTTProperties_initializer;
-  MQTTResponse response = MQTTResponse_initializer;
   char mqtt_broker_endpoint[100];
   char buf[100];
   char *pEnv;
@@ -676,17 +737,11 @@ int mqtt_client_init(void)
     return(1);
   }
 
-  conn_opts.keepAliveInterval = 30;
-  conn_opts.MQTTVersion = MQTTVERSION_5;
-  conn_opts.cleanstart = 1;
-  response = MQTTClient_connect5(mqtt_client, &conn_opts, &props, &willProps);
-  rc = response.reasonCode;
-  MQTTResponse_free(response);
-  if (rc != MQTTCLIENT_SUCCESS)
-  {
-    printf("MQTT failed to connect to server: %s\n", MQTTClient_strerror(rc));
+  if (mqtt_connect_to_broker()) {
     return(1);
   }
+
+  mqtt_client_connected = true;
 
   if (yaml_config_mqtt_write_via_subscribe()) {
     printf("MQTT write via subscribe enabled\n");
@@ -1011,6 +1066,31 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
     default:
       printf("MQTT unsupported topic value: %d\n", vtype);
       return(1);
+  }
+
+  if (!mqtt_client_connected) {
+    if (mqtt_debug) {
+      printf("MQTT connection was lost. Reconnecting to MQTT broker...\n");
+    }
+
+    if (mqtt_connect_to_broker()) {
+      if (mqtt_debug) {
+        printf("Failed to connect to MQTT broker. Please check network connection.\n");
+      }
+
+      return(1);
+    }
+
+    mqtt_client_connected = true;
+
+    if (yaml_config_mqtt_write_via_subscribe()) {
+      printf("MQTT write via subscribe enabled\n");
+      rc = mqtt_subscribe_to_topics();
+      if (rc) {
+        printf("- Failed to subscribe to one of the topics\n");
+        return(1);
+      }
+    }
   }
 
   pubmsg.qos = DEFAULT_PUB_QOS;
