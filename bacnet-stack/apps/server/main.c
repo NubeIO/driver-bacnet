@@ -351,7 +351,9 @@ int main(int argc, char *argv[])
     /* loop forever */
     for (; running ;) {
         /* mqtt broker */
-        mqtt_check_reconnect();
+        if (yaml_config_mqtt_connect_retry()) {
+          mqtt_check_reconnect();
+        }
 
         /* input */
         current_seconds = time(NULL);

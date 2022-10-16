@@ -2,18 +2,18 @@
 #define MQTT_CLIENT_H
 
 #ifndef true
-#define true                           1
+#define true                             1
 #endif
 
 #ifndef false
-#define false                          0
+#define false                            0
 #endif
 
 /* default values */
-#define DEFAULT_MQTT_BROKER_IP         "127.0.0.1"
-#define DEFAULT_MQTT_BROKER_PORT       1883
-#define DEFAULT_PUB_QOS                0
-#define DEFAULT_PUB_TIMEOUT            10000L
+#define DEFAULT_MQTT_BROKER_IP           "127.0.0.1"
+#define DEFAULT_MQTT_BROKER_PORT         1883
+#define DEFAULT_PUB_QOS                  0
+#define DEFAULT_PUB_TIMEOUT              10000L
 
 /* topic value types */
 #define MQTT_TOPIC_VALUE_STRING          1
@@ -24,6 +24,9 @@
 #define MAX_TOPIC_TOKENS                 10
 #define MAX_TOPIC_TOKEN_LENGTH           31
 #define MAX_TOPIC_VALUE_LENGTH           100
+
+#define MQTT_RETRY_LIMIT                 5
+#define MQTT_RETRY_INTERVAL              10
 
 #ifdef __cplusplus
 extern "C" {

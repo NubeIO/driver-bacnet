@@ -39,6 +39,12 @@ extern "C" {
 
   int yaml_config_mqtt_write_via_subscribe(void);
 
+  int yaml_config_mqtt_connect_retry(void);
+
+  int yaml_config_mqtt_connect_retry_limit(void);
+
+  int yaml_config_mqtt_connect_retry_interval(void);
+
   const char **yaml_config_objects(int *length);
 
   const char **yaml_config_properties(int *length);
