@@ -101,6 +101,7 @@ static object_functions_t My_Object_Table[] = {
         Device_Property_Lists, DeviceGetRRInfo, NULL /* Iterator */,
         NULL /* Value_Lists */, NULL /* COV */, NULL /* COV Clear */,
         NULL /* Intrinsic Reporting */ },
+#if 0
 #if (BACNET_PROTOCOL_REVISION >= 17)
     { OBJECT_NETWORK_PORT, Network_Port_Init, Network_Port_Count,
         Network_Port_Index_To_Instance, Network_Port_Valid_Instance,
@@ -108,6 +109,7 @@ static object_functions_t My_Object_Table[] = {
         Network_Port_Write_Property, Network_Port_Property_Lists,
         NULL /* ReadRangeInfo */, NULL /* Iterator */, NULL /* Value_Lists */,
         NULL /* COV */, NULL /* COV Clear */, NULL /* Intrinsic Reporting */ },
+#endif
 #endif
     { OBJECT_ANALOG_INPUT, Analog_Input_Init, Analog_Input_Count,
         Analog_Input_Index_To_Instance, Analog_Input_Valid_Instance,
