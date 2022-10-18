@@ -1020,7 +1020,9 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
   char topic[512];
   char topic_value[1024];
   char buf[1024];
-  int rc;
+  int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
+  int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
+  int rc, i;
 
   if (!mqtt_create_topic(object_type, object_instance, property_id, topic, sizeof(topic))) {
     printf("Failed to create MQTT topic: %d/%d\n", object_type, property_id);
@@ -1068,28 +1070,22 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
       return(1);
   }
 
-  if (!mqtt_client_connected) {
-    if (mqtt_debug) {
-      printf("MQTT connection was lost. Reconnecting to MQTT broker...\n");
+  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
+    for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
+      }
+
+      mqtt_check_reconnect();
+      sleep(mqtt_retry_interval);
     }
 
-    if (mqtt_connect_to_broker()) {
+    if (i >= mqtt_retry_limit) {
       if (mqtt_debug) {
-        printf("Failed to connect to MQTT broker. Please check network connection.\n");
+        printf("MQTT reconnect limit reached: %d\n", i);
       }
 
       return(1);
-    }
-
-    mqtt_client_connected = true;
-
-    if (yaml_config_mqtt_write_via_subscribe()) {
-      printf("MQTT write via subscribe enabled\n");
-      rc = mqtt_subscribe_to_topics();
-      if (rc) {
-        printf("- Failed to subscribe to one of the topics\n");
-        return(1);
-      }
     }
   }
 

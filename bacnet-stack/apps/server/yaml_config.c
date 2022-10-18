@@ -20,6 +20,9 @@ struct _mqtt {
   const char *debug;
   const char *enable;
   const char *write_via_subscribe;
+  const char *retry_enable;
+  uint16_t retry_limit;
+  uint16_t retry_interval;
 };
 
 /* top level struct for storing the configuration */
@@ -71,6 +74,18 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
     "write_via_subscribe", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _mqtt, write_via_subscribe, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "retry_enable", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _mqtt, retry_enable, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_UINT(
+    "retry_limit", CYAML_FLAG_OPTIONAL,
+    struct _mqtt, retry_limit),
+
+  CYAML_FIELD_UINT(
+    "retry_interval", CYAML_FLAG_OPTIONAL,
+    struct _mqtt, retry_interval),
 
   CYAML_FIELD_END
 };
@@ -232,6 +247,12 @@ void yaml_config_dump(void)
       bacnet_config->mqtt->debug: "null");
     printf("YAML Config: mqtt->enable: %s\n", (bacnet_config->mqtt->enable) ?
       bacnet_config->mqtt->enable: "null");
+    printf("YAML Config: mqtt->write_via_subscribe: %s\n", (bacnet_config->mqtt->write_via_subscribe) ?
+      bacnet_config->mqtt->write_via_subscribe: "null");
+    printf("YAML Config: mqtt->retry_enable: %s\n", (bacnet_config->mqtt->retry_enable) ?
+      bacnet_config->mqtt->retry_enable: "null");
+    printf("YAML Config: mqtt->retry_limit: %d\n", bacnet_config->mqtt->retry_limit);
+    printf("YAML Config: mqtt->retry_interval: %d\n", bacnet_config->mqtt->retry_interval);
   }
 
   if (bacnet_config->n_objects > 0) {
@@ -391,6 +412,34 @@ int yaml_config_mqtt_write_via_subscribe(void)
 {
   return ((bacnet_config->mqtt && bacnet_config->mqtt->write_via_subscribe &&
     !strcmp(bacnet_config->mqtt->write_via_subscribe, "true")) ? true : false);
+}
+
+
+/*
+ * Get MQTT connect retry enable flag.
+ */
+int yaml_config_mqtt_connect_retry(void)
+{
+  return ((bacnet_config->mqtt && bacnet_config->mqtt->retry_enable &&
+    !strcmp(bacnet_config->mqtt->retry_enable, "true")) ? true : false);
+}
+
+
+/*
+ * Get MQTT retry limit.
+ */
+int yaml_config_mqtt_connect_retry_limit(void)
+{
+  return(bacnet_config->mqtt->retry_limit);
+}
+
+
+/*
+ * Get MQTT retry interval.
+ */
+int yaml_config_mqtt_connect_retry_interval(void)
+{
+  return(bacnet_config->mqtt->retry_interval);
 }
 
 
