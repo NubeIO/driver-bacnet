@@ -19,6 +19,9 @@ mqtt:
   debug: false
   enable: true
   write_via_subscribe: true
+  retry_enable: true
+  retry_limit: 5
+  retry_interval: 10
 
 objects:
   - ai
