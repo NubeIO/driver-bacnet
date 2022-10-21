@@ -21,8 +21,8 @@ struct _mqtt {
   const char *enable;
   const char *write_via_subscribe;
   const char *retry_enable;
-  uint16_t retry_limit;
-  uint16_t retry_interval;
+  unsigned int retry_limit;
+  unsigned int retry_interval;
 };
 
 /* top level struct for storing the configuration */
@@ -31,15 +31,15 @@ struct _bacnet_config {
   const char *device_id;
   const char *iface;
   uint16_t port;
-  uint8_t bi_max;
-  uint8_t bo_max;
-  uint8_t bv_max;
-  uint8_t ai_max;
-  uint8_t ao_max;
-  uint8_t av_max;
+  unsigned int bi_max;
+  unsigned int bo_max;
+  unsigned int bv_max;
+  unsigned int ai_max;
+  unsigned int ao_max;
+  unsigned int av_max;
   struct _mqtt *mqtt;
   const char **objects;
-  unsigned n_objects;
+  unsigned int n_objects;
   const char **properties;
   unsigned n_properties;
 };
