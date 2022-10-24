@@ -611,6 +611,7 @@ int mqtt_connect_to_broker(void)
   conn_opts.keepAliveInterval = 30;
   conn_opts.MQTTVersion = MQTTVERSION_5;
   conn_opts.cleanstart = 1;
+  conn_opts.cleansession = 0;
   response = MQTTClient_connect5(mqtt_client, &conn_opts, &props, &willProps);
   rc = response.reasonCode;
   MQTTResponse_free(response);
@@ -725,7 +726,7 @@ int mqtt_client_init(void)
   }
 
   createOpts.MQTTVersion = MQTTVERSION_5;
-  rc = MQTTClient_createWithOptions(&mqtt_client, mqtt_broker_endpoint, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL, &createOpts);
+  rc = MQTTClient_createWithOptions(&mqtt_client, mqtt_broker_endpoint, mqtt_client_id, MQTTCLIENT_PERSISTENCE_DEFAULT, NULL, &createOpts);
   if (rc != MQTTCLIENT_SUCCESS) {
     printf("MQTT error creating client instance: %s\n", mqtt_broker_endpoint);
     return(1);
@@ -761,6 +762,7 @@ int mqtt_client_init(void)
  */
 int subscribe_write_prop_name(void)
 {
+  MQTTSubscribe_options subOpts = MQTTSubscribe_options_initializer;
   MQTTResponse response;
   int rc;
   const char *topics[] = {
@@ -777,15 +779,15 @@ int subscribe_write_prop_name(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    response = MQTTClient_subscribe5(mqtt_client, topics[i], 0, NULL, NULL);
+    response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, &subOpts, NULL);
     rc = response.reasonCode;
     MQTTResponse_free(response);
     if (rc != MQTTCLIENT_SUCCESS) {
       if (mqtt_debug) {
-        printf("- Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
       }
 
-      return(1);
+      // return(1);
     } else {
       if (mqtt_debug) {
         printf("- Subscribed\n");
@@ -818,15 +820,15 @@ int subscribe_write_prop_present_value(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    response = MQTTClient_subscribe5(mqtt_client, topics[i], 0, NULL, NULL);
+    response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, NULL, NULL);
     rc = response.reasonCode;
     MQTTResponse_free(response);
     if (rc != MQTTCLIENT_SUCCESS) {
       if (mqtt_debug) {
-        printf("- Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
       }
       
-      return(1);
+      // return(1);
     } else {
       if (mqtt_debug) {
         printf("- Subscribed\n");
@@ -860,15 +862,15 @@ int subscribe_write_prop_priority_array(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    response = MQTTClient_subscribe5(mqtt_client, topics[i], 0, NULL, NULL);
+    response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, NULL, NULL);
     rc = response.reasonCode;
     MQTTResponse_free(response);
     if (rc != MQTTCLIENT_SUCCESS) {
       if (mqtt_debug) {
-        printf("- Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
       }
 
-      return(1);
+      // return(1);
     } else {
       if (mqtt_debug) {
         printf("- Subscribed\n");
@@ -896,15 +898,15 @@ int mqtt_subscribe_to_topics(void)
   for (i = 0; i < n_topics; i++) {
     if (!strncmp(topics[i], "name", 4)) {
       if (subscribe_write_prop_name()) {
-        return(1);
+        // return(1);
       }
     } else if (!strncmp(topics[i], "pv", 2)) {
       if (subscribe_write_prop_present_value()) {
-        return(1);
+        // return(1);
       }
     } else if (!strncmp(topics[i], "pri", 3)) {
       if (subscribe_write_prop_priority_array()) {
-        return(1);
+        // return(1);
       }
     }
   }
