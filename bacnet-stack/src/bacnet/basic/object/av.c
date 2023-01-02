@@ -197,7 +197,7 @@ bool Analog_Value_Valid_Instance(uint32_t object_instance)
  */
 unsigned Analog_Value_Count(void)
 {
-    return Analog_Value_Instances;
+    return (Analog_Value_Instances + 1);
 }
 
 /**

@@ -1265,6 +1265,9 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                     found = Device_Object_List_Identifier(
                         i, &object_type, &instance);
                     if (found) {
+                        if (instance == 0 && object_type <= 5) {
+                            /* nothing */
+                        } else {
                         len = encode_application_object_id(
                             &apdu[apdu_len], object_type, instance);
                         apdu_len += len;
@@ -1277,6 +1280,7 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                                 ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED;
                             apdu_len = BACNET_STATUS_ABORT;
                             break;
+                        }
                         }
                     } else {
                         /* error: internal error? */
