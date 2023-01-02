@@ -8,10 +8,10 @@ port: 47808
 
 bi_max: 10
 bo_max: 10
-bv_max: 10
+bv_max: 20
 ai_max: 10
 ao_max: 10
-av_max: 10
+av_max: 20
 
 mqtt:
   broker_ip: 127.0.0.1
