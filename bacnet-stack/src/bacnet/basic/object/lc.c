@@ -493,7 +493,7 @@ void Load_Control_State_Machine(int object_index)
                     Shed_Level_Copy(&Expected_Shed_Level[object_index],
                         &Requested_Shed_Level[object_index]);
                     Analog_Output_Present_Value_Set(object_index,
-                        Requested_Shed_Level_Value(object_index), 4, NULL);
+                        Requested_Shed_Level_Value(object_index), 4, NULL, false);
                     Shed_Level_Copy(&Actual_Shed_Level[object_index],
                         &Requested_Shed_Level[object_index]);
                     Load_Control_State[object_index] = SHED_COMPLIANT;
@@ -542,7 +542,7 @@ void Load_Control_State_Machine(int object_index)
                 Shed_Level_Copy(&Expected_Shed_Level[object_index],
                     &Requested_Shed_Level[object_index]);
                 Analog_Output_Present_Value_Set(
-                    object_index, Requested_Shed_Level_Value(object_index), 4, NULL);
+                    object_index, Requested_Shed_Level_Value(object_index), 4, NULL, false);
                 Shed_Level_Copy(&Actual_Shed_Level[object_index],
                     &Requested_Shed_Level[object_index]);
                 Load_Control_State[object_index] = SHED_COMPLIANT;

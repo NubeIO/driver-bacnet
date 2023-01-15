@@ -35,3 +35,11 @@ properties:
   - name
   - pv
   - pri
+
+bacnet_client:
+  debug: true
+  enable: true
+  commands:
+    - whois
+    - read_value
+    - write_value

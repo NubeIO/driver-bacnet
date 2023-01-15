@@ -276,7 +276,7 @@ static void Analog_Value_COV_Detect(unsigned int index, float value)
  * @return  true if values are within range and present-value is set.
  */
 bool Analog_Value_Present_Value_Set(
-    uint32_t object_instance, float value, uint8_t priority, char *uuid)
+    uint32_t object_instance, float value, uint8_t priority, char *uuid, int bacnet_client)
 {
     unsigned index = 0;
     bool status = false;
@@ -288,7 +288,7 @@ bool Analog_Value_Present_Value_Set(
             AV_Descr[index - 1].Present_Value_Level[priority - 1] = value;
             status = true;
 #if defined(MQTT)
-            if (yaml_config_mqtt_enable()) {
+            if (yaml_config_mqtt_enable() && !bacnet_client) {
                 if (value == AV_LEVEL_NULL) {
                     mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE,
                         MQTT_TOPIC_VALUE_STRING, "null", uuid);
@@ -984,7 +984,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                    algorithm and may not be used for other purposes in any
                    object. */
                 status = Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority, NULL);
+                        value.type.Real, wp_data->priority, NULL, false);
                 if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -1000,7 +1000,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     BACNET_APPLICATION_TAG_NULL);
                 if (status) {
                     status = Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        AV_LEVEL_NULL, wp_data->priority, NULL);
+                        AV_LEVEL_NULL, wp_data->priority, NULL, false);
                     if (!status) {
                         wp_data->error_class = ERROR_CLASS_PROPERTY;
                         wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;

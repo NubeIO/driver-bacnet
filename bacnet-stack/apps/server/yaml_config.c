@@ -25,6 +25,14 @@ struct _mqtt {
   unsigned int retry_interval;
 };
 
+/* bacnet-client */
+struct _bacnet_client {
+  const char *debug;
+  const char *enable;
+  const char **commands;
+  unsigned int n_commands;
+};
+
 /* top level struct for storing the configuration */
 struct _bacnet_config {
   const char *server_name;
@@ -42,12 +50,14 @@ struct _bacnet_config {
   unsigned int n_objects;
   const char **properties;
   unsigned n_properties;
+  struct _bacnet_client *bacnet_client;
 };
 
 /* globals */
 static struct _bacnet_config *bacnet_config = NULL;
 static int yaml_config_debug = false;
 static int yaml_config_mqtt_disable = false;
+static int yaml_config_bacnet_client_disable = false;
 
 /* Schema for string pointer values (used in sequences of strings). */
 static const cyaml_schema_value_t string_ptr_schema = {
@@ -86,6 +96,23 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_UINT(
     "retry_interval", CYAML_FLAG_OPTIONAL,
     struct _mqtt, retry_interval),
+
+  CYAML_FIELD_END
+};
+
+static const cyaml_schema_field_t bacnet_client_fields_schema[] = {
+  CYAML_FIELD_STRING_PTR(
+    "debug", CYAML_FLAG_POINTER,
+    struct _bacnet_client, debug, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "enable", CYAML_FLAG_POINTER,
+    struct _bacnet_client, enable, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_SEQUENCE_COUNT(
+    "commands", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_client, commands, n_commands,
+    &string_ptr_schema, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -145,6 +172,10 @@ static const cyaml_schema_field_t config_fields_schema[] = {
     struct _bacnet_config, properties, n_properties,
     &string_ptr_schema, 0, CYAML_UNLIMITED),
 
+  CYAML_FIELD_MAPPING_PTR(
+    "bacnet_client", CYAML_FLAG_POINTER,
+    struct _bacnet_config, bacnet_client, bacnet_client_fields_schema),
+
   CYAML_FIELD_END
 };
 
@@ -177,6 +208,11 @@ int yaml_config_init(void)
   pEnv = getenv("MQTT_DISABLE");
   if (pEnv) {
     yaml_config_mqtt_disable = true;
+  }
+
+  pEnv = getenv("BACNET_CLIENT_DISABLE");
+  if (pEnv) {
+    yaml_config_bacnet_client_disable = true;
   }
 
   pEnv = getenv("g");
@@ -268,6 +304,21 @@ void yaml_config_dump(void)
 
     for(i = 0; i < bacnet_config->n_properties; i++) {
       printf("[%d]: %s\n", i, bacnet_config->properties[i]);
+    }
+  }
+
+  if (bacnet_config->bacnet_client) {
+   printf("YAML Config: bacnet_client->debug: %s\n", (bacnet_config->bacnet_client->debug) ?
+      bacnet_config->bacnet_client->debug: "null");
+    printf("YAML Config: bacnet_client->enable: %s\n", (bacnet_config->bacnet_client->enable) ?
+      bacnet_config->bacnet_client->enable: "null");
+
+    if (bacnet_config->bacnet_client->n_commands > 0) {
+      printf("YAML Config: Bacnet Client Commands\n");
+
+      for(i = 0; i < bacnet_config->bacnet_client->n_commands; i++) {
+        printf("[%d]: %s\n", i, bacnet_config->bacnet_client->commands[i]);
+      }
     }
   }
 }
@@ -460,6 +511,45 @@ const char **yaml_config_properties(int *length)
 {
   *length = bacnet_config->n_properties;
   return(bacnet_config->properties);
+}
+
+
+/*
+ * Get bacnet client debug flag.
+ */
+int yaml_config_bacnet_client_debug(void)
+{ 
+  return ((bacnet_config->bacnet_client && bacnet_config->bacnet_client ->debug &&
+    !strcmp(bacnet_config->bacnet_client->debug, "true")) ? true : false);
+}
+
+
+/*
+ * Get bacnet client enable flag.
+ */
+int yaml_config_bacnet_client_enable(void)
+{ 
+  if (yaml_config_bacnet_client_disable) {
+    return(false);
+  }
+  
+  return ((bacnet_config->bacnet_client && bacnet_config->bacnet_client->enable &&
+    !strcmp(bacnet_config->bacnet_client->enable, "true")) ? true : false);
+}
+
+
+/*
+ * Get bacnet client commands.
+ */
+const char **yaml_config_bacnet_client_commands(int *length)
+{
+  if (bacnet_config->bacnet_client == NULL) {
+    *length = 0;
+    return(NULL);
+  }
+
+  *length = bacnet_config->bacnet_client->n_commands;
+  return(bacnet_config->bacnet_client->commands);
 }
 
 
