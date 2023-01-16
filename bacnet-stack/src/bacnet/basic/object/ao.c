@@ -230,7 +230,7 @@ unsigned Analog_Output_Present_Value_Priority(uint32_t object_instance)
 }
 
 bool Analog_Output_Present_Value_Set(
-    uint32_t object_instance, float value, unsigned priority, char *uuid)
+    uint32_t object_instance, float value, unsigned priority, char *uuid, int bacnet_client)
 {
     unsigned index = 0;
     bool status = false;
@@ -248,7 +248,7 @@ bool Analog_Output_Present_Value_Set(
                main loop (i.e. check out of service before changing output) */
             status = true;
 #if defined(MQTT)
-            if (yaml_config_mqtt_enable()) {
+            if (yaml_config_mqtt_enable() && !bacnet_client) {
                 if (value == AO_LEVEL_NULL) {
                   mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRESENT_VALUE,
                       MQTT_TOPIC_VALUE_STRING, "null", uuid);
@@ -612,7 +612,7 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                    object. */
                 status =
                     Analog_Output_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority, NULL);
+                        value.type.Real, wp_data->priority, NULL, false);
                 if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any

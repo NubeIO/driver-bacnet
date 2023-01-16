@@ -136,7 +136,8 @@ extern "C" {
     void Analog_Input_Present_Value_Set(
         uint32_t object_instance,
         float value,
-        char *uuid);
+        char *uuid,
+        int bacnet_client);
 
     BACNET_STACK_EXPORT
     bool Analog_Input_Out_Of_Service(

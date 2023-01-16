@@ -49,6 +49,12 @@ extern "C" {
 
   const char **yaml_config_properties(int *length);
 
+  int yaml_config_bacnet_client_debug(void);
+
+  int yaml_config_bacnet_client_enable(void);
+
+  const char **yaml_config_bacnet_client_commands(int *length);
+
   int yaml_config_cleanup(void);
 
 #ifdef __cplusplus

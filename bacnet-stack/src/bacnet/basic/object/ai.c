@@ -236,7 +236,7 @@ static void Analog_Input_COV_Detect(unsigned int index, float value)
     }
 }
 
-void Analog_Input_Present_Value_Set(uint32_t object_instance, float value, char *uuid)
+void Analog_Input_Present_Value_Set(uint32_t object_instance, float value, char *uuid, int bacnet_client)
 {
     unsigned int index = 0;
 
@@ -246,7 +246,7 @@ void Analog_Input_Present_Value_Set(uint32_t object_instance, float value, char 
         AI_Descr[index - 1].Present_Value = value;
 
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable()) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_ANALOG_INPUT, object_instance, PROP_PRESENT_VALUE,
             MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
         }
@@ -698,7 +698,7 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 BACNET_APPLICATION_TAG_REAL);
             if (status) {
                 Analog_Input_Present_Value_Set(
-                    wp_data->object_instance, value.type.Real, NULL);
+                    wp_data->object_instance, value.type.Real, NULL, false);
             }
             break;
 

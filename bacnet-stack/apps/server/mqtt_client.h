@@ -15,6 +15,11 @@
 #define DEFAULT_PUB_QOS                  0
 #define DEFAULT_PUB_TIMEOUT              10000L
 
+/* topic types */
+#define MQTT_UPDATE_RESULT_TOPIC           1
+#define MQTT_READ_VALUE_CMD_RESULT_TOPIC   2
+#define MQTT_WRITE_VALUE_CMD_RESULT_TOPIC  3
+
 /* topic value types */
 #define MQTT_TOPIC_VALUE_STRING          1
 #define MQTT_TOPIC_VALUE_BACNET_STRING   2
@@ -36,7 +41,7 @@ extern "C" {
   int mqtt_client_init(void);
   void mqtt_client_shutdown(void);
   char *mqtt_form_publish_topic(char *device_id, char *object_name);
-  char *mqtt_create_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len);
+  char *mqtt_create_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len, int topic_type);
   int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr, char *uuid_value);
 
 #ifdef __cplusplus

@@ -124,7 +124,8 @@ extern "C" {
         uint32_t object_instance,
         float value,
         uint8_t priority,
-        char *uuid);
+        char *uuid,
+        int bacnet_client);
     BACNET_STACK_EXPORT
     bool Analog_Value_Priority_Array_Set(
         uint32_t object_instance,
