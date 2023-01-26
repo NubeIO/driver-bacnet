@@ -289,7 +289,7 @@ bool Binary_Input_Encode_Value_List(
 }
 
 bool Binary_Input_Present_Value_Set(
-    uint32_t object_instance, BACNET_BINARY_PV value, char *uuid)
+    uint32_t object_instance, BACNET_BINARY_PV value, char *uuid, int bacnet_client)
 {
     unsigned index = 0;
     bool status = false;
@@ -309,7 +309,7 @@ bool Binary_Input_Present_Value_Set(
         Present_Value[index - 1] = value;
         status = true;
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable()) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_BINARY_INPUT, object_instance, PROP_PRESENT_VALUE,
                 MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
         }
@@ -502,7 +502,7 @@ bool Binary_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             if (status) {
                 if (value.type.Enumerated <= MAX_BINARY_PV) {
                     Binary_Input_Present_Value_Set(wp_data->object_instance,
-                        (BACNET_BINARY_PV)value.type.Enumerated, NULL);
+                        (BACNET_BINARY_PV)value.type.Enumerated, NULL, false);
                 } else {
                     status = false;
                     wp_data->error_class = ERROR_CLASS_PROPERTY;

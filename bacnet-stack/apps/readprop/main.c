@@ -431,11 +431,15 @@ int main(int argc, char *argv[])
         }
 
         /* returns 0 bytes on timeout */
+printf("xxx\n");
         pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+printf("yyy pdu_len: %d\n", pdu_len);
 
         /* process */
         if (pdu_len) {
+printf("calling handler\n");
             npdu_handler(&src, &Rx_Buf[0], pdu_len);
+printf("done\n");
         }
 
         /* keep track of time for next check */

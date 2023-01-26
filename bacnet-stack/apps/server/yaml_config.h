@@ -55,6 +55,12 @@ extern "C" {
 
   const char **yaml_config_bacnet_client_commands(int *length);
 
+  const char *yaml_config_bacnet_client_whois_program(void);
+
+  const char *yaml_config_bacnet_client_read_program(void);
+
+  const char *yaml_config_bacnet_client_write_program(void);
+
   int yaml_config_cleanup(void);
 
 #ifdef __cplusplus

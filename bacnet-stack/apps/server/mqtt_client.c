@@ -4,6 +4,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "bacnet/indtext.h"
+#include "bacnet/bacenum.h"
+#include "bacnet/basic/object/device.h"
+#include "bacnet/basic/binding/address.h"
+#include "bacnet/npdu.h"
+#include "bacnet/apdu.h"
+#include "bacnet/datalink/datalink.h"
+
+#include "bacnet/basic/services.h"
+
 #include "MQTTClient.h"
 #include "json-c/json.h"
 #include "mqtt_client.h"
@@ -11,7 +22,6 @@
 #include "yaml_config.h"
 #endif /* defined(YAML_CONFIG) */
 
-#include "bacnet/basic/object/device.h"
 
 /* forward decls */
 extern bool Analog_Input_Set_Object_Name(
@@ -24,6 +34,8 @@ extern void Analog_Input_Present_Value_Set(
 extern float Analog_Input_Present_Value(uint32_t object_instance);
 extern unsigned Analog_Input_Instance_To_Index(
   uint32_t instance);
+extern bool Analog_Input_Object_Name(
+  uint32_t object_instance, BACNET_CHARACTER_STRING *object_name);
 
 extern bool Analog_Output_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
@@ -35,6 +47,8 @@ extern bool Analog_Output_Priority_Array_Set2(
   uint32_t object_instance, float value, unsigned priority);
 extern float Analog_Output_Present_Value(uint32_t object_instance);
 extern unsigned Analog_Output_Instance_To_Index(uint32_t object_instance);
+extern bool Analog_Output_Object_Name(
+  uint32_t object_instance, BACNET_CHARACTER_STRING *object_name);
 
 extern bool Analog_Value_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
@@ -46,12 +60,17 @@ extern bool Analog_Value_Priority_Array_Set2(
   uint32_t object_instance, float value, uint8_t priority);
 extern float Analog_Value_Present_Value(uint32_t object_instance);
 extern unsigned Analog_Value_Instance_To_Index(uint32_t object_instance);
+extern bool Analog_Value_Object_Name(
+  uint32_t object_instance, BACNET_CHARACTER_STRING *object_name);
 
 extern bool Binary_Input_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
 extern bool Binary_Input_Present_Value_Set(
-  uint32_t object_instance, BACNET_BINARY_PV value, char *uuid);
+  uint32_t object_instance, BACNET_BINARY_PV value, char *uuid, int bacnet_client);
 extern BACNET_BINARY_PV Binary_Input_Present_Value(uint32_t object_instance);
+extern unsigned Binary_Input_Instance_To_Index(uint32_t object_instance);
+extern bool Binary_Input_Object_Name(
+  uint32_t object_instance, BACNET_CHARACTER_STRING *object_name);
 
 extern bool Binary_Output_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
@@ -62,6 +81,9 @@ extern bool Binary_Output_Priority_Array_Set(
 extern bool Binary_Output_Priority_Array_Set2(
   uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority);
 extern BACNET_BINARY_PV Binary_Output_Present_Value(uint32_t object_instance);
+extern unsigned Binary_Output_Instance_To_Index(uint32_t object_instance);
+extern bool Binary_Output_Object_Name(
+  uint32_t object_instance, BACNET_CHARACTER_STRING *object_name);
 
 extern bool Binary_Value_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid);
@@ -72,6 +94,9 @@ extern bool Binary_Value_Priority_Array_Set(
 extern bool Binary_Value_Priority_Array_Set2(
   uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority);
 extern BACNET_BINARY_PV Binary_Value_Present_Value(uint32_t object_instance);
+extern unsigned Binary_Value_Instance_To_Index(uint32_t object_instance);
+extern bool Binary_Value_Object_Name(
+  uint32_t object_instance, BACNET_CHARACTER_STRING *object_name);
 
 int tokenize_topic(char *topic, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
 void dump_topic_tokens(int n_topic_tokens, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
@@ -93,11 +118,23 @@ int subscribe_bacnet_client_whois_command(void);
 int subscribe_bacnet_client_read_value_command(void);
 int subscribe_bacnet_client_write_value_command(void);
 int mqtt_subscribe_to_bacnet_client_topics(void);
+int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_opts *cmd_opts);
 int process_bacnet_client_whois_command(void);
 int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int vtype, void *vptr, int topic_id);
-int process_bacnet_client_read_value_command(char *object_type, char *object_index, char *property_id);
+int is_command_for_us(bacnet_client_cmd_opts *opts);
+char *get_object_type_str(int object_type);
+char *get_object_property_str(int object_property);
+int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, char *buf, int buf_len);
+int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data);
+void bacnet_client_read_value_handler(uint8_t *service_request,
+  uint16_t service_len,
+  BACNET_ADDRESS *src,
+  BACNET_CONFIRMED_SERVICE_ACK_DATA *service_data);
+int process_local_read_value_command(bacnet_client_cmd_opts *opts);
+int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts);
+void init_bacnet_client_service_handlers(void);
 int process_bacnet_client_write_value_command(char *object_type, char *object_index, char *property_id, char *value);
-int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], int n_topic_tokens);
+int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], int n_topic_tokens, bacnet_client_cmd_opts *opts);
 
 /* globals */
 static int mqtt_debug = false;
@@ -106,7 +143,7 @@ static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[124] = {0};
 static MQTTClient mqtt_client;
 static int mqtt_client_connected = false;
-
+static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = { -1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, 0, {0}, {0} };
 
 /*
  * MQTT subscribe connection lost callback.
@@ -338,7 +375,7 @@ int process_bi_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
     BACNET_BINARY_PV pv;
     int i_val = atoi(value);
     pv = (i_val == 0) ? 0 : 1;
-    Binary_Input_Present_Value_Set(index, pv, uuid);
+    Binary_Input_Present_Value_Set(index, pv, uuid, false);
   } else {
     if (mqtt_debug) {
       printf("MQTT Invalid Property for Binary Input (BI): [%s]\n", prop_name);
@@ -589,82 +626,481 @@ int mqtt_publish_command_result(int object_type, int object_instance, int proper
 
 
 /*
+ * Return true if the device instance ID in the Bacnet client command is the same
+ * as the device ID.
+ */
+int is_command_for_us(bacnet_client_cmd_opts *opts)
+{
+  if (Device_Object_Instance_Number() == opts->device_instance) {
+    return(true);
+  }
+
+  return(false);
+}
+
+
+char *get_object_type_str(int object_type)
+{
+  char *str = NULL;
+
+  switch(object_type) {
+    case OBJECT_ANALOG_INPUT:
+      str = "ai";
+      break;
+
+    case OBJECT_ANALOG_OUTPUT:
+      str = "ao";
+      break;
+
+    case OBJECT_ANALOG_VALUE:
+      str = "av";
+      break;
+
+    case OBJECT_BINARY_INPUT:
+      str = "bi";
+      break;
+
+    case OBJECT_BINARY_OUTPUT:
+      str = "bo";
+      break;
+
+    case OBJECT_BINARY_VALUE:
+      str = "bv";
+      break;
+  }
+
+  return(str);
+}
+
+
+char *get_object_property_str(int object_property)
+{
+  char *str = NULL;
+
+  switch(object_property) {
+    case PROP_PRESENT_VALUE:
+      str = "pv";
+      break;
+
+    case PROP_OBJECT_NAME:
+      str = "name";
+      break;
+  }
+
+  return(str);
+}
+
+
+int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, char *buf, int buf_len)
+{
+  BACNET_APPLICATION_DATA_VALUE value;
+  char tmp[100];
+
+  bacapp_decode_application_data(
+    data->application_data, (unsigned)data->application_data_len, &value);
+  
+  switch(data->object_type) {
+    case OBJECT_ANALOG_INPUT:
+    case OBJECT_ANALOG_OUTPUT:
+    case OBJECT_ANALOG_VALUE:
+      switch(data->object_property) {
+        case PROP_PRESENT_VALUE:
+          sprintf(tmp, "%.6f", *((float*)&value.type));
+          break;
+
+        case PROP_OBJECT_NAME:
+          characterstring_ansi_copy(tmp, sizeof(tmp), (BACNET_CHARACTER_STRING*)&value.type);
+          break;
+
+        default:
+          return(1);
+      }
+
+      snprintf(buf, buf_len, "{ \"value\" : \"%s\" }", tmp);
+      break;
+
+    case OBJECT_BINARY_INPUT:
+    case OBJECT_BINARY_OUTPUT:
+    case OBJECT_BINARY_VALUE:
+      switch(data->object_property) {
+        case PROP_PRESENT_VALUE:
+          sprintf(tmp, "%d", *((int*)&value.type));
+          break;
+
+        case PROP_OBJECT_NAME:
+          characterstring_ansi_copy(tmp, sizeof(tmp), (BACNET_CHARACTER_STRING*)&value.type);
+          break;
+
+        default:
+          return(1);
+      }
+
+      snprintf(buf, buf_len, "{ \"value\" : \"%s\" }", tmp);
+      break;
+
+    default:
+      return(1);
+  }
+
+  return(0);
+}
+
+
+/*
+ * Publish bacnet client read value result.
+ */
+int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data)
+{
+  MQTTResponse response;
+  MQTTClient_message pubmsg = MQTTClient_message_initializer;
+  MQTTClient_deliveryToken token;
+  char topic[512];
+  char topic_value[1024] = {0};
+  char *object_type_str;
+  char *object_property;
+  int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
+  int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
+  int rc, i;
+
+  object_type_str = get_object_type_str(data->object_type);
+  if (!object_type_str) {
+    printf("Unsupported object type: %d\n", data->object_type);
+    return(1);
+  }
+
+  object_property = get_object_property_str(data->object_property);
+  if (!object_property) {
+    printf("Unsupported object property: %d\n", data->object_property);
+    return(1);
+  }
+
+  sprintf(topic, "bacnet/cmd_result/read_value/%s/%d/%s",
+    object_type_str, data->object_instance, object_property);
+
+  encode_read_value_result(data, topic_value, sizeof(topic_value));
+
+  printf("- read value result topic: %s\n", topic);
+  printf("- read value result topic value: %s\n", topic_value);
+
+  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
+    for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
+      }
+
+      mqtt_check_reconnect();
+      sleep(mqtt_retry_interval);
+    }
+
+    if (i >= mqtt_retry_limit) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect limit reached: %d\n", i);
+      }
+
+      return(1);
+    }
+  }
+
+  pubmsg.payload = topic_value;
+  pubmsg.payloadlen = strlen(topic_value);
+  pubmsg.qos = DEFAULT_PUB_QOS;
+  pubmsg.retained = 0;
+  response = MQTTClient_publishMessage5(mqtt_client, topic, &pubmsg, &token);
+  rc = response.reasonCode;
+  MQTTResponse_free(response);
+  if (mqtt_debug) {
+    if (rc != MQTTCLIENT_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" with token %d\n", topic, token);
+    } else {
+      printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
+      rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
+    }
+  }
+
+  return(0);
+}
+
+
+/*
+ * Bacnet client read value handler.
+ */
+void bacnet_client_read_value_handler(uint8_t *service_request,
+  uint16_t service_len,
+  BACNET_ADDRESS *src,
+  BACNET_CONFIRMED_SERVICE_ACK_DATA *service_data)
+{
+  BACNET_READ_PROPERTY_DATA data;
+  int len;
+
+  printf("- bacnet_client_read_value_handler()\n");
+  printf("-- service_data->invoke_id: %d\n", service_data->invoke_id);
+
+  len = rp_ack_decode_service_request(service_request, service_len, &data);
+  if (len < 0) {
+    printf("<decode failed!>\n");
+  } else {
+    rp_ack_print_data(&data);
+    publish_bacnet_client_read_value_result(&data);
+  }
+}
+
+
+/*
+ * Initialize bacnet client service handlers.
+ */
+void init_bacnet_client_service_handlers(void)
+{
+  apdu_set_confirmed_ack_handler(
+    SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_read_value_handler);
+}
+
+
+/*
+ * Process local bacnet client read value command.
+ */
+int process_local_read_value_command(bacnet_client_cmd_opts *opts)
+{
+  BACNET_CHARACTER_STRING bs_val;
+  float f_val;
+  int i_val;
+
+  switch (opts->object_type) {
+    case OBJECT_ANALOG_INPUT:
+      if (Analog_Input_Instance_To_Index(opts->object_instance) < 1) {
+        return(1);
+      }
+
+      switch(opts->property) {
+        case PROP_PRESENT_VALUE:
+          f_val = Analog_Input_Present_Value(opts->object_instance);
+          mqtt_publish_command_result(OBJECT_ANALOG_INPUT, opts->object_instance, PROP_PRESENT_VALUE,
+            MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        case PROP_OBJECT_NAME:
+          Analog_Input_Object_Name(opts->object_instance, &bs_val);
+          mqtt_publish_command_result(OBJECT_ANALOG_INPUT, opts->object_instance, PROP_OBJECT_NAME,
+            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        default:
+          return(1);
+      }
+
+      break;
+
+    case OBJECT_ANALOG_OUTPUT:
+      if (Analog_Output_Instance_To_Index(opts->object_instance) < 1) {
+        return(1);
+      }
+
+      switch(opts->property) {
+        case PROP_PRESENT_VALUE:
+          f_val = Analog_Output_Present_Value(opts->object_instance);
+          mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRESENT_VALUE,
+            MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        case PROP_OBJECT_NAME:
+          Analog_Output_Object_Name(opts->object_instance, &bs_val);
+          mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_OBJECT_NAME,
+            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        default:
+          return(1);
+      }
+
+      break;
+
+    case OBJECT_ANALOG_VALUE:
+      if (Analog_Value_Instance_To_Index(opts->object_instance) < 1) {
+        return(1);
+      }
+
+      switch(opts->property) {
+        case PROP_PRESENT_VALUE:
+          f_val = Analog_Value_Present_Value(opts->object_instance);
+          mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRESENT_VALUE,
+            MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        case PROP_OBJECT_NAME:
+          Analog_Value_Object_Name(opts->object_instance, &bs_val);
+          mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_OBJECT_NAME,
+            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        default:
+          return(1);
+      }
+
+      break;
+
+    case OBJECT_BINARY_INPUT:
+      if (Binary_Input_Instance_To_Index(opts->object_instance) < 1) {
+        return(1);
+      }
+
+      switch(opts->property) {
+        case PROP_PRESENT_VALUE:
+          i_val = Binary_Input_Present_Value(opts->object_instance);
+          mqtt_publish_command_result(OBJECT_BINARY_INPUT, opts->object_instance, PROP_PRESENT_VALUE,
+            MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        case PROP_OBJECT_NAME:
+          Binary_Input_Object_Name(opts->object_instance, &bs_val);
+          mqtt_publish_command_result(OBJECT_BINARY_INPUT, opts->object_instance, PROP_OBJECT_NAME,
+            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        default:
+          return(1);
+      }
+        
+      break;
+
+    case OBJECT_BINARY_OUTPUT:
+      if (Binary_Output_Instance_To_Index(opts->object_instance) < 1) {
+        return(1);
+      }
+        
+      switch(opts->property) {
+        case PROP_PRESENT_VALUE:
+          i_val = Binary_Output_Present_Value(opts->object_instance);
+          mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRESENT_VALUE,
+            MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        case PROP_OBJECT_NAME:
+          Binary_Output_Object_Name(opts->object_instance, &bs_val);
+          mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_OBJECT_NAME,
+            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        default:
+          return(1);
+      }
+        
+      break;
+
+    case OBJECT_BINARY_VALUE:
+      if (Binary_Value_Instance_To_Index(opts->object_instance) < 1) {
+        return(1);
+      }
+
+      switch(opts->property) {
+        case PROP_PRESENT_VALUE:
+          i_val = Binary_Value_Present_Value(opts->object_instance);
+          mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRESENT_VALUE,
+            MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        case PROP_OBJECT_NAME:
+          Binary_Value_Object_Name(opts->object_instance, &bs_val);
+          mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_OBJECT_NAME,
+            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+          break;
+
+        default:
+          return(1);
+      }
+
+      break;
+
+    default:
+      if (mqtt_debug) {
+        printf("Unknown read value object_type: [%d]\n", opts->object_type);
+      }
+      return(1);
+  }
+
+  return(0);
+}
+
+
+/*
  * Process Bacnet client read value command.
  */
-int process_bacnet_client_read_value_command(char *object_type, char *object_index, char *property_id)
+int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
 {
-  uint32_t object_instance;
-  float f;
-  int i;
+  uint8_t Rx_Buf[MAX_MPDU] = { 0 };
+  BACNET_ADDRESS src = { 0 };
+  BACNET_MAC_ADDRESS mac = { 0 };
+  BACNET_ADDRESS dest = { 0 };
+  bool specific_address = false;
+  unsigned timeout = 100;
+  uint16_t pdu_len = 0;
+  int request_invoke_id;
 
-  if (!strlen(object_type) || !strlen(object_index) || !strlen(property_id)) {
+  if (opts->device_instance < 0 || opts->object_type < 0 || opts->object_instance < 0 ||
+    opts->property < 0) {
     if (mqtt_debug) {
-      printf("Empty read value object_type or object_index or property_id: [%s/%s/%s]\n",
-        object_type, object_index, property_id);
+      printf("Empty read value device_instance/object_type/object_instance/property: [%d/%d/%d/%d]\n",
+        opts->device_instance, opts->object_type, opts->object_instance, opts->property);
     }
 
     return(1);
   }
 
-  object_instance = strtoul(object_index, NULL, 10);
-  if (!object_instance) {
-    if (mqtt_debug) {
-      printf("Unknown read value object_index: [%s]\n", object_index);
-    }
+ if (strlen(opts->mac)) {
+   if (address_mac_from_ascii(&mac, opts->mac)) {
+     specific_address = true;
+   }
+ }
 
-    return(1);
-  }
+ if (specific_address) {
+   if (mac.len) {
+     memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+     dest.mac_len = mac.len;
+     dest.len = 0;
+     if ((opts->dnet >= 0) && (opts->dnet <= BACNET_BROADCAST_NETWORK)) {
+       dest.net = opts->dnet;
+     } else {
+       dest.net = 0;
+     }
+   }
 
-  if (strcmp(property_id, "name") && strcmp(property_id, "pv")) {
-    if (mqtt_debug) {
-      printf("Unknown read value property_id: [%s]\n", property_id);
-    }
+   address_add(opts->device_instance, MAX_APDU, &dest);
+ }
 
-    return(1);
-  }
+  switch (opts->object_type) {
+    case OBJECT_ANALOG_INPUT:
+    case OBJECT_ANALOG_OUTPUT:
+    case OBJECT_ANALOG_VALUE:
+    case OBJECT_BINARY_INPUT:
+    case OBJECT_BINARY_OUTPUT:
+    case OBJECT_BINARY_VALUE:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE) {
+        if (mqtt_debug) {
+          printf("Unsupported object_type %d property: %d\n", opts->object_type, opts->property);
+        }
 
-  if (!strcmp(object_type, "ai")) {
-    if (!strcmp(property_id, "pv")) {
-      f = Analog_Input_Present_Value(object_instance);
-      mqtt_publish_command_result(OBJECT_ANALOG_INPUT, object_instance, PROP_PRESENT_VALUE, 
-        MQTT_TOPIC_VALUE_FLOAT, &f, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-    }
-  } else if (!strcmp(object_type, "ao")) {
-    if (!strcmp(property_id, "pv")) {
-      f = Analog_Output_Present_Value(object_instance);
-      mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRESENT_VALUE, 
-        MQTT_TOPIC_VALUE_FLOAT, &f, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-    }
-  } else if (!strcmp(object_type, "av")) {
-    if (!strcmp(property_id, "pv")) {
-      f = Analog_Value_Present_Value(object_instance);
-      mqtt_publish_command_result(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE, 
-        MQTT_TOPIC_VALUE_FLOAT, &f, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-    }
-  } else if (!strcmp(object_type, "bi")) {
-    if (!strcmp(property_id, "pv")) {
-      i = Binary_Input_Present_Value(object_instance);
-      mqtt_publish_command_result(OBJECT_BINARY_INPUT, object_instance, PROP_PRESENT_VALUE, 
-        MQTT_TOPIC_VALUE_INTEGER, &i, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-    }
-  } else if (!strcmp(object_type, "bo")) {
-    if (!strcmp(property_id, "pv")) {
-      i = Binary_Output_Present_Value(object_instance);
-      mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, object_instance, PROP_PRESENT_VALUE, 
-        MQTT_TOPIC_VALUE_INTEGER, &i, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-    }
-  } else if (!strcmp(object_type, "bv")) {
-    if (!strcmp(property_id, "pv")) {
-      i = Binary_Value_Present_Value(object_instance);
-      mqtt_publish_command_result(OBJECT_BINARY_VALUE, object_instance, PROP_PRESENT_VALUE, 
-        MQTT_TOPIC_VALUE_INTEGER, &i, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-    }
-  } else {
-    if (mqtt_debug) {
-      printf("Unknown read value object_type: [%s]\n", object_type);
-    }
+        return(1);
+      }
 
-    return(1);
+      if (is_command_for_us(opts)) {
+        printf("command for us\n");
+        process_local_read_value_command(opts);
+      } else {
+        request_invoke_id = Send_Read_Property_Request(opts->device_instance,
+          opts->object_type, opts->object_instance, opts->property, opts->index);
+        printf("request_invoke_id: %d\n", request_invoke_id);
+
+        pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+        if (pdu_len) {
+          npdu_handler(&src, &Rx_Buf[0], pdu_len);
+        }
+      }
+
+      break;
+
+    default:
+      if (mqtt_debug) {
+        printf("Unknown read value object_type: [%d]\n", opts->object_type);
+      }
+      return(1);
   }
 
   return(0);
@@ -676,10 +1112,12 @@ int process_bacnet_client_read_value_command(char *object_type, char *object_ind
  */
 int process_bacnet_client_write_value_command(char *object_type, char *object_index, char *property_id, char *value)
 {
+  BACNET_BINARY_PV pv;
   uint32_t object_instance;
   char *endptr = NULL;
   unsigned int index;
   float f;
+  int i_val;
 
   if (!strlen(object_type) || !strlen(object_index) || !strlen(property_id)) {
     if (mqtt_debug) {
@@ -789,6 +1227,25 @@ int process_bacnet_client_write_value_command(char *object_type, char *object_in
       mqtt_publish_command_result(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE,
         MQTT_TOPIC_VALUE_FLOAT, &f, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
     }
+  } else if (!strcmp(object_type, "bi")) {
+    index = Binary_Input_Instance_To_Index(object_instance);
+    if (!index) {
+      if (mqtt_debug) {
+        printf("Unknown BI object index: [%s]\n", object_index);
+      }
+
+      return(1);
+    }
+
+    if (!strcmp(property_id, "pv")) {
+      i_val = atoi(value);
+      pv = (i_val == 0) ? 0 : 1;
+
+      Binary_Input_Present_Value_Set(object_instance, pv, NULL, true);
+      f = Binary_Input_Present_Value(object_instance);
+      mqtt_publish_command_result(OBJECT_BINARY_INPUT, object_instance, PROP_PRESENT_VALUE,
+        MQTT_TOPIC_VALUE_INTEGER, &pv, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+    }
   } else {
     if (mqtt_debug) {
       printf("Unknown write value object_type: [%s]\n", object_type);
@@ -804,12 +1261,13 @@ int process_bacnet_client_write_value_command(char *object_type, char *object_in
 /*
  * Process Bacnet client commands.
  */
-int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], int n_topic_tokens)
+int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], int n_topic_tokens,
+  bacnet_client_cmd_opts *opts)
 {
   if (!strcasecmp(topic_tokens[2], "whois")) {
     process_bacnet_client_whois_command();
   } else if (!strcasecmp(topic_tokens[2], "read_value")) {
-    process_bacnet_client_read_value_command(topic_tokens[3], topic_tokens[4], topic_tokens[5]);
+    process_bacnet_client_read_value_command(opts);
   } else if (!strcasecmp(topic_tokens[2], "write_value")) {
     process_bacnet_client_write_value_command(topic_tokens[3], topic_tokens[4], topic_tokens[5], topic_tokens[6]);
   } else {
@@ -825,12 +1283,72 @@ int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_
   return(0);
 }
 
+
+/*
+ * Extract json fields.
+ */
+int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_opts *cmd_opts)
+{
+  json_object *json_field;
+  char *key;
+  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  int i;
+  char *keys[] = {
+    "objectType",
+    "objectInstance",
+    "property",
+    "index",
+    "priority",
+    "deviceInstance",
+    "dnet",
+    "mac",
+    "daddr",
+    "tag",
+    "value",
+    NULL
+  };
+
+  for (i = 0; keys[i] ;i++) {
+    key = keys[i];
+    json_field = json_object_object_get(json_root, key);
+    if (!json_field) {
+      continue;
+    }
+
+    strncpy(value, json_object_get_string(json_field), sizeof(value) - 1);
+    if (!strcmp(key, "objectType")) {
+      cmd_opts->object_type = (unsigned)strtol(value, NULL, 0);
+    } else if (!strcmp(key, "objectInstance")) {
+      cmd_opts->object_instance = strtol(value, NULL, 0);
+    } else if (!strcmp(key, "property")) {
+      cmd_opts->property = (unsigned)strtol(value, NULL, 0);
+    } else if (!strcmp(key, "index")) {
+      cmd_opts->index = atoi(value);
+    } else if (!strcmp(key, "deviceInstance")) {
+      cmd_opts->device_instance = strtol(value, NULL, 0);
+    } else if (!strcmp(key, "dnet")) {
+      cmd_opts->dnet = atoi(value);
+    } else if (!strcmp(key, "mac")) {
+      strncpy(cmd_opts->mac, value, sizeof(cmd_opts->mac) - 1);
+    } else if (!strcmp(key, "daddr")) {
+      strncpy(cmd_opts->daddr, value, sizeof(cmd_opts->daddr) - 1);
+    } else {
+      if (mqtt_debug) {
+        printf("Unsupported command option key: %s. Skipping.\n", key);
+      }
+    }
+  }
+
+  return(0);
+}
+
  
 /*
  * MQTT message arrived callback.
  */
 int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_message *message)
 {
+  bacnet_client_cmd_opts cmd_opts = init_bacnet_client_cmd_opts;
   json_object *json_root, *json_field;
   char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH];
   char topic_value[MAX_TOPIC_VALUE_LENGTH];
@@ -861,8 +1379,30 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_messa
     dump_topic_tokens(n_topic_tokens, topic_tokens);
   }
 
+  json_root = json_tokener_parse(topic_value);
+  if (json_root == NULL) {
+    if (mqtt_debug) {
+      printf("Failed to parse topic value. Must be a JSON formatted string!\n");
+    }
+
+    goto EXIT;
+  }
+
+  if (mqtt_debug) {
+    printf("The json string:\n\n%s\n\n", json_object_to_json_string(json_root));
+  }
+
+  if (extract_json_fields_to_cmd_opts(json_root,
+    &cmd_opts)) {
+    if (mqtt_debug) {
+      printf("Error extracting command options!\n");
+    }
+
+    goto EXIT;
+  }
+
   if (!strcmp(topic_tokens[1], "cmd")) {
-    process_bacnet_client_command(topic_tokens, n_topic_tokens);
+    process_bacnet_client_command(topic_tokens, n_topic_tokens, &cmd_opts);
   } else {
 
   address = strtol(topic_tokens[2], &ptr, 10);
@@ -880,19 +1420,6 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_messa
     }
 
     goto EXIT;
-  }
-
-  json_root = json_tokener_parse(topic_value);
-  if (json_root == NULL) {
-    if (mqtt_debug) {
-      printf("Failed to parse topic value. Must be a JSON formatted string!\n");
-    }
-
-    goto EXIT;
-  }
-
-  if (mqtt_debug) {
-    printf("The json string:\n\n%s\n\n", json_object_to_json_string(json_root));
   }
 
   json_field = json_object_object_get(json_root, "value");
@@ -1126,6 +1653,8 @@ int mqtt_client_init(void)
       printf("- Failed to subscribe to one of the Bacnet client topics\n");
       return(1);
     }
+
+    init_bacnet_client_service_handlers();
   }
 
   return(0);
@@ -1549,7 +2078,7 @@ int subscribe_bacnet_client_read_value_command(void)
   MQTTResponse response;
   int rc;
   const char *topics[] = {
-    "bacnet/cmd/read_value/+/+/+",
+    "bacnet/cmd/read_value",
     NULL
   };
     
@@ -1591,7 +2120,7 @@ int subscribe_bacnet_client_write_value_command(void)
   MQTTResponse response;
   int rc;
   const char *topics[] = {
-    "bacnet/cmd/write_value/+/+/+/+",
+    "bacnet/cmd/write_value",
     NULL
   };
 
