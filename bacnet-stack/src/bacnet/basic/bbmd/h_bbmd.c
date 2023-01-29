@@ -92,6 +92,8 @@ static BACNET_IP_BROADCAST_DISTRIBUTION_TABLE_ENTRY
 static BACNET_IP_FOREIGN_DEVICE_TABLE_ENTRY FD_Table[MAX_FD_ENTRIES];
 #endif
 
+bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr);
+
 /**
  * @brief Enabled debug printing of BACnet/IPv4 BBMD
  */
@@ -255,12 +257,15 @@ void bvlc_maintenance_timer(uint16_t seconds)
  *
  * @return true if the IP from sin match me
  */
-static bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr)
+bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr)
 {
     BACNET_IP_ADDRESS my_addr = { 0 };
     bool status = false;
 
     if (bip_get_addr(&my_addr)) {
+debug_print_bip("*** my_addr:", &my_addr);
+debug_print_bip("*** addr:", addr);
+
         if (!bvlc_address_different(&my_addr, addr)) {
             status = true;
         }
