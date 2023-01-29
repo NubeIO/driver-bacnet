@@ -80,7 +80,8 @@ extern "C" {
     bool Binary_Input_Present_Value_Set(
         uint32_t object_instance,
         BACNET_BINARY_PV value,
-        char *uuid);
+        char *uuid,
+        int bacnet_client);
 
     BACNET_STACK_EXPORT
     char *Binary_Input_Description(

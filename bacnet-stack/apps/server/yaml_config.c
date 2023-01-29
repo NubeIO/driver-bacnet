@@ -31,6 +31,9 @@ struct _bacnet_client {
   const char *enable;
   const char **commands;
   unsigned int n_commands;
+  const char *whois_program;
+  const char *read_program;
+  const char *write_program;
 };
 
 /* top level struct for storing the configuration */
@@ -308,7 +311,7 @@ void yaml_config_dump(void)
   }
 
   if (bacnet_config->bacnet_client) {
-   printf("YAML Config: bacnet_client->debug: %s\n", (bacnet_config->bacnet_client->debug) ?
+    printf("YAML Config: bacnet_client->debug: %s\n", (bacnet_config->bacnet_client->debug) ?
       bacnet_config->bacnet_client->debug: "null");
     printf("YAML Config: bacnet_client->enable: %s\n", (bacnet_config->bacnet_client->enable) ?
       bacnet_config->bacnet_client->enable: "null");
@@ -519,7 +522,7 @@ const char **yaml_config_properties(int *length)
  */
 int yaml_config_bacnet_client_debug(void)
 { 
-  return ((bacnet_config->bacnet_client && bacnet_config->bacnet_client ->debug &&
+  return ((bacnet_config->bacnet_client && bacnet_config->bacnet_client->debug &&
     !strcmp(bacnet_config->bacnet_client->debug, "true")) ? true : false);
 }
 
@@ -550,6 +553,44 @@ const char **yaml_config_bacnet_client_commands(int *length)
 
   *length = bacnet_config->bacnet_client->n_commands;
   return(bacnet_config->bacnet_client->commands);
+}
+
+
+/*
+ * Get bacnet client whois program.
+ */
+const char *yaml_config_bacnet_client_whois_program(void)
+{
+  if (yaml_config_bacnet_client_disable) {
+    return(NULL);
+  }
+
+  return ((bacnet_config->bacnet_client) ? bacnet_config->bacnet_client->whois_program : NULL);
+}
+
+/*
+ * Get bacnet client read program.
+ */
+const char *yaml_config_bacnet_client_read_program(void)
+{ 
+  if (yaml_config_bacnet_client_disable) {
+    return(NULL);
+  }
+  
+  return ((bacnet_config->bacnet_client) ? bacnet_config->bacnet_client->read_program : NULL);
+}
+
+
+/*
+ * Get bacnet client write program.
+ */
+const char *yaml_config_bacnet_client_write_program(void)
+{ 
+  if (yaml_config_bacnet_client_disable) {
+    return(NULL);
+  }
+  
+  return ((bacnet_config->bacnet_client) ? bacnet_config->bacnet_client->write_program : NULL);
 }
 
 
