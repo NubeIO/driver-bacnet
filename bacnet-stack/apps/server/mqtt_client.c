@@ -121,6 +121,8 @@ int mqtt_subscribe_to_bacnet_client_topics(void);
 int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_opts *cmd_opts);
 int process_bacnet_client_whois_command(void);
 int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int vtype, void *vptr, int topic_id);
+bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr);
+int is_address_us(bacnet_client_cmd_opts *opts);
 int is_command_for_us(bacnet_client_cmd_opts *opts);
 char *get_object_type_str(int object_type);
 char *get_object_property_str(int object_property);
@@ -144,6 +146,7 @@ static char mqtt_client_id[124] = {0};
 static MQTTClient mqtt_client;
 static int mqtt_client_connected = false;
 static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = { -1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, 0, {0}, {0} };
+
 
 /*
  * MQTT subscribe connection lost callback.
@@ -625,13 +628,36 @@ int mqtt_publish_command_result(int object_type, int object_instance, int proper
 }
 
 
+int is_address_us(bacnet_client_cmd_opts *opts)
+{
+  BACNET_IP_ADDRESS addr = {0};
+  BACNET_MAC_ADDRESS mac = {0};
+  BACNET_ADDRESS b_addr = {0};
+
+  if (opts->mac) {
+    address_mac_from_ascii(&mac, opts->mac);
+    memcpy(&b_addr.mac[0], &mac.adr[0], mac.len);
+    b_addr.mac_len = mac.len;
+    b_addr.len = 0;
+    bvlc_ip_address_from_bacnet_local(&addr, &b_addr);
+
+    if (bbmd_address_match_self(&addr)) {
+      return(true);
+    }
+  }
+
+  return(false);
+}
+
+
 /*
  * Return true if the device instance ID in the Bacnet client command is the same
  * as the device ID.
  */
 int is_command_for_us(bacnet_client_cmd_opts *opts)
 {
-  if (Device_Object_Instance_Number() == opts->device_instance) {
+  if (Device_Object_Instance_Number() == opts->device_instance &&
+    is_address_us(opts)) {
     return(true);
   }
 
