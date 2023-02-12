@@ -224,6 +224,7 @@ int main(int argc, char *argv[])
     uint16_t pdu_len = 0;
     unsigned timeout = 1; /* milliseconds */
     time_t last_seconds = 0;
+    time_t last_sweep_seconds = 0;
     time_t current_seconds = 0;
     uint32_t elapsed_seconds = 0;
     uint32_t elapsed_milliseconds = 0;
@@ -339,6 +340,7 @@ int main(int argc, char *argv[])
     atexit(datalink_cleanup);
     /* configure the timeout values */
     last_seconds = time(NULL);
+    last_sweep_seconds = time(NULL);
     /* broadcast an I-Am on startup */
     Send_I_Am(&Handler_Transmit_Buffer[0]);
 #if defined(MQTT)
@@ -403,6 +405,12 @@ int main(int argc, char *argv[])
         /* output */
 
         /* blink LEDs, Turn on or off outputs, etc */
+
+        elapsed_seconds = (uint32_t)(current_seconds - last_sweep_seconds);
+        if (elapsed_seconds > 5) {
+            last_sweep_seconds = current_seconds;
+            sweep_bacnet_client_aged_requests();
+        }
     }
 
     clean_up();

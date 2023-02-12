@@ -1,6 +1,8 @@
 #ifndef MQTT_CLIENT_H
 #define MQTT_CLIENT_H
 
+#include <time.h>
+
 #ifndef true
 #define true                             1
 #endif
@@ -39,6 +41,18 @@
 #define MAX_CMD_STR_OPT_VALUE_LENGTH     100
 #define MAX_CMD_OPT_TAG_VALUE_PAIR       5
 
+#define CMD_TAG_FLAG_SLOW_TEST           0x01
+
+#define BACNET_CLIENT_REQUEST_TTL        12
+
+typedef struct _llist_cb {
+  struct _llist_cb *next;
+  time_t timestamp;
+  union {
+    uint8_t invoke_id;
+  } data;
+} llist_cb;
+
 /* bacnet-client command options */
 typedef struct _cmd_opt_tag_value_pair {
 } cmd_opt_tag_value_pair;
@@ -53,7 +67,9 @@ typedef struct _bacnet_client_cmd_opts {
   int dnet;
   char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char daddr[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   cmd_opt_tag_value_pair tag_value_pairs[MAX_CMD_OPT_TAG_VALUE_PAIR];
+  uint32_t tag_flags;
 } bacnet_client_cmd_opts;
 
 #ifdef __cplusplus
