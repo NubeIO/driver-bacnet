@@ -163,7 +163,7 @@ static llist_cb *bc_request_list_tail = NULL;
 void mqtt_connection_lost(void *context, char *cause)
 { 
   if (mqtt_debug) {
-     printf("MQTT connection lost: %s\n", cause);
+     printf("WARNING: MQTT connection lost: %s\n", cause);
   }
 
   mqtt_client_connected = false;
@@ -630,6 +630,9 @@ int mqtt_publish_command_result(int object_type, int object_instance, int proper
     } else {
       printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
       rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
+      if (rc != MQTTCLIENT_SUCCESS) {
+        printf("WARNING: Error in MQTTClient_waitForCompletion()\n");
+      }
     }
   }
 
