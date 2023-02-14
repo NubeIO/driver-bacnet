@@ -629,10 +629,10 @@ int mqtt_publish_command_result(int object_type, int object_instance, int proper
       printf("MQTT failed to publish topic: \"%s\" with token %d\n", topic, token);
     } else {
       printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
-      rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
+      /* rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
       if (rc != MQTTCLIENT_SUCCESS) {
         printf("WARNING: Error in MQTTClient_waitForCompletion()\n");
-      }
+      } */
     }
   }
 
@@ -851,7 +851,7 @@ int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data)
       printf("MQTT failed to publish topic: \"%s\" with token %d\n", topic, token);
     } else {
       printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
-      rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
+      // rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
     }
   }
 
@@ -2314,7 +2314,7 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
       printf("MQTT failed to publish topic: \"%s\" with token %d\n", topic, token);
     } else {
       printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
-      rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
+      // rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
     }
   }
 
