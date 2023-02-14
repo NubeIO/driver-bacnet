@@ -1472,6 +1472,8 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
       strncpy(cmd_opts->daddr, value, sizeof(cmd_opts->daddr) - 1);
     } else if (!strcmp(key, "value")) {
       strncpy(cmd_opts->value, value, sizeof(cmd_opts->value) - 1);
+    } else if (!strcmp(key, "uuid")) {
+      strncpy(cmd_opts->uuid, value, sizeof(cmd_opts->uuid) - 1);
     } else if (!strcmp(key, "tags")) {
       if (!strcmp(value, "slow_test")) {
         cmd_opts->tag_flags |= CMD_TAG_FLAG_SLOW_TEST;

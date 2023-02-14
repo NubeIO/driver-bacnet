@@ -70,6 +70,7 @@ typedef struct _bacnet_client_cmd_opts {
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   cmd_opt_tag_value_pair tag_value_pairs[MAX_CMD_OPT_TAG_VALUE_PAIR];
   uint32_t tag_flags;
+  char uuid[MAX_CMD_STR_OPT_VALUE_LENGTH];
 } bacnet_client_cmd_opts;
 
 #ifdef __cplusplus
