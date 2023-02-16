@@ -150,7 +150,7 @@ static int mqtt_debug = false;
 static char mqtt_broker_ip[51] = {0};
 static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[124] = {0};
-static MQTTClient mqtt_client;
+static MQTTClient mqtt_client = NULL;
 static int mqtt_client_connected = false;
 static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = { -1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, 0, {0}, {0}, {0} };
 
@@ -1671,6 +1671,11 @@ void mqtt_check_reconnect(void)
 {
   int rc;
 
+  rc = MQTTClient_isConnected(mqtt_client);
+  if (!rc) {
+    printf("WARNING: MQTT client not connected!\n");
+  }
+
   if (!mqtt_client_connected) {
     if (mqtt_debug) {
       printf("MQTT connection was lost. Reconnecting to MQTT broker...\n");
@@ -1917,7 +1922,8 @@ int mqtt_client_init(void)
     return(1);
   }
 
-  rc = MQTTClient_setCallbacks(mqtt_client, NULL, mqtt_connection_lost, mqtt_msg_arrived, mqtt_msg_delivered);
+  // rc = MQTTClient_setCallbacks(mqtt_client, NULL, mqtt_connection_lost, mqtt_msg_arrived, mqtt_msg_delivered);
+  rc = MQTTClient_setCallbacks(mqtt_client, NULL, mqtt_connection_lost, mqtt_msg_arrived, NULL);
   if (rc != MQTTCLIENT_SUCCESS) {
     printf("MQTT error setting up callbacks\n");
     return(1);
@@ -2461,7 +2467,7 @@ int subscribe_bacnet_client_write_value_command(void)
 int mqtt_subscribe_to_bacnet_client_topics(void)
 {   
   int i, n_commands = 0;
-  const char **commands;
+  char **commands;
     
   commands = yaml_config_bacnet_client_commands(&n_commands);
   if ((commands == NULL) || (n_commands == 0)) {
