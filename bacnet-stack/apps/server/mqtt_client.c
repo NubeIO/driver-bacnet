@@ -15,7 +15,8 @@
 
 #include "bacnet/basic/services.h"
 
-#include "MQTTClient.h"
+// #include "MQTTClient.h"
+#include "MQTTAsync.h"
 #include "json-c/json.h"
 #include "mqtt_client.h"
 #if defined(YAML_CONFIG)
@@ -107,17 +108,16 @@ int process_bi_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 int process_bo_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
 int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
 void mqtt_connection_lost(void *context, char *cause);
-int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_message *message);
-void mqtt_msg_delivered(void *context, MQTTClient_deliveryToken dt);
+int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_message *message);
 int mqtt_connect_to_broker(void);
-int subscribe_write_prop_name(void);
-int subscribe_write_prop_present_value(void);
-int subscribe_write_prop_priority_array(void);
-int mqtt_subscribe_to_topics(void);
-int subscribe_bacnet_client_whois_command(void);
-int subscribe_bacnet_client_read_value_command(void);
-int subscribe_bacnet_client_write_value_command(void);
-int mqtt_subscribe_to_bacnet_client_topics(void);
+int subscribe_write_prop_name(void *context);
+int subscribe_write_prop_present_value(void *context);
+int subscribe_write_prop_priority_array(void *context);
+int mqtt_subscribe_to_topics(void *context);
+int subscribe_bacnet_client_whois_command(void *context);
+int subscribe_bacnet_client_read_value_command(void *context);
+int subscribe_bacnet_client_write_value_command(void *context);
+int mqtt_subscribe_to_bacnet_client_topics(void *context);
 int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_opts *cmd_opts);
 int process_bacnet_client_whois_command(void);
 int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int vtype, void *vptr, int topic_id);
@@ -150,7 +150,7 @@ static int mqtt_debug = false;
 static char mqtt_broker_ip[51] = {0};
 static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[124] = {0};
-static MQTTClient mqtt_client = NULL;
+static MQTTAsync mqtt_client = NULL;
 static int mqtt_client_connected = false;
 static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = { -1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, 0, {0}, {0}, {0} };
 
@@ -543,14 +543,25 @@ int process_bacnet_client_whois_command(void)
 }
 
 
+void mqtt_on_send_success(void* context, MQTTAsync_successData* response)
+{
+  printf("Message with token value %d delivery confirmed\n", response->token);
+}
+
+
+void mqtt_on_send_failure(void* context, MQTTAsync_failureData* response)
+{
+  printf("Message send failed token %d error code %d\n", response->token, response->code);
+}
+
+
 /*
  * Publish Bacnet client topic.
  */
 int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int vtype, void *vptr, int topic_id)
 {
-  MQTTResponse response;
-  MQTTClient_message pubmsg = MQTTClient_message_initializer;
-  MQTTClient_deliveryToken token;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
   char topic[512];
   char topic_value[1024];
   char buf[1024];
@@ -566,6 +577,10 @@ int mqtt_publish_command_result(int object_type, int object_instance, int proper
   if (mqtt_debug) {
     printf("MQTT publish topic: %s\n", topic);
   }
+
+  opts.onSuccess = mqtt_on_send_success;
+  opts.onFailure = mqtt_on_send_failure;
+  opts.context = mqtt_client;
 
   switch(vtype) {
     case MQTT_TOPIC_VALUE_STRING:
@@ -621,18 +636,12 @@ int mqtt_publish_command_result(int object_type, int object_instance, int proper
 
   pubmsg.qos = DEFAULT_PUB_QOS;
   pubmsg.retained = 0;
-  response = MQTTClient_publishMessage5(mqtt_client, topic, &pubmsg, &token);
-  rc = response.reasonCode;
-  MQTTResponse_free(response);
+  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
   if (mqtt_debug) {
-    if (rc != MQTTCLIENT_SUCCESS) {
-      printf("MQTT failed to publish topic: \"%s\" with token %d\n", topic, token);
+    if (rc != MQTTASYNC_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
     } else {
-      printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
-      /* rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
-      if (rc != MQTTCLIENT_SUCCESS) {
-        printf("WARNING: Error in MQTTClient_waitForCompletion()\n");
-      } */
+      printf("MQTT published topic: \"%s\"\n", topic);
     }
   }
 
@@ -789,9 +798,8 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, char *buf, int buf
  */
 int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data)
 {
-  MQTTResponse response;
-  MQTTClient_message pubmsg = MQTTClient_message_initializer;
-  MQTTClient_deliveryToken token;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
   char topic[512];
   char topic_value[1024] = {0};
   char *object_type_str;
@@ -839,19 +847,20 @@ int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data)
     }
   }
 
+  opts.onSuccess = mqtt_on_send_success;
+  opts.onFailure = mqtt_on_send_failure;
+  opts.context = mqtt_client;
+
   pubmsg.payload = topic_value;
   pubmsg.payloadlen = strlen(topic_value);
   pubmsg.qos = DEFAULT_PUB_QOS;
   pubmsg.retained = 0;
-  response = MQTTClient_publishMessage5(mqtt_client, topic, &pubmsg, &token);
-  rc = response.reasonCode;
-  MQTTResponse_free(response);
+  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
   if (mqtt_debug) {
-    if (rc != MQTTCLIENT_SUCCESS) {
-      printf("MQTT failed to publish topic: \"%s\" with token %d\n", topic, token);
+    if (rc != MQTTASYNC_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
     } else {
-      printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
-      // rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
+      printf("MQTT published topic: \"%s\"\n", topic);
     }
   }
 
@@ -870,7 +879,7 @@ void bacnet_client_read_value_handler(uint8_t *service_request,
   BACNET_READ_PROPERTY_DATA data;
   int len;
 
-  printf("- bacnet_client_read_value_handler()\n");
+  printf("- bacnet_client_read_value_handler() => %d\n", getpid());
   printf("-- service_data->invoke_id: %d\n", service_data->invoke_id);
 
   if (is_bacnet_client_request_present(service_data->invoke_id)) {
@@ -1179,7 +1188,6 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts)
 int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
 {
   BACNET_APPLICATION_DATA_VALUE value = { 0 };
-  BACNET_ADDRESS src = { 0 };
   BACNET_MAC_ADDRESS mac = { 0 };
   BACNET_ADDRESS dest = { 0 };
   bool specific_address = false;
@@ -1492,7 +1500,7 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
 /*
  * MQTT message arrived callback.
  */
-int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_message *message)
+int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_message *message)
 {
   bacnet_client_cmd_opts cmd_opts = init_bacnet_client_cmd_opts;
   json_object *json_root, *json_field;
@@ -1509,7 +1517,7 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_messa
     (message->payloadlen > sizeof(topic_value)) ? sizeof(topic_value) -1 : message->payloadlen);
 
   if (mqtt_debug) {
-     printf("MQTT message arrived:\n");
+     printf("MQTT message arrived: => %d\n", getpid());
      printf("- version: [%d]\n", message->struct_version);
      printf("- topic  : [%s]\n", topic);
      printf("- value  : [%s]\n", topic_value);
@@ -1617,21 +1625,51 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTClient_messa
  
   EXIT:
 
-  MQTTClient_freeMessage(&message);
-  MQTTClient_free(topic);
+  MQTTAsync_freeMessage(&message);
+  MQTTAsync_free(topic);
 
   return(1);
 }
 
 
 /*
- * MQTT message delivered callback.
+ * On connect handler.
  */
-void mqtt_msg_delivered(void *context, MQTTClient_deliveryToken dt)
+void mqtt_on_connect(void* context, MQTTAsync_successData* response)
 {
-  if (mqtt_debug) {
-     printf("MQTT message delivered\n");
+  int rc;
+
+  printf("MQTT client connected!\n");
+
+  mqtt_client_connected = true;
+
+  if (yaml_config_mqtt_write_via_subscribe()) {
+    printf("MQTT write via subscribe enabled\n");
+    rc = mqtt_subscribe_to_topics(context);
+    if (rc) {
+      printf("- Failed to subscribe to one of the topics\n");
+    }
   }
+
+  if (yaml_config_bacnet_client_enable()) {
+    printf("Bacnet client enabled\n");
+    rc = mqtt_subscribe_to_bacnet_client_topics(context);
+    if (rc) {
+      printf("- Failed to subscribe to one of the Bacnet client topics\n");
+    }
+
+    init_bacnet_client_service_handlers();
+  }
+}
+
+
+/*
+ * On connect failure handler.
+ */
+void mqtt_on_connect_failure(void* context, MQTTAsync_failureData* response)
+{
+  printf("Connect failed, rc %d\n", response->code);
+  mqtt_client_connected = false;
 }
 
 
@@ -1640,23 +1678,18 @@ void mqtt_msg_delivered(void *context, MQTTClient_deliveryToken dt)
  */
 int mqtt_connect_to_broker(void)
 {
-  MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
-  MQTTProperties props = MQTTProperties_initializer;
-  MQTTProperties willProps = MQTTProperties_initializer;
-  MQTTResponse response = MQTTResponse_initializer;
+  MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
   int rc;
 
   conn_opts.keepAliveInterval = 30;
-  // conn_opts.MQTTVersion = MQTTVERSION_5;
-  // conn_opts.cleanstart = 1;
   conn_opts.cleansession = 1;
-  // response = MQTTClient_connect5(mqtt_client, &conn_opts, &props, &willProps);
-  // rc = response.reasonCode;
-  // MQTTResponse_free(response);
-  rc = MQTTClient_connect(mqtt_client, &conn_opts);
-  if (rc != MQTTCLIENT_SUCCESS)
+  conn_opts.context = mqtt_client;
+  conn_opts.onSuccess = mqtt_on_connect;
+  conn_opts.onFailure = mqtt_on_connect_failure;
+  rc = MQTTAsync_connect(mqtt_client, &conn_opts);
+  if (rc != MQTTASYNC_SUCCESS)
   {
-    printf("MQTT failed to connect to server: %s\n", MQTTClient_strerror(rc));
+    printf("MQTT failed to connect to server: %s\n", MQTTAsync_strerror(rc));
     return(1);
   }
 
@@ -1671,7 +1704,7 @@ void mqtt_check_reconnect(void)
 {
   int rc;
 
-  rc = MQTTClient_isConnected(mqtt_client);
+  rc = MQTTAsync_isConnected(mqtt_client);
   if (!rc) {
     printf("WARNING: MQTT client not connected!\n");
   }
@@ -1693,7 +1726,7 @@ void mqtt_check_reconnect(void)
 
     if (yaml_config_mqtt_write_via_subscribe()) {
       printf("MQTT write via subscribe enabled\n");
-      rc = mqtt_subscribe_to_topics();
+      rc = mqtt_subscribe_to_topics(mqtt_client);
       if (rc) {
         printf("- Failed to subscribe to one of the topics\n");
         return;
@@ -1854,7 +1887,7 @@ void sweep_bacnet_client_aged_requests(void)
  */
 int mqtt_client_init(void)
 {
-  MQTTClient_createOptions createOpts = MQTTClient_createOptions_initializer;
+  MQTTAsync_createOptions createOpts = MQTTAsync_createOptions_initializer;
   char mqtt_broker_endpoint[100];
   char buf[100];
   char *pEnv;
@@ -1915,44 +1948,20 @@ int mqtt_client_init(void)
     printf("MQTT client ID: %s\n", mqtt_client_id);
   }
 
-  // createOpts.MQTTVersion = MQTTVERSION_5;
-  rc = MQTTClient_createWithOptions(&mqtt_client, mqtt_broker_endpoint, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL, &createOpts);
-  if (rc != MQTTCLIENT_SUCCESS) {
+  rc = MQTTAsync_createWithOptions(&mqtt_client, mqtt_broker_endpoint, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL, &createOpts);
+  if (rc != MQTTASYNC_SUCCESS) {
     printf("MQTT error creating client instance: %s\n", mqtt_broker_endpoint);
     return(1);
   }
 
-  // rc = MQTTClient_setCallbacks(mqtt_client, NULL, mqtt_connection_lost, mqtt_msg_arrived, mqtt_msg_delivered);
-  rc = MQTTClient_setCallbacks(mqtt_client, NULL, mqtt_connection_lost, mqtt_msg_arrived, NULL);
-  if (rc != MQTTCLIENT_SUCCESS) {
+  rc = MQTTAsync_setCallbacks(mqtt_client, mqtt_client, mqtt_connection_lost, mqtt_msg_arrived, NULL);
+  if (rc != MQTTASYNC_SUCCESS) {
     printf("MQTT error setting up callbacks\n");
     return(1);
   }
 
   if (mqtt_connect_to_broker()) {
     return(1);
-  }
-
-  mqtt_client_connected = true;
-
-  if (yaml_config_mqtt_write_via_subscribe()) {
-    printf("MQTT write via subscribe enabled\n");
-    rc = mqtt_subscribe_to_topics();
-    if (rc) {
-      printf("- Failed to subscribe to one of the topics\n");
-      return(1);
-    }
-  }
-
-  if (yaml_config_bacnet_client_enable()) {
-    printf("Bacnet client enabled\n");
-    rc = mqtt_subscribe_to_bacnet_client_topics();
-    if (rc) {
-      printf("- Failed to subscribe to one of the Bacnet client topics\n");
-      return(1);
-    }
-
-    init_bacnet_client_service_handlers();
   }
 
   init_bacnet_client_request_list();
@@ -1962,12 +1971,30 @@ int mqtt_client_init(void)
 
 
 /*
+ * On subscribe success handler.
+ */
+void mqtt_on_subscribe(void* context, MQTTAsync_successData* response)
+{
+  printf("Subscribe succeeded\n");
+}
+
+
+/*
+ * On subscribe failure handler.
+ */
+void mqtt_on_subscribe_failure(void* context, MQTTAsync_failureData* response)
+{
+  printf("Subscribe failed, rc %d\n", response->code);
+}
+
+
+/*
  * Subscribe to write property name topics.
  */
-int subscribe_write_prop_name(void)
+int subscribe_write_prop_name(void* context)
 {
-  MQTTSubscribe_options subOpts = MQTTSubscribe_options_initializer;
-  MQTTResponse response;
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
   const char *topics[] = {
     "bacnet/+/+/write/name",
@@ -1983,20 +2010,16 @@ int subscribe_write_prop_name(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    // response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, &subOpts, NULL);
-    // rc = response.reasonCode;
-    // MQTTResponse_free(response);
-    rc = MQTTClient_subscribe(mqtt_client, topics[i], 0);
-    if (rc != MQTTCLIENT_SUCCESS) {
+    opts.onSuccess = mqtt_on_subscribe;
+    opts.onFailure = mqtt_on_subscribe_failure;
+    opts.context = client;
+    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
       if (mqtt_debug) {
-        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
       }
 
       // return(1);
-    } else {
-      if (mqtt_debug) {
-        printf("- Subscribed\n");
-      }
     }
   }
 
@@ -2007,9 +2030,10 @@ int subscribe_write_prop_name(void)
 /*
  * Subscribe to write property present value topics.
  */
-int subscribe_write_prop_present_value(void)
+int subscribe_write_prop_present_value(void* context)
 {
-  MQTTResponse response;
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
   const char *topics[] = {
     "bacnet/+/+/write/pv",
@@ -2025,20 +2049,16 @@ int subscribe_write_prop_present_value(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    // response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, NULL, NULL);
-    // rc = response.reasonCode;
-    // MQTTResponse_free(response);
-    rc = MQTTClient_subscribe(mqtt_client, topics[i], 0);
-    if (rc != MQTTCLIENT_SUCCESS) {
+    opts.onSuccess = mqtt_on_subscribe;
+    opts.onFailure = mqtt_on_subscribe_failure;
+    opts.context = client;
+    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
       if (mqtt_debug) {
-        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
       }
       
       // return(1);
-    } else {
-      if (mqtt_debug) {
-        printf("- Subscribed\n");
-      }
     }
   }
 
@@ -2049,9 +2069,10 @@ int subscribe_write_prop_present_value(void)
 /*
  * Subscribe to write property name topics.
  */
-int subscribe_write_prop_priority_array(void)
+int subscribe_write_prop_priority_array(void* context)
 {
-  MQTTResponse response;
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
   const char *topics[] = {
     "bacnet/+/+/write/pri/+",
@@ -2068,20 +2089,16 @@ int subscribe_write_prop_priority_array(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    // response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, NULL, NULL);
-    // rc = response.reasonCode;
-    // MQTTResponse_free(response);
-    rc = MQTTClient_subscribe(mqtt_client, topics[i], 0);
-    if (rc != MQTTCLIENT_SUCCESS) {
+    opts.onSuccess = mqtt_on_subscribe;
+    opts.onFailure = mqtt_on_subscribe_failure;
+    opts.context = client;
+    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
       if (mqtt_debug) {
-        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
       }
 
       // return(1);
-    } else {
-      if (mqtt_debug) {
-        printf("- Subscribed\n");
-      }
     }
   }
 
@@ -2092,7 +2109,7 @@ int subscribe_write_prop_priority_array(void)
 /*
  * Subscribe to topics.
  */
-int mqtt_subscribe_to_topics(void)
+int mqtt_subscribe_to_topics(void* context)
 {
   int i, n_topics = 0;
   const char **topics;
@@ -2104,15 +2121,15 @@ int mqtt_subscribe_to_topics(void)
 
   for (i = 0; i < n_topics; i++) {
     if (!strncmp(topics[i], "name", 4)) {
-      if (subscribe_write_prop_name()) {
+      if (subscribe_write_prop_name(context)) {
         // return(1);
       }
     } else if (!strncmp(topics[i], "pv", 2)) {
-      if (subscribe_write_prop_present_value()) {
+      if (subscribe_write_prop_present_value(context)) {
         // return(1);
       }
     } else if (!strncmp(topics[i], "pri", 3)) {
-      if (subscribe_write_prop_priority_array()) {
+      if (subscribe_write_prop_priority_array(context)) {
         // return(1);
       }
     }
@@ -2122,13 +2139,30 @@ int mqtt_subscribe_to_topics(void)
 }
 
 
+void mqtt_on_disconnect(void* context, MQTTAsync_successData* response)
+{
+  printf("- MQTT client disconnected!\n");
+}
+
+
+void mqtt_on_disconnect_failure(void* context, MQTTAsync_failureData* response)
+{
+  printf("- MQTT client failed to disconnect!\n");
+}
+
+
 /*
  * Shutdown mqtt client module.
  */
 void mqtt_client_shutdown(void)
 {
-  MQTTClient_disconnect(mqtt_client, 10000);
-  MQTTClient_destroy(&mqtt_client);
+  MQTTAsync_disconnectOptions disc_opts = MQTTAsync_disconnectOptions_initializer;
+
+  disc_opts.onSuccess = mqtt_on_disconnect;
+  disc_opts.onFailure = mqtt_on_disconnect_failure;
+
+  MQTTAsync_disconnect(mqtt_client, &disc_opts);
+  MQTTAsync_destroy(&mqtt_client);
 
   shutdown_bacnet_client_request_list();
 }
@@ -2239,9 +2273,8 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
  */
 int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr, char *uuid_value)
 {
-  MQTTResponse response;
-  MQTTClient_message pubmsg = MQTTClient_message_initializer;
-  MQTTClient_deliveryToken token;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
   char topic[512];
   char topic_value[1024];
   char buf[1024];
@@ -2314,17 +2347,18 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
     }
   }
 
+  opts.onSuccess = mqtt_on_send_success;
+  opts.onFailure = mqtt_on_send_failure;
+  opts.context = mqtt_client;
+
   pubmsg.qos = DEFAULT_PUB_QOS;
   pubmsg.retained = 0;
-  response = MQTTClient_publishMessage5(mqtt_client, topic, &pubmsg, &token);
-  rc = response.reasonCode;
-  MQTTResponse_free(response);
+  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
   if (mqtt_debug) {
-    if (rc != MQTTCLIENT_SUCCESS) {
-      printf("MQTT failed to publish topic: \"%s\" with token %d\n", topic, token);
+    if (rc != MQTTASYNC_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
     } else {
-      printf("MQTT published topic: \"%s\" with token %d\n", topic, token);
-      // rc = MQTTClient_waitForCompletion(mqtt_client, token, DEFAULT_PUB_TIMEOUT);
+      printf("MQTT published topic: \"%s\"\n", topic);
     }
   }
 
@@ -2335,10 +2369,10 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
 /*
  * Subscribe to bacnet client whois command topics.
  */
-int subscribe_bacnet_client_whois_command(void)
+int subscribe_bacnet_client_whois_command(void *context)
 {
-  MQTTSubscribe_options subOpts = MQTTSubscribe_options_initializer;
-  MQTTResponse response;
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
   const char *topics[] = {
     "bacnet/cmd/whois",
@@ -2354,20 +2388,16 @@ int subscribe_bacnet_client_whois_command(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    // response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, &subOpts, NULL);
-    // rc = response.reasonCode;
-    // MQTTResponse_free(response);
-    rc = MQTTClient_subscribe(mqtt_client, topics[i], 0);
-    if (rc != MQTTCLIENT_SUCCESS) {
+    opts.onSuccess = mqtt_on_subscribe;
+    opts.onFailure = mqtt_on_subscribe_failure;
+    opts.context = client;
+    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
       if (mqtt_debug) {
-        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
       }
 
       // return(1);
-    } else {
-      if (mqtt_debug) {
-        printf("- Subscribed\n");
-      }
     }
   }
 
@@ -2378,10 +2408,10 @@ int subscribe_bacnet_client_whois_command(void)
 /*
  * Subscribe to bacnet client read value command topics.
  */
-int subscribe_bacnet_client_read_value_command(void)
+int subscribe_bacnet_client_read_value_command(void *context)
 {
-  MQTTSubscribe_options subOpts = MQTTSubscribe_options_initializer;
-  MQTTResponse response;
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
   const char *topics[] = {
     "bacnet/cmd/read_value",
@@ -2397,20 +2427,16 @@ int subscribe_bacnet_client_read_value_command(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     } 
         
-    // response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, &subOpts, NULL);
-    // rc = response.reasonCode;
-    // MQTTResponse_free(response);
-    rc = MQTTClient_subscribe(mqtt_client, topics[i], 0);
-    if (rc != MQTTCLIENT_SUCCESS) {
+    opts.onSuccess = mqtt_on_subscribe;
+    opts.onFailure = mqtt_on_subscribe_failure;
+    opts.context = client;
+    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
       if (mqtt_debug) {
-        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
       }
 
       // return(1);
-    } else {
-      if (mqtt_debug) {
-        printf("- Subscribed\n");
-      }
     }
   }
 
@@ -2421,10 +2447,10 @@ int subscribe_bacnet_client_read_value_command(void)
 /*
  * Subscribe to bacnet client write value command topics.
  */
-int subscribe_bacnet_client_write_value_command(void)
+int subscribe_bacnet_client_write_value_command(void *context)
 {
-  MQTTSubscribe_options subOpts = MQTTSubscribe_options_initializer;
-  MQTTResponse response;
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
   const char *topics[] = {
     "bacnet/cmd/write_value",
@@ -2440,20 +2466,16 @@ int subscribe_bacnet_client_write_value_command(void)
       printf("- topic[%d] = [%s]\n", i, topics[i]);
     }
 
-    // response = MQTTClient_subscribe5(mqtt_client, topics[i], 2, &subOpts, NULL);
-    // rc = response.reasonCode;
-    // MQTTResponse_free(response);
-    rc = MQTTClient_subscribe(mqtt_client, topics[i], 0);
-    if (rc != MQTTCLIENT_SUCCESS) {
+    opts.onSuccess = mqtt_on_subscribe;
+    opts.onFailure = mqtt_on_subscribe_failure;
+    opts.context = client;
+    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
       if (mqtt_debug) {
-        printf("- WARNING: Failed to subscribe: %s\n", MQTTClient_strerror(rc));
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
       }
 
       // return(1);
-    } else {
-      if (mqtt_debug) {
-        printf("- Subscribed\n");
-      }
     }
   }
 
@@ -2464,7 +2486,7 @@ int subscribe_bacnet_client_write_value_command(void)
 /*
  * Subscribe to bacnet client topics.
  */ 
-int mqtt_subscribe_to_bacnet_client_topics(void)
+int mqtt_subscribe_to_bacnet_client_topics(void *context)
 {   
   int i, n_commands = 0;
   char **commands;
@@ -2476,15 +2498,15 @@ int mqtt_subscribe_to_bacnet_client_topics(void)
     
   for (i = 0; i < n_commands; i++) {
     if (!strncmp(commands[i], "whois", 5)) {
-      if (subscribe_bacnet_client_whois_command()) {
+      if (subscribe_bacnet_client_whois_command(context)) {
         // return(1);
       }
     } else if (!strncmp(commands[i], "read_value", 10)) {
-      if (subscribe_bacnet_client_read_value_command()) {
+      if (subscribe_bacnet_client_read_value_command(context)) {
         // return(1);
       }
     } else if (!strncmp(commands[i], "write_value", 11)) {
-      if (subscribe_bacnet_client_write_value_command()) {
+      if (subscribe_bacnet_client_write_value_command(context)) {
         // return(1);
       }
     }
