@@ -11,36 +11,37 @@
 
 #include "bacnet/basic/object/device.h"
 
-#define DEFAULT_YAML_CONFIG   "/data/bacnet-server-driver/config/config.yml"
+#define DEFAULT_YAML_CONFIG         "/data/bacnet-server-driver/config/config.yml"
+#define MAX_YAML_STR_VALUE_LENGTH   51
 
 /* mqtt struct */
 struct _mqtt {
-  const char *broker_ip;
+  char *broker_ip;
   uint16_t broker_port;
-  const char *debug;
-  const char *enable;
-  const char *write_via_subscribe;
-  const char *retry_enable;
+  char *debug;
+  char *enable;
+  char *write_via_subscribe;
+  char *retry_enable;
   unsigned int retry_limit;
   unsigned int retry_interval;
 };
 
 /* bacnet-client */
 struct _bacnet_client {
-  const char *debug;
-  const char *enable;
-  const char **commands;
+  char *debug;
+  char *enable;
+  char **commands;
   unsigned int n_commands;
-  const char *whois_program;
-  const char *read_program;
-  const char *write_program;
+  char *whois_program;
+  char *read_program;
+  char *write_program;
 };
 
 /* top level struct for storing the configuration */
 struct _bacnet_config {
-  const char *server_name;
-  const char *device_id;
-  const char *iface;
+  char *server_name;
+  char *device_id;
+  char *iface;
   uint16_t port;
   unsigned int bi_max;
   unsigned int bo_max;
@@ -49,12 +50,15 @@ struct _bacnet_config {
   unsigned int ao_max;
   unsigned int av_max;
   struct _mqtt *mqtt;
-  const char **objects;
+  char **objects;
   unsigned int n_objects;
-  const char **properties;
+  char **properties;
   unsigned n_properties;
   struct _bacnet_client *bacnet_client;
 };
+
+/* forward decls */
+void load_default_settings(void);
 
 /* globals */
 static struct _bacnet_config *bacnet_config = NULL;
@@ -69,19 +73,19 @@ static const cyaml_schema_value_t string_ptr_schema = {
 
 static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
-    "broker_ip", CYAML_FLAG_POINTER,
+    "broker_ip", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _mqtt, broker_ip, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_UINT(
-    "broker_port", CYAML_FLAG_DEFAULT,
+    "broker_port", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _mqtt, broker_port),
 
   CYAML_FIELD_STRING_PTR(
-    "debug", CYAML_FLAG_POINTER,
+    "debug", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _mqtt, debug, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_STRING_PTR(
-    "enable", CYAML_FLAG_POINTER,
+    "enable", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _mqtt, enable, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_STRING_PTR(
@@ -105,11 +109,11 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
 
 static const cyaml_schema_field_t bacnet_client_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
-    "debug", CYAML_FLAG_POINTER,
+    "debug", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_client, debug, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_STRING_PTR(
-    "enable", CYAML_FLAG_POINTER,
+    "enable", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_client, enable, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_SEQUENCE_COUNT(
@@ -122,15 +126,15 @@ static const cyaml_schema_field_t bacnet_client_fields_schema[] = {
 
 static const cyaml_schema_field_t config_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
-    "server_name", CYAML_FLAG_POINTER,
+    "server_name", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, server_name, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_STRING_PTR(
-    "device_id", CYAML_FLAG_POINTER,
+    "device_id", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, device_id, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_STRING_PTR(
-    "iface", CYAML_FLAG_POINTER,
+    "iface", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, iface, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_UINT(
@@ -138,31 +142,31 @@ static const cyaml_schema_field_t config_fields_schema[] = {
     struct _bacnet_config, port),
 
   CYAML_FIELD_UINT(
-    "bi_max", CYAML_FLAG_DEFAULT,
+    "bi_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, bi_max),
 
   CYAML_FIELD_UINT(
-    "bo_max", CYAML_FLAG_DEFAULT,
+    "bo_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, bo_max),
 
   CYAML_FIELD_UINT(
-    "bv_max", CYAML_FLAG_DEFAULT,
+    "bv_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, bv_max),
 
   CYAML_FIELD_UINT(
-    "ai_max", CYAML_FLAG_DEFAULT,
+    "ai_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, ai_max),
 
   CYAML_FIELD_UINT(
-    "ao_max", CYAML_FLAG_DEFAULT,
+    "ao_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, ao_max),
 
   CYAML_FIELD_UINT(
-    "av_max", CYAML_FLAG_DEFAULT,
+    "av_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, av_max),
 
   CYAML_FIELD_MAPPING_PTR(
-    "mqtt", CYAML_FLAG_POINTER,
+    "mqtt", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, mqtt, mqtt_fields_schema),
 
   CYAML_FIELD_SEQUENCE_COUNT(
@@ -176,7 +180,7 @@ static const cyaml_schema_field_t config_fields_schema[] = {
     &string_ptr_schema, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_MAPPING_PTR(
-    "bacnet_client", CYAML_FLAG_POINTER,
+    "bacnet_client", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, bacnet_client, bacnet_client_fields_schema),
 
   CYAML_FIELD_END
@@ -193,6 +197,135 @@ static const cyaml_config_t yaml_config = {
   .log_level = CYAML_LOG_WARNING, /* Logging errors and warnings only. */
   .flags = CYAML_CFG_IGNORE_UNKNOWN_KEYS
 };
+
+
+/*
+ * Load default configs.
+ */
+void load_default_settings(void)
+{
+  if (bacnet_config) {
+    if (!bacnet_config->server_name) {
+      bacnet_config->server_name = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->server_name, "My Bacnet Server");
+    }
+
+    if (!bacnet_config->device_id) {
+      bacnet_config->device_id = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->device_id, "1234");
+    }
+
+    if (!bacnet_config->port) {
+      bacnet_config->port = 47808;
+    }
+
+    if (!bacnet_config->bi_max) {
+      bacnet_config->bi_max = 10;
+    }
+
+    if (!bacnet_config->bo_max) {
+      bacnet_config->bo_max = 10;
+    }
+
+    if (!bacnet_config->bv_max) {
+      bacnet_config->bv_max = 20;
+    }
+
+    if (!bacnet_config->ai_max) {
+      bacnet_config->ai_max = 10;
+    }
+
+    if (!bacnet_config->ao_max) {
+      bacnet_config->ao_max = 10;
+    }
+
+    if (!bacnet_config->av_max) {
+      bacnet_config->av_max = 20;
+    }
+
+    if (!bacnet_config->mqtt) {
+      bacnet_config->mqtt = malloc(sizeof(struct _mqtt));
+      memset(bacnet_config->mqtt, 0, sizeof(struct _mqtt));
+      bacnet_config->mqtt->retry_limit = 3;
+      bacnet_config->mqtt->retry_interval = 5;
+    }
+
+    if (!bacnet_config->mqtt->broker_ip) {
+      bacnet_config->mqtt->broker_ip = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mqtt->broker_ip, "127.0.0.1");
+    }
+
+    if (!bacnet_config->mqtt->broker_port) {
+      bacnet_config->mqtt->broker_port = 1883;
+    }
+
+    if (!bacnet_config->mqtt->debug) {
+      bacnet_config->mqtt->debug = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mqtt->debug, "false");
+    }
+
+    if (!bacnet_config->mqtt->enable) {
+      bacnet_config->mqtt->enable = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mqtt->enable, "true");
+    }
+
+    if (!bacnet_config->mqtt->write_via_subscribe) {
+      bacnet_config->mqtt->write_via_subscribe = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mqtt->write_via_subscribe, "true");
+    }
+
+    if (!bacnet_config->mqtt->retry_enable) {
+      bacnet_config->mqtt->retry_enable = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mqtt->retry_enable, "true");
+    }
+
+    if (!bacnet_config->objects) {
+      char *obj_names[6] = { "ai", "ao", "av", "bi", "bo", "bV" };
+      bacnet_config->n_objects = 6;
+      bacnet_config->objects = malloc(sizeof(char*) * bacnet_config->n_objects);
+      for (int i = 0; i < bacnet_config->n_objects; i++) {
+        bacnet_config->objects[i] = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+        strcpy(bacnet_config->objects[i], obj_names[i]);
+      }
+    }
+
+    if (!bacnet_config->properties) {
+      char *prop_names[3] = { "name", "pv", "pri" };
+      bacnet_config->n_properties = 3;
+      bacnet_config->properties = malloc(sizeof(char*) * bacnet_config->n_properties);
+      for (int i = 0; i < bacnet_config->n_properties; i++) {
+        bacnet_config->properties[i] = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+        strcpy(bacnet_config->properties[i], prop_names[i]);
+      }
+    }
+
+    if (!bacnet_config->bacnet_client) {
+      bacnet_config->bacnet_client= malloc(sizeof(struct _bacnet_client));
+      memset(bacnet_config->bacnet_client, 0, sizeof(struct _bacnet_client));
+    }
+
+    if (!bacnet_config->bacnet_client->debug) {
+      bacnet_config->bacnet_client->debug = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->bacnet_client->debug, "false");
+    }
+
+    if (!bacnet_config->bacnet_client->enable) {
+      bacnet_config->bacnet_client->enable = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->bacnet_client->enable, "true");
+    }
+
+    if (!bacnet_config->bacnet_client->commands) {
+      char *cmd_names[3] = { "whois", "read_value", "write_value" };
+      bacnet_config->bacnet_client->n_commands = 3;
+      bacnet_config->bacnet_client->commands = malloc(sizeof(char*) * bacnet_config->bacnet_client->n_commands);
+      for (int i = 0; i < bacnet_config->bacnet_client->n_commands; i++) {
+        bacnet_config->bacnet_client->commands[i] = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+        strcpy(bacnet_config->bacnet_client->commands[i], cmd_names[i]);
+      }
+    }
+  }
+}
+
 
 /*
  * Initialize yaml config module.
@@ -250,6 +383,8 @@ int yaml_config_init(void)
     fprintf(stderr, "ERROR: %s\n", cyaml_strerror(err));
     exit(1);
   }
+
+  load_default_settings();
 
   if (yaml_config_debug) {
     yaml_config_dump();
@@ -331,7 +466,7 @@ void yaml_config_dump(void)
 /*
  * Get server name.
  */
-const char *yaml_config_server_name(void)
+char *yaml_config_server_name(void)
 {
   return(bacnet_config->server_name);
 }
@@ -340,7 +475,7 @@ const char *yaml_config_server_name(void)
 /*
  * Get device ID.
  */
-const char *yaml_config_service_id(void)
+char *yaml_config_service_id(void)
 {
   return(bacnet_config->device_id);
 }
@@ -349,7 +484,7 @@ const char *yaml_config_service_id(void)
 /*
  * Get interface name.
  */
-const char *yaml_config_iface(void)
+char *yaml_config_iface(void)
 {
   return(bacnet_config->iface);
 }
@@ -421,7 +556,7 @@ int yaml_config_av_max(void)
 /*
  * Get MQTT Broker IP.
  */
-const char *yaml_config_mqtt_broker_ip(void)
+char *yaml_config_mqtt_broker_ip(void)
 {
   return(bacnet_config->mqtt->broker_ip);
 }
@@ -501,7 +636,7 @@ int yaml_config_mqtt_connect_retry_interval(void)
 /*
  * Get objects.
  */
-const char **yaml_config_objects(int *length)
+char **yaml_config_objects(int *length)
 {
   *length = bacnet_config->n_objects;
   return(bacnet_config->objects);
@@ -511,7 +646,7 @@ const char **yaml_config_objects(int *length)
 /*
  * Get properties.
  */
-const char **yaml_config_properties(int *length)
+char **yaml_config_properties(int *length)
 {
   *length = bacnet_config->n_properties;
   return(bacnet_config->properties);
@@ -545,7 +680,7 @@ int yaml_config_bacnet_client_enable(void)
 /*
  * Get bacnet client commands.
  */
-const char **yaml_config_bacnet_client_commands(int *length)
+char **yaml_config_bacnet_client_commands(int *length)
 {
   if (bacnet_config->bacnet_client == NULL) {
     *length = 0;
@@ -560,7 +695,7 @@ const char **yaml_config_bacnet_client_commands(int *length)
 /*
  * Get bacnet client whois program.
  */
-const char *yaml_config_bacnet_client_whois_program(void)
+char *yaml_config_bacnet_client_whois_program(void)
 {
   if (yaml_config_bacnet_client_disable) {
     return(NULL);
@@ -572,7 +707,7 @@ const char *yaml_config_bacnet_client_whois_program(void)
 /*
  * Get bacnet client read program.
  */
-const char *yaml_config_bacnet_client_read_program(void)
+char *yaml_config_bacnet_client_read_program(void)
 { 
   if (yaml_config_bacnet_client_disable) {
     return(NULL);
@@ -585,7 +720,7 @@ const char *yaml_config_bacnet_client_read_program(void)
 /*
  * Get bacnet client write program.
  */
-const char *yaml_config_bacnet_client_write_program(void)
+char *yaml_config_bacnet_client_write_program(void)
 { 
   if (yaml_config_bacnet_client_disable) {
     return(NULL);

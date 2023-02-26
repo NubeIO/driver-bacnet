@@ -9,11 +9,11 @@ extern "C" {
 
   void yaml_config_dump(void);
 
-  const char *yaml_config_server_name(void);
+  char *yaml_config_server_name(void);
 
-  const char *yaml_config_service_id(void);
+  char *yaml_config_service_id(void);
 
-  const char *yaml_config_iface(void);
+  char *yaml_config_iface(void);
 
   int yaml_config_port(void);
 
@@ -29,7 +29,7 @@ extern "C" {
 
   int yaml_config_av_max(void);
 
-  const char *yaml_config_mqtt_broker_ip(void);
+  char *yaml_config_mqtt_broker_ip(void);
 
   int yaml_config_mqtt_broker_port(void);
 
@@ -45,21 +45,21 @@ extern "C" {
 
   int yaml_config_mqtt_connect_retry_interval(void);
 
-  const char **yaml_config_objects(int *length);
+  char **yaml_config_objects(int *length);
 
-  const char **yaml_config_properties(int *length);
+  char **yaml_config_properties(int *length);
 
   int yaml_config_bacnet_client_debug(void);
 
   int yaml_config_bacnet_client_enable(void);
 
-  const char **yaml_config_bacnet_client_commands(int *length);
+  char **yaml_config_bacnet_client_commands(int *length);
 
-  const char *yaml_config_bacnet_client_whois_program(void);
+  char *yaml_config_bacnet_client_whois_program(void);
 
-  const char *yaml_config_bacnet_client_read_program(void);
+  char *yaml_config_bacnet_client_read_program(void);
 
-  const char *yaml_config_bacnet_client_write_program(void);
+  char *yaml_config_bacnet_client_write_program(void);
 
   int yaml_config_cleanup(void);
 
