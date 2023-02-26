@@ -1503,7 +1503,8 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
 int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_message *message)
 {
   bacnet_client_cmd_opts cmd_opts = init_bacnet_client_cmd_opts;
-  json_object *json_root, *json_field;
+  json_object *json_root = NULL;
+  json_object *json_field;
   char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH];
   char topic_value[MAX_TOPIC_VALUE_LENGTH];
   char prop_value[MAX_TOPIC_VALUE_LENGTH] = {0};
@@ -1624,6 +1625,10 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_messag
   }
  
   EXIT:
+
+  if (json_root) {
+    json_object_put(json_root);
+  }
 
   MQTTAsync_freeMessage(&message);
   MQTTAsync_free(topic);
