@@ -121,7 +121,8 @@ extern "C" {
     bool Analog_Output_Set_Object_Name(
         uint32_t object_instance,
         BACNET_CHARACTER_STRING *object_name,
-        char *uuid);
+        char *uuid,
+        int bacnet_client);
     BACNET_STACK_EXPORT
     bool Analog_Output_Name_Set(
         uint32_t object_instance,

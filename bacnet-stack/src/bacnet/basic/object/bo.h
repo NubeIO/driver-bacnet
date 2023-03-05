@@ -103,7 +103,8 @@ extern "C" {
         uint32_t instance,
         BACNET_BINARY_PV binary_value,
         unsigned priority,
-        char *uuid);
+        char *uuid,
+        int bacnet_client);
     BACNET_STACK_EXPORT
     bool Binary_Output_Priority_Array_Set(
         uint32_t object_instance,
@@ -162,7 +163,8 @@ extern "C" {
     bool Binary_Output_Set_Object_Name(
         uint32_t object_instance,
         BACNET_CHARACTER_STRING *object_name,
-        char *uuid);
+        char *uuid,
+        int bacnet_client);
 
     BACNET_STACK_EXPORT
     int Binary_Output_Read_Property(

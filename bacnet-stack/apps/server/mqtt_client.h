@@ -45,11 +45,20 @@
 
 #define BACNET_CLIENT_REQUEST_TTL        12
 
+typedef struct _llist_obj_data {
+  uint32_t device_instance;
+  BACNET_OBJECT_TYPE object_type;
+  uint32_t object_instance;
+  BACNET_PROPERTY_ID object_property;
+  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+} llist_obj_data;
+
 typedef struct _llist_cb {
   struct _llist_cb *next;
   time_t timestamp;
-  union {
+  struct _llist_cb_data {
     uint8_t invoke_id;
+    llist_obj_data obj_data;
   } data;
 } llist_cb;
 
@@ -83,6 +92,7 @@ void mqtt_client_shutdown(void);
 char *mqtt_form_publish_topic(char *device_id, char *object_name);
 char *mqtt_create_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len, int topic_type);
 int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr, char *uuid_value);
+void sweep_bacnet_client_aged_requests(void);
 
 #ifdef __cplusplus
 }
