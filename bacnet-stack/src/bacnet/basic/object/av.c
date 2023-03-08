@@ -396,7 +396,7 @@ bool Analog_Value_Object_Name(
 }
 
 bool Analog_Value_Set_Object_Name(
-    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid)
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid, int bacnet_client)
 {
     bool status = false;
     unsigned index = 0;
@@ -407,7 +407,7 @@ bool Analog_Value_Set_Object_Name(
             status = characterstring_copy(&Analog_Value_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable()) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
         }
@@ -1136,7 +1136,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Value_Instance_Names[0]));
             if (status) {
                 Analog_Value_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL);
+                    &value.type.Character_String, NULL, false);
             }
             break;
         case PROP_OBJECT_TYPE:

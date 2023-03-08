@@ -267,7 +267,7 @@ bool Binary_Value_Object_Name(
 }
 
 bool Binary_Value_Set_Object_Name(
-    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid)
+    uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid, int bacnet_client)
 {
     bool status = false;
     unsigned index = 0;
@@ -278,7 +278,7 @@ bool Binary_Value_Set_Object_Name(
             status = characterstring_copy(&Binary_Value_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable()) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
         }
@@ -519,7 +519,7 @@ void publish_bv_priority_array(uint32_t object_instance, char *uuid)
 
 
 bool Binary_Value_Present_Value_Set(
-    uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid)
+    uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid, int bacnet_client)
 {
     unsigned index = 0;
     bool status = false;
@@ -529,7 +529,7 @@ bool Binary_Value_Present_Value_Set(
         Binary_Value_Level[index - 1][priority - 1] = value;
         status = true;
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable()) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             if (value == BINARY_NULL) {
                 mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRESENT_VALUE,
                     MQTT_TOPIC_VALUE_STRING, "null", uuid);
@@ -656,7 +656,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                        main loop (i.e. check out of service before changing
                        output) */
                     Binary_Value_Present_Value_Set(wp_data->object_instance,
-                        (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL);
+                        (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL, false);
                     status = true;
                 } else if (priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
@@ -685,7 +685,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                            main loop (i.e. check out of service before changing
                            output) */
                         Binary_Value_Present_Value_Set(wp_data->object_instance,
-                            level, wp_data->priority, NULL);
+                            level, wp_data->priority, NULL, false);
                     } else {
                         status = false;
                         wp_data->error_class = ERROR_CLASS_PROPERTY;
@@ -708,7 +708,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Binary_Value_Instance_Names[0]));
             if (status) {
                 Binary_Value_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL);
+                    &value.type.Character_String, NULL, false);
             }
             break;
         case PROP_DESCRIPTION:
