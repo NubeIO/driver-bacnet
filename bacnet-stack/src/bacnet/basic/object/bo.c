@@ -449,6 +449,22 @@ void publish_priority_array(uint32_t object_instance, char *uuid)
     }
 }
 
+/* get the values of priority array */
+void get_bo_priority_array(uint32_t object_instance, BACNET_BINARY_PV *pa, int pa_length)
+{
+    unsigned index = 0;
+    unsigned i;
+    unsigned max;
+
+    index = Binary_Output_Instance_To_Index(object_instance);
+    if (index > 0 && index <= Binary_Output_Instances) {
+        max = (pa_length < BACNET_MAX_PRIORITY) ? pa_length : BACNET_MAX_PRIORITY;
+        for (i = 0; i < max; i++) {
+            pa[i] = Binary_Output_Level[index - 1][i];
+        }
+    }
+}
+
 bool Binary_Output_Present_Value_Set(
     uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid, int bacnet_client)
 {

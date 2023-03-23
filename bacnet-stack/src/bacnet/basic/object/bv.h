@@ -209,6 +209,12 @@ extern "C" {
         uint32_t object_instance,
         char *uuid);
 
+    BACNET_STACK_EXPORT
+    void get_bv_priority_array(
+        uint32_t object_instance,
+        BACNET_BINARY_PV *pa,
+        int pa_length);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

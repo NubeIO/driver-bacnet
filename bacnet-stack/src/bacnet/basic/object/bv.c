@@ -487,7 +487,7 @@ int Binary_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 
 /* publish the values of priority array over mqtt */
 void publish_bv_priority_array(uint32_t object_instance, char *uuid)
-{   
+{
     BACNET_BINARY_PV value;
     char buf[1024] = {0};
     char *first = "";
@@ -517,6 +517,21 @@ void publish_bv_priority_array(uint32_t object_instance, char *uuid)
     }
 }
 
+/* get the values of priority array */
+void get_bv_priority_array(uint32_t object_instance, BACNET_BINARY_PV *pa, int pa_length)
+{
+    unsigned index = 0;
+    unsigned i;
+    unsigned max;
+
+    index = Binary_Value_Instance_To_Index(object_instance);
+    if (index > 0 && index <= Binary_Value_Instances) {
+        max = (pa_length < BACNET_MAX_PRIORITY) ? pa_length : BACNET_MAX_PRIORITY;
+        for (i = 0; i < max; i++) {
+            pa[i] = Binary_Value_Level[index - 1][i];
+        }
+    }
+}
 
 bool Binary_Value_Present_Value_Set(
     uint32_t object_instance, BACNET_BINARY_PV value, unsigned int priority, char *uuid, int bacnet_client)

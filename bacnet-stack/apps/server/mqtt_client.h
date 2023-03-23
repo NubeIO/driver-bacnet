@@ -27,6 +27,8 @@
 #define MQTT_TOPIC_VALUE_BACNET_STRING   2
 #define MQTT_TOPIC_VALUE_INTEGER         3
 #define MQTT_TOPIC_VALUE_FLOAT           4
+#define MQTT_TOPIC_VALUE_FLOAT_MAX_PRIO  5
+#define MQTT_TOPIC_VALUE_BINARY_MAX_PRIO 6
 
 #define MAX_TOPIC_TOKENS                 10
 #define MAX_TOPIC_TOKEN_LENGTH           31
@@ -45,11 +47,15 @@
 
 #define BACNET_CLIENT_REQUEST_TTL        12
 
+#define MAX_JSON_KEY_VALUE_PAIR          10
+
 typedef struct _llist_obj_data {
   uint32_t device_instance;
   BACNET_OBJECT_TYPE object_type;
   uint32_t object_instance;
   BACNET_PROPERTY_ID object_property;
+  int priority;
+  int index;
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
 } llist_obj_data;
 
@@ -62,10 +68,6 @@ typedef struct _llist_cb {
   } data;
 } llist_cb;
 
-/* bacnet-client command options */
-typedef struct _cmd_opt_tag_value_pair {
-} cmd_opt_tag_value_pair;
-
 typedef struct _bacnet_client_cmd_opts {
   BACNET_OBJECT_TYPE object_type;
   uint32_t object_instance;
@@ -77,10 +79,14 @@ typedef struct _bacnet_client_cmd_opts {
   char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char daddr[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
-  cmd_opt_tag_value_pair tag_value_pairs[MAX_CMD_OPT_TAG_VALUE_PAIR];
   uint32_t tag_flags;
   char uuid[MAX_CMD_STR_OPT_VALUE_LENGTH];
 } bacnet_client_cmd_opts;
+
+typedef struct _json_key_value_pair {
+  char key[MAX_JSON_KEY_LENGTH];
+  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+} json_key_value_pair;
 
 #ifdef __cplusplus
 extern "C" {

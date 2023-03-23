@@ -577,6 +577,22 @@ void publish_ao_priority_array(uint32_t object_instance, char *uuid)
     }
 }
 
+/* get the values of priority array */
+void get_ao_priority_array(uint32_t object_instance, float *pa, int pa_length)
+{
+    unsigned index = 0;
+    unsigned i;
+    unsigned max;
+
+    index = Analog_Output_Instance_To_Index(object_instance);
+    if (index > 0 && index <= Analog_Output_Instances) {
+        max = (pa_length < BACNET_MAX_PRIORITY) ? pa_length : BACNET_MAX_PRIORITY;
+        for (i = 0; i < max; i++) {
+            pa[i] = Analog_Output_Level[index - 1][i];
+        }
+    }
+}
+
 /* returns true if successful */
 bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 {

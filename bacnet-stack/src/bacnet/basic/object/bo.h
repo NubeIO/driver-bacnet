@@ -187,6 +187,12 @@ extern "C" {
     void Binary_Output_Cleanup(
         void);
 
+    BACNET_STACK_EXPORT
+    void get_bo_priority_array(
+        uint32_t object_instance,
+        BACNET_BINARY_PV *pa,
+        int pa_length);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
