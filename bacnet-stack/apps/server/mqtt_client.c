@@ -129,7 +129,7 @@ int subscribe_bacnet_client_read_value_command(void *context);
 int subscribe_bacnet_client_write_value_command(void *context);
 int mqtt_subscribe_to_bacnet_client_topics(void *context);
 int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_opts *cmd_opts);
-int process_bacnet_client_whois_command(void);
+int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts);
 int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int priority,
   int vtype, void *vptr, int topic_id, json_key_value_pair *kv_pairs, int kvps_length);
 bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr);
@@ -172,7 +172,7 @@ static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[124] = {0};
 static MQTTAsync mqtt_client = NULL;
 static int mqtt_client_connected = false;
-static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = { -1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, 0, {0}, {0}, {0} };
+static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = {-1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, -1, {0}, {0}, {0}, -1, {0}, -1, -1};
 
 static llist_cb *bc_request_list_head = NULL;
 static llist_cb *bc_request_list_tail = NULL;
@@ -557,8 +557,66 @@ int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 /*
  * Process Bacnet client Whois command.
  */
-int process_bacnet_client_whois_command(void)
+int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
 {
+  BACNET_ADDRESS src = { 0 };
+  BACNET_MAC_ADDRESS mac = { 0 };
+  BACNET_ADDRESS dest = { 0 };
+  BACNET_MAC_ADDRESS adr = { 0 };
+  uint16_t pdu_len;
+  uint8_t Rx_Buf[MAX_MPDU] = { 0 };
+  long dnet = -1;
+  bool global_broadcast = true;
+  unsigned delay_milliseconds = 120;
+
+  if (strlen(opts->mac)) {
+    if (address_mac_from_ascii(&mac, opts->mac)) {
+      global_broadcast = false;
+    }
+  }
+
+  if (opts->dnet >= 0 && (opts->dnet <= BACNET_BROADCAST_NETWORK)) {
+    dnet = opts->dnet;
+    global_broadcast = false;
+  }
+
+  if (strlen(opts->daddr)) {
+    if (address_mac_from_ascii(&adr, opts->daddr)) {
+      global_broadcast = false;
+    }
+  }
+
+  if (global_broadcast) {
+    datalink_get_broadcast_address(&dest);
+  }
+
+  if (opts->device_instance_max < 0) {
+    opts->device_instance_max = opts->device_instance_min;
+  }
+
+  if (opts->device_instance_min > BACNET_MAX_INSTANCE) {
+    printf("Mininum Device-Instance exceeded limit!\n");
+    return(1);
+  }
+
+  if (opts->device_instance_max > BACNET_MAX_INSTANCE) {
+    printf("Maximum Device-Instance exceeded limit!\n");
+    return(1);
+  }
+
+printf("- Sending whois to network ...\n");
+
+  Send_WhoIs_To_Network(
+    &dest, opts->device_instance_min, opts->device_instance_max);
+
+  pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU,
+    delay_milliseconds);
+  /* process */
+  if (pdu_len) {
+    npdu_handler(&src, &Rx_Buf[0], pdu_len);
+        
+  }
+printf("- Request sent!\n");
   return(0);
 }
 
@@ -1187,6 +1245,47 @@ static void bacnet_client_write_value_handler(
 
 
 /*
+ * Bacnet client whois handler.
+ */
+static void bacnet_client_whois_handler(uint8_t *service_request, uint16_t service_len,
+  BACNET_ADDRESS *src)
+{
+  int len = 0;
+  uint32_t device_id = 0;
+  unsigned max_apdu = 0;
+  int segmentation = 0;
+  uint16_t vendor_id = 0;
+  unsigned i = 0;
+
+  (void)service_len;
+  len = iam_decode_service_request(
+    service_request, &device_id, &max_apdu, &segmentation, &vendor_id);
+  fprintf(stderr, "Received I-Am Request");
+
+  if (len != -1) {
+    fprintf(stderr, " from %lu, MAC = ", (unsigned long)device_id);
+    if ((src->mac_len == 6) && (src->len == 0)) {
+      fprintf(stderr, "%u.%u.%u.%u %02X%02X\n", (unsigned)src->mac[0],
+        (unsigned)src->mac[1], (unsigned)src->mac[2],
+        (unsigned)src->mac[3], (unsigned)src->mac[4],
+        (unsigned)src->mac[5]);
+    } else {
+      for (i = 0; i < src->mac_len; i++) {
+        fprintf(stderr, "%02X", (unsigned)src->mac[i]);
+        if (i < (src->mac_len - 1)) {
+          fprintf(stderr, ":");
+        }
+      }
+      fprintf(stderr, "\n");
+    }
+    // address_table_add(device_id, max_apdu, src);
+  } else {
+    fprintf(stderr, ", but unable to decode it.\n");
+  }
+}
+
+
+/*
  * Initialize bacnet client service handlers.
  */
 void init_bacnet_client_service_handlers(void)
@@ -1195,6 +1294,7 @@ void init_bacnet_client_service_handlers(void)
     SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_read_value_handler);
   apdu_set_confirmed_simple_ack_handler(
     SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_write_value_handler);
+  apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, bacnet_client_whois_handler);
 }
 
 
@@ -1922,7 +2022,7 @@ int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_
   bacnet_client_cmd_opts *opts)
 {
   if (!strcasecmp(topic_tokens[2], "whois")) {
-    process_bacnet_client_whois_command();
+    process_bacnet_client_whois_command(opts);
   } else if (!strcasecmp(topic_tokens[2], "read_value")) {
     process_bacnet_client_read_value_command(opts);
   } else if (!strcasecmp(topic_tokens[2], "write_value")) {

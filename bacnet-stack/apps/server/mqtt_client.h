@@ -81,6 +81,8 @@ typedef struct _bacnet_client_cmd_opts {
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   uint32_t tag_flags;
   char uuid[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  int32_t device_instance_min;
+  int32_t device_instance_max;
 } bacnet_client_cmd_opts;
 
 typedef struct _json_key_value_pair {
