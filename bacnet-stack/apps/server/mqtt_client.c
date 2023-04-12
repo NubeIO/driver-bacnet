@@ -30,6 +30,10 @@
 #define AV_LEVEL_NULL 255
 #endif
 
+#ifndef BAC_ADDRESS_MULT
+#define BAC_ADDRESS_MULT 1
+#endif
+
 /* forward decls */
 extern bool Analog_Input_Set_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name, char *uuid, int bacnet_client);
@@ -129,7 +133,7 @@ int subscribe_bacnet_client_read_value_command(void *context);
 int subscribe_bacnet_client_write_value_command(void *context);
 int mqtt_subscribe_to_bacnet_client_topics(void *context);
 int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_opts *cmd_opts);
-int process_bacnet_client_whois_command(void);
+int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts);
 int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int priority,
   int vtype, void *vptr, int topic_id, json_key_value_pair *kv_pairs, int kvps_length);
 bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr);
@@ -141,6 +145,7 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
 int encode_write_value_result(llist_obj_data *data, char *buf, int buf_len);
 int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data);
 int publish_bacnet_client_write_value_result(llist_obj_data *data);
+int publish_bacnet_client_whois_result(llist_whois_cb *cb);
 void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outlen, bacnet_client_cmd_opts *opts);
 int process_local_read_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts);
@@ -149,12 +154,26 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], int n_topic_tokens, bacnet_client_cmd_opts *opts);
 
+void encode_array_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data, char *buf, int buf_len);
+
 void init_bacnet_client_request_list(void);
 void shutdown_bacnet_client_request_list(void);
 int is_bacnet_client_request_present(uint8_t invoke_id);
 llist_obj_data *get_bacnet_client_request_obj_data(uint8_t invoke_id, llist_obj_data *buf);
 int add_bacnet_client_request(uint8_t invoke_id, llist_obj_data *obj_data);
 int del_bacnet_client_request(uint8_t invoke_id);
+
+void init_bacnet_client_whois_list(void);
+void shutdown_bacnet_client_whois_list(void);
+int is_bacnet_client_whois_present(void);
+address_table_cb *get_bacnet_client_first_whois_data(void);
+int add_bacnet_client_whois(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts);
+int del_bacnet_client_first_whois_request(void);
+void whois_address_table_add(address_table_cb *table, uint32_t device_id,
+  unsigned max_apdu, BACNET_ADDRESS *src);
+void whois_address_table_add(address_table_cb *table, uint32_t device_id,
+  unsigned max_apdu, BACNET_ADDRESS *src);
+int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len);
 
 void mqtt_on_send_success(void* context, MQTTAsync_successData* response);
 void mqtt_on_send_failure(void* context, MQTTAsync_failureData* response);
@@ -165,6 +184,13 @@ void mqtt_on_disconnect_failure(void* context, MQTTAsync_failureData* response);
 void mqtt_on_subscribe(void* context, MQTTAsync_successData* response);
 void mqtt_on_subscribe_failure(void* context, MQTTAsync_failureData* response);
 
+int iam_decode_service_request(uint8_t *apdu,
+  uint32_t *pDevice_id,
+  unsigned *pMax_apdu,
+  int *pSegmentation,
+  uint16_t *pVendor_id);
+bool bacnet_address_same(BACNET_ADDRESS *dest, BACNET_ADDRESS *src);
+
 /* globals */
 static int mqtt_debug = false;
 static char mqtt_broker_ip[51] = {0};
@@ -172,10 +198,15 @@ static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[124] = {0};
 static MQTTAsync mqtt_client = NULL;
 static int mqtt_client_connected = false;
-static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = { -1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, 0, {0}, {0}, {0} };
+static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = {-1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0,
+  BACNET_MAX_INSTANCE, -1, {0}, {0}, {0}, -1, {0}, -1, -1, 0};
 
 static llist_cb *bc_request_list_head = NULL;
 static llist_cb *bc_request_list_tail = NULL;
+
+static uint32_t bc_whois_request_ctr = 0;
+static llist_whois_cb *bc_whois_head = NULL;
+static llist_whois_cb *bc_whois_tail = NULL;
 
 /*
  * MQTT subscribe connection lost callback.
@@ -557,8 +588,101 @@ int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 /*
  * Process Bacnet client Whois command.
  */
-int process_bacnet_client_whois_command(void)
+int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
 {
+  BACNET_ADDRESS src = { 0 };
+  BACNET_MAC_ADDRESS mac = { 0 };
+  BACNET_ADDRESS dest = { 0 };
+  BACNET_MAC_ADDRESS adr = { 0 };
+  long dnet = -1;
+  uint16_t pdu_len;
+  uint8_t Rx_Buf[MAX_MPDU] = { 0 };
+  bool global_broadcast = true;
+  unsigned delay_milliseconds = 120;
+
+  if (strlen(opts->mac)) {
+    if (address_mac_from_ascii(&mac, opts->mac)) {
+      global_broadcast = false;
+    }
+  }
+
+  if (opts->dnet >= 0 && (opts->dnet <= BACNET_BROADCAST_NETWORK)) {
+    dnet = opts->dnet;
+    global_broadcast = false;
+  }
+
+  if (strlen(opts->daddr)) {
+    if (address_mac_from_ascii(&adr, opts->daddr)) {
+      global_broadcast = false;
+    }
+  }
+
+  if (global_broadcast) {
+    datalink_get_broadcast_address(&dest);
+  } else {
+    if (adr.len && mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      memcpy(&dest.adr[0], &adr.adr[0], adr.len);
+      dest.len = adr.len;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+    } else if (mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      dest.len = 0;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = 0;
+      }
+    } else {
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+      dest.mac_len = 0;
+      dest.len = 0;
+    }
+  }
+
+  if (opts->device_instance_max < 0) {
+    opts->device_instance_max = opts->device_instance_min;
+  }
+
+  if (opts->device_instance_min > BACNET_MAX_INSTANCE) {
+    printf("Mininum Device-Instance exceeded limit!\n");
+    return(1);
+  }
+
+  if (opts->device_instance_max > BACNET_MAX_INSTANCE) {
+    printf("Maximum Device-Instance exceeded limit!\n");
+    return(1);
+  }
+
+  if (opts->timeout == 0) {
+    opts->timeout = BACNET_CLIENT_WHOIS_TIMEOUT;
+  }
+
+  add_bacnet_client_whois(&dest, opts);
+
+printf("- Sending whois request ...\n");
+
+  Send_WhoIs_To_Network(
+    &dest, opts->device_instance_min, opts->device_instance_max);
+
+  pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU,
+    delay_milliseconds);
+  /* process */
+  if (pdu_len) {
+    npdu_handler(&src, &Rx_Buf[0], pdu_len);
+        
+  }
+printf("- Whois request sent!\n");
   return(0);
 }
 
@@ -980,6 +1104,72 @@ int encode_write_value_result(llist_obj_data *data, char *buf, int buf_len)
 
 
 /*
+ * Print MAC address into string.
+ */
+static void macaddr_to_str(uint8_t *addr, int len, char *buf, int buf_len)
+{
+  int j = 0;
+    
+  while (j < len) {
+    if (j != 0) {
+      snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ":");
+    }
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "%02X", addr[j]);
+    j++;
+  }
+}
+
+
+/*
+ * Encode value payload for bacnet client whois command.
+ */
+int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len)
+{
+  address_entry_cb *addr;
+  char value[2048];
+  char mac_buf[51] = {0};
+  int value_len = sizeof(value);
+  uint8_t local_sadr = 0;
+  bool first = true;
+
+  sprintf(value, "[ ");
+  addr = cb->data.address_table.first;
+  while (addr) {
+    if (!first) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", ");
+    }
+    snprintf(&value[strlen(value)], value_len - strlen(value), "{\"device_id\" : \"%u\"", addr->device_id);
+    if (addr->address.mac_len > 0) {
+      macaddr_to_str(addr->address.mac, addr->address.mac_len, mac_buf, sizeof(mac_buf));
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"mac_address\" : \"%s\"", mac_buf);
+    }
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"snet\" : \"%u\"", addr->address.net);
+    mac_buf[0] = '\0';
+    if (addr->address.net) {
+      macaddr_to_str(addr->address.adr, addr->address.len, mac_buf, sizeof(mac_buf));
+    } else {
+      macaddr_to_str(&local_sadr, 1, mac_buf, sizeof(mac_buf));
+    }
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"sadr\" : \"%s\"", mac_buf);
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"apdu\" : \"%u\"", addr->max_apdu);
+    snprintf(&value[strlen(value)], value_len - strlen(value), "}");
+
+    addr = addr->next;
+    first = false;
+  }
+
+  snprintf(&value[strlen(value)], value_len - strlen(value), " ]");
+  snprintf(buf, buf_len, "{ \"value\" : %s", value);
+  if (cb->data.dnet >= 0) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"dnet\" : \"%d\"", cb->data.dnet);
+  }
+  snprintf(&buf[strlen(buf)], buf_len - strlen(buf), " }");
+
+  return(0);
+}
+
+
+/*
  * Publish bacnet client read value result.
  */
 int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data,
@@ -1131,6 +1321,65 @@ int publish_bacnet_client_write_value_result(llist_obj_data *data)
 
 
 /*
+ * Publish bacnet client whois result.
+ */
+int publish_bacnet_client_whois_result(llist_whois_cb *cb)
+{
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+  char topic[512];
+  char topic_value[2048] = {0};
+  int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
+  int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
+  int rc, i;
+
+  sprintf(topic, "bacnet/cmd_result/whois");
+  encode_whois_result(cb, topic_value, sizeof(topic_value));
+
+  printf("- write value result topic: %s\n", topic);
+  printf("- write value result topic value: %s\n", topic_value);
+
+  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
+    for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
+      }
+
+      mqtt_check_reconnect();
+      sleep(mqtt_retry_interval);
+    }
+
+    if (i >= mqtt_retry_limit) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect limit reached: %d\n", i);
+      }
+
+      return(1);
+    }
+  }
+
+  opts.onSuccess = mqtt_on_send_success;
+  opts.onFailure = mqtt_on_send_failure;
+  opts.context = mqtt_client;
+
+  pubmsg.payload = topic_value;
+  pubmsg.payloadlen = strlen(topic_value);
+  pubmsg.qos = DEFAULT_PUB_QOS;
+  pubmsg.retained = 0;
+  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
+  if (mqtt_debug) {
+    if (rc != MQTTASYNC_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
+    } else {
+      printf("MQTT published topic: \"%s\"\n", topic);
+    }
+  }
+
+  return(0);
+}
+
+
+/*
  * Bacnet client read value handler.
  */
 static void bacnet_client_read_value_handler(uint8_t *service_request,
@@ -1187,6 +1436,55 @@ static void bacnet_client_write_value_handler(
 
 
 /*
+ * Bacnet client whois handler.
+ */
+static void bacnet_client_whois_handler(uint8_t *service_request, uint16_t service_len,
+  BACNET_ADDRESS *src)
+{
+  address_table_cb *table;
+  int len = 0;
+  uint32_t device_id = 0;
+  unsigned max_apdu = 0;
+  int segmentation = 0;
+  uint16_t vendor_id = 0;
+  unsigned i = 0;
+
+  (void)service_len;
+  len = iam_decode_service_request(
+    service_request, &device_id, &max_apdu, &segmentation, &vendor_id);
+  fprintf(stderr, "Received I-Am Request");
+
+  if (len != -1) {
+    fprintf(stderr, " from %lu, MAC = ", (unsigned long)device_id);
+    if ((src->mac_len == 6) && (src->len == 0)) {
+      fprintf(stderr, "%u.%u.%u.%u %02X%02X\n", (unsigned)src->mac[0],
+        (unsigned)src->mac[1], (unsigned)src->mac[2],
+        (unsigned)src->mac[3], (unsigned)src->mac[4],
+        (unsigned)src->mac[5]);
+    } else {
+      for (i = 0; i < src->mac_len; i++) {
+        fprintf(stderr, "%02X", (unsigned)src->mac[i]);
+        if (i < (src->mac_len - 1)) {
+          fprintf(stderr, ":");
+        }
+      }
+      fprintf(stderr, "\n");
+    }
+
+    table = get_bacnet_client_first_whois_data();
+    if (table) {
+      printf("- Adding Whois address ...\n");
+      whois_address_table_add(table, device_id, max_apdu, src);
+    } else {
+      printf("- WARNING: No existing whois request found!\n");
+    }
+  } else {
+    fprintf(stderr, ", but unable to decode it.\n");
+  }
+}
+
+
+/*
  * Initialize bacnet client service handlers.
  */
 void init_bacnet_client_service_handlers(void)
@@ -1195,6 +1493,7 @@ void init_bacnet_client_service_handlers(void)
     SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_read_value_handler);
   apdu_set_confirmed_simple_ack_handler(
     SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_write_value_handler);
+  apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, bacnet_client_whois_handler);
 }
 
 
@@ -1922,7 +2221,7 @@ int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_
   bacnet_client_cmd_opts *opts)
 {
   if (!strcasecmp(topic_tokens[2], "whois")) {
-    process_bacnet_client_whois_command();
+    process_bacnet_client_whois_command(opts);
   } else if (!strcasecmp(topic_tokens[2], "read_value")) {
     process_bacnet_client_read_value_command(opts);
   } else if (!strcasecmp(topic_tokens[2], "write_value")) {
@@ -1964,6 +2263,7 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     "value",
     "uuid",
     "tags",
+    "timeout",
     NULL
   };
 
@@ -2001,6 +2301,8 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
       if (!strcmp(value, "slow_test")) {
         cmd_opts->tag_flags |= CMD_TAG_FLAG_SLOW_TEST;
       }
+    } else if (!strcmp(key, "timeout")) {
+      cmd_opts->timeout = atoi(value);
     } else {
       if (mqtt_debug) {
         printf("Unsupported command option key: %s. Skipping.\n", key);
@@ -2426,6 +2728,189 @@ void sweep_bacnet_client_aged_requests(void)
 
 
 /*
+ * Intialize bacnet client whois list.
+ */
+void init_bacnet_client_whois_list(void)
+{
+  bc_whois_head = bc_whois_tail = NULL;
+}
+
+
+/*
+ * Shutdown bacnet client whois list.
+ */
+void shutdown_bacnet_client_whois_list(void)
+{
+  llist_whois_cb *tmp, *ptr = bc_whois_head;
+
+  while (ptr != NULL) {
+    tmp = ptr;
+    ptr = ptr->next;
+    free(tmp);
+  }
+}
+
+
+/*
+ * Check if bacnet client whois list is not empty.
+ */
+int is_bacnet_client_whois_present(void)
+{
+  return(bc_whois_head != NULL);
+}
+
+
+/*
+ * Get bacnet client first whois data.
+ */
+address_table_cb *get_bacnet_client_first_whois_data(void)
+{
+  llist_whois_cb *ptr = bc_whois_head;
+
+  if (ptr != NULL) {
+    return(&ptr->data.address_table);
+  }
+
+  return(NULL);
+}
+
+
+/*
+ * Add bacnet client whois.
+ */
+int add_bacnet_client_whois(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts)
+{
+  llist_whois_cb *ptr;
+
+  ptr = malloc(sizeof(llist_whois_cb));
+  if (!ptr) {
+    printf("Error allocating memory for llist_whois_cb!\n");
+    return(1);
+  }
+
+  memset(ptr, 0, sizeof(llist_whois_cb));
+  ptr->request_id = bc_whois_request_ctr++;
+  ptr->timestamp = time(NULL);
+  ptr->data.timeout = opts->timeout;
+  memcpy(&ptr->data.dest, dest, sizeof(BACNET_ADDRESS));
+  ptr->data.device_instance_min = opts->device_instance_min;
+  ptr->data.device_instance_max = opts->device_instance_max;
+  ptr->data.dnet = opts->dnet;
+  ptr->next = NULL;
+
+  if (!bc_whois_head) {
+    bc_whois_head = bc_whois_tail = ptr;
+  } else {
+    bc_whois_tail->next = ptr;
+    bc_whois_tail = ptr;
+  }
+
+  printf("- Added whois request: %d\n", ptr->request_id);
+
+  return(0);
+}
+
+
+/*
+ * Delete backet client whois.
+ */
+int del_bacnet_client_first_whois_request(void)
+{
+  llist_whois_cb *ptr = bc_whois_head;
+
+  if (ptr) {
+    printf("- whois request found!\n");
+    bc_whois_head = ptr->next;
+    free(ptr);
+  }
+
+  return(0);
+}
+
+
+/*
+ * Add whois address.
+ */
+void whois_address_table_add(address_table_cb *table, uint32_t device_id,
+  unsigned max_apdu, BACNET_ADDRESS *src)
+{
+  address_entry_cb *pMatch;
+  uint8_t flags = 0;
+
+  pMatch = table->first;
+  while (pMatch) {
+    if (pMatch->device_id == device_id) {
+      if (bacnet_address_same(&pMatch->address, src)) {
+        return;
+      }
+
+      flags |= BAC_ADDRESS_MULT;
+      pMatch->Flags |= BAC_ADDRESS_MULT;
+    }
+
+    pMatch = pMatch->next;
+  }
+    
+  // pMatch = alloc_address_entry();
+  pMatch = (address_entry_cb *)malloc(sizeof(address_entry_cb));
+  memset(pMatch, 0, sizeof(address_entry_cb));
+  if (table->first) {
+    table->last->next = pMatch;
+    table->last = pMatch;
+  } else {
+    table->first = table->last = pMatch;
+  }
+    
+  pMatch->Flags = flags;
+  pMatch->device_id = device_id;
+  pMatch->max_apdu = max_apdu;
+  pMatch->address = *src;
+}
+
+
+/*
+ * Sweep aged bacnet client whois requests.
+ */
+void sweep_bacnet_client_whois_requests(void)
+{
+  llist_whois_cb *tmp, *prev = NULL;
+  llist_whois_cb *ptr = bc_whois_head;
+  time_t cur_tt = time(NULL);
+
+  printf("- sweep_bacnet_client_whois_requests()\n");
+
+  while (ptr != NULL) {
+    if ((ptr->timestamp + ptr->data.timeout) < cur_tt) {
+      printf("- Whois Aged request found: %d\n", ptr->request_id);
+
+      tmp = ptr;
+      if (ptr == bc_whois_head) {
+        bc_whois_head = ptr->next;
+        ptr = bc_whois_head;
+      } else {
+        prev->next = ptr->next;
+        if (ptr == bc_whois_tail) {
+          bc_whois_tail = prev;
+        }
+
+        ptr = ptr->next;
+      }
+
+      // if (tmp->data.address_table.first) {
+        publish_bacnet_client_whois_result(tmp);
+      // }
+
+      free(tmp);
+      continue;
+    }
+
+    prev = ptr;
+    ptr = ptr->next;
+  }
+}
+
+
+/*
  * Initialize mqtt client module.
  */
 int mqtt_client_init(void)
@@ -2508,6 +2993,7 @@ int mqtt_client_init(void)
   }
 
   init_bacnet_client_request_list();
+  init_bacnet_client_whois_list();
 
   return(0);
 }
@@ -2708,6 +3194,7 @@ void mqtt_client_shutdown(void)
   MQTTAsync_destroy(&mqtt_client);
 
   shutdown_bacnet_client_request_list();
+  shutdown_bacnet_client_whois_list();
 }
 
 

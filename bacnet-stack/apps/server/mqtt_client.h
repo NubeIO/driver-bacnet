@@ -46,6 +46,7 @@
 #define CMD_TAG_FLAG_SLOW_TEST           0x01
 
 #define BACNET_CLIENT_REQUEST_TTL        12
+#define BACNET_CLIENT_WHOIS_TIMEOUT      3
 
 #define MAX_JSON_KEY_VALUE_PAIR          10
 
@@ -68,6 +69,33 @@ typedef struct _llist_cb {
   } data;
 } llist_cb;
 
+typedef struct _address_entry_cb {
+    struct _address_entry_cb *next;
+    uint8_t Flags;
+    uint32_t device_id;
+    unsigned max_apdu;
+    BACNET_ADDRESS address;
+} address_entry_cb;
+
+typedef struct _address_table_cb {
+  address_entry_cb *first;
+  address_entry_cb *last;
+} address_table_cb;
+
+typedef struct _llist_whois_cb {
+  struct _llist_whois_cb *next;
+  uint32_t request_id;
+  time_t timestamp;
+  struct _llist_whois_cb_data {
+    BACNET_ADDRESS dest;
+    int dnet;
+    int32_t device_instance_min;
+    int32_t device_instance_max;
+    address_table_cb address_table;
+    uint32_t timeout;
+  } data;
+} llist_whois_cb;
+
 typedef struct _bacnet_client_cmd_opts {
   BACNET_OBJECT_TYPE object_type;
   uint32_t object_instance;
@@ -81,6 +109,9 @@ typedef struct _bacnet_client_cmd_opts {
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   uint32_t tag_flags;
   char uuid[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  int32_t device_instance_min;
+  int32_t device_instance_max;
+  uint32_t timeout;
 } bacnet_client_cmd_opts;
 
 typedef struct _json_key_value_pair {
@@ -99,6 +130,7 @@ char *mqtt_form_publish_topic(char *device_id, char *object_name);
 char *mqtt_create_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len, int topic_type);
 int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr, char *uuid_value);
 void sweep_bacnet_client_aged_requests(void);
+void sweep_bacnet_client_whois_requests(void);
 
 #ifdef __cplusplus
 }
