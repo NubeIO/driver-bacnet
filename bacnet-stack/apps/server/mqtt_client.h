@@ -89,6 +89,8 @@ typedef struct _llist_whois_cb {
   struct _llist_whois_cb_data {
     BACNET_ADDRESS dest;
     int dnet;
+    char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
+    char daddr[MAX_CMD_STR_OPT_VALUE_LENGTH];
     int32_t device_instance_min;
     int32_t device_instance_max;
     address_table_cb address_table;
