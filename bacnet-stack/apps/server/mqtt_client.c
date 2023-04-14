@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include "bacnet/indtext.h"
 #include "bacnet/bacenum.h"
@@ -670,8 +671,6 @@ int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
 
   add_bacnet_client_whois(&dest, opts);
 
-printf("- Sending whois request ...\n");
-
   Send_WhoIs_To_Network(
     &dest, opts->device_instance_min, opts->device_instance_max);
 
@@ -682,7 +681,6 @@ printf("- Sending whois request ...\n");
     npdu_handler(&src, &Rx_Buf[0], pdu_len);
         
   }
-printf("- Whois request sent!\n");
   return(0);
 }
 
@@ -1121,6 +1119,16 @@ static void macaddr_to_str(uint8_t *addr, int len, char *buf, int buf_len)
 
 
 /*
+ * Print MAC address into string.
+ */
+static void macaddr_to_ip_port_str(uint8_t *addr, int len, char *buf, int buf_len)
+{
+  snprintf(buf, buf_len, "%d.%d.%d.%d:%d", addr[0], addr[1], addr[2], addr[3],
+   ntohs(*((uint16_t *)&addr[4])));
+}
+
+
+/*
  * Encode value payload for bacnet client whois command.
  */
 int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len)
@@ -1140,7 +1148,11 @@ int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len)
     }
     snprintf(&value[strlen(value)], value_len - strlen(value), "{\"device_id\" : \"%u\"", addr->device_id);
     if (addr->address.mac_len > 0) {
-      macaddr_to_str(addr->address.mac, addr->address.mac_len, mac_buf, sizeof(mac_buf));
+      if (addr->address.mac_len == 6) {
+        macaddr_to_ip_port_str(addr->address.mac, addr->address.mac_len, mac_buf, sizeof(mac_buf));
+      } else {
+        macaddr_to_str(addr->address.mac, addr->address.mac_len, mac_buf, sizeof(mac_buf));
+      }
       snprintf(&value[strlen(value)], value_len - strlen(value), ", \"mac_address\" : \"%s\"", mac_buf);
     }
     snprintf(&value[strlen(value)], value_len - strlen(value), ", \"snet\" : \"%u\"", addr->address.net);
@@ -1163,6 +1175,15 @@ int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len)
   if (cb->data.dnet >= 0) {
     snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"dnet\" : \"%d\"", cb->data.dnet);
   }
+
+  if (strlen(cb->data.mac)) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"mac\" : \"%s\"", cb->data.mac);
+  }
+
+  if (strlen(cb->data.daddr)) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"daddr\" : \"%s\"", cb->data.daddr);
+  }
+
   snprintf(&buf[strlen(buf)], buf_len - strlen(buf), " }");
 
   return(0);
@@ -2796,6 +2817,14 @@ int add_bacnet_client_whois(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts)
   ptr->data.device_instance_min = opts->device_instance_min;
   ptr->data.device_instance_max = opts->device_instance_max;
   ptr->data.dnet = opts->dnet;
+  if (strlen(opts->mac)) {
+    strcpy(ptr->data.mac, opts->mac);
+  }
+
+  if (strlen(opts->daddr)) {
+    strcpy(ptr->data.daddr, opts->daddr);
+  }
+
   ptr->next = NULL;
 
   if (!bc_whois_head) {
@@ -2896,9 +2925,7 @@ void sweep_bacnet_client_whois_requests(void)
         ptr = ptr->next;
       }
 
-      // if (tmp->data.address_table.first) {
-        publish_bacnet_client_whois_result(tmp);
-      // }
+      publish_bacnet_client_whois_result(tmp);
 
       free(tmp);
       continue;
