@@ -1184,6 +1184,14 @@ int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len)
     snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"daddr\" : \"%s\"", cb->data.daddr);
   }
 
+  if (cb->data.device_instance_min >= 0) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"device_instance_min\" : \"%d\"", cb->data.device_instance_min);
+  }
+
+  if (cb->data.device_instance_max >= 0 && cb->data.device_instance_min != cb->data.device_instance_max) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"device_instance_max\" : \"%d\"", cb->data.device_instance_max);
+  }
+
   snprintf(&buf[strlen(buf)], buf_len - strlen(buf), " }");
 
   return(0);
@@ -2284,6 +2292,8 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     "value",
     "uuid",
     "tags",
+    "device_instance_min",
+    "device_instance_max",
     "timeout",
     NULL
   };
@@ -2322,6 +2332,10 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
       if (!strcmp(value, "slow_test")) {
         cmd_opts->tag_flags |= CMD_TAG_FLAG_SLOW_TEST;
       }
+    } else if (!strcmp(key, "device_instance_min")) {
+      cmd_opts->device_instance_min = atoi(value);
+    } else if (!strcmp(key, "device_instance_max")) {
+      cmd_opts->device_instance_max = atoi(value);
     } else if (!strcmp(key, "timeout")) {
       cmd_opts->timeout = atoi(value);
     } else {
