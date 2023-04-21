@@ -406,11 +406,13 @@ int main(int argc, char *argv[])
 
         /* blink LEDs, Turn on or off outputs, etc */
 
-        elapsed_seconds = (uint32_t)(current_seconds - last_sweep_seconds);
-        if (elapsed_seconds > 3) {
-            last_sweep_seconds = current_seconds;
-            sweep_bacnet_client_aged_requests();
-            sweep_bacnet_client_whois_requests();
+        if (yaml_config_bacnet_client_enable()) {
+            elapsed_seconds = (uint32_t)(current_seconds - last_sweep_seconds);
+            if (elapsed_seconds > 3) {
+                last_sweep_seconds = current_seconds;
+                sweep_bacnet_client_aged_requests();
+                sweep_bacnet_client_whois_requests();
+            }
         }
     }
 
