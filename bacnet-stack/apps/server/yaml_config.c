@@ -35,6 +35,8 @@ struct _bacnet_client {
   char *whois_program;
   char *read_program;
   char *write_program;
+  char **tokens;
+  unsigned int n_tokens;
 };
 
 /* top level struct for storing the configuration */
@@ -119,6 +121,11 @@ static const cyaml_schema_field_t bacnet_client_fields_schema[] = {
   CYAML_FIELD_SEQUENCE_COUNT(
     "commands", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_client, commands, n_commands,
+    &string_ptr_schema, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_SEQUENCE_COUNT(
+    "tokens", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_client, tokens, n_tokens,
     &string_ptr_schema, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
@@ -459,6 +466,14 @@ void yaml_config_dump(void)
         printf("[%d]: %s\n", i, bacnet_config->bacnet_client->commands[i]);
       }
     }
+
+    if (bacnet_config->bacnet_client->n_tokens > 0) {
+      printf("YAML Config: Bacnet Client Tokens\n");
+
+      for(i = 0; i < bacnet_config->bacnet_client->n_tokens; i++) {
+        printf("[%d]: %s\n", i, bacnet_config->bacnet_client->tokens[i]);
+      }
+    }
   }
 }
 
@@ -689,6 +704,21 @@ char **yaml_config_bacnet_client_commands(int *length)
 
   *length = bacnet_config->bacnet_client->n_commands;
   return(bacnet_config->bacnet_client->commands);
+}
+
+
+/*
+ * Get bacnet client tokens.
+ */
+char **yaml_config_bacnet_client_tokens(int *length)
+{
+  if (bacnet_config->bacnet_client == NULL) {
+    *length = 0;
+    return(NULL);
+  }
+
+  *length = bacnet_config->bacnet_client->n_tokens;
+  return(bacnet_config->bacnet_client->tokens);
 }
 
 

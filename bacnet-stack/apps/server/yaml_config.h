@@ -55,6 +55,8 @@ extern "C" {
 
   char **yaml_config_bacnet_client_commands(int *length);
 
+  char **yaml_config_bacnet_client_tokens(int *length);
+
   char *yaml_config_bacnet_client_whois_program(void);
 
   char *yaml_config_bacnet_client_read_program(void);
