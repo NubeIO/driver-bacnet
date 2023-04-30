@@ -50,6 +50,11 @@
 
 #define MAX_JSON_KEY_VALUE_PAIR          10
 
+typedef struct _request_token_cb {
+  char key[MAX_JSON_KEY_LENGTH];
+  char value[MAX_JSON_VALUE_LENGTH];
+} request_token_cb;
+
 typedef struct _llist_obj_data {
   uint32_t device_instance;
   BACNET_OBJECT_TYPE object_type;
@@ -58,6 +63,10 @@ typedef struct _llist_obj_data {
   int priority;
   int index;
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  int dnet;
+  char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  int32_t req_tokens_len;
+  request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
 } llist_obj_data;
 
 typedef struct _llist_cb {
@@ -95,6 +104,8 @@ typedef struct _llist_whois_cb {
     int32_t device_instance_max;
     address_table_cb address_table;
     uint32_t timeout;
+    int32_t req_tokens_len;
+    request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   } data;
 } llist_whois_cb;
 
@@ -103,7 +114,7 @@ typedef struct _bacnet_client_cmd_opts {
   uint32_t object_instance;
   BACNET_PROPERTY_ID property;
   int32_t index;
-  int priority;
+  int32_t priority;
   uint32_t device_instance;
   int dnet;
   char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
@@ -114,6 +125,8 @@ typedef struct _bacnet_client_cmd_opts {
   int32_t device_instance_min;
   int32_t device_instance_max;
   uint32_t timeout;
+  int32_t req_tokens_len;
+  request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
 } bacnet_client_cmd_opts;
 
 typedef struct _json_key_value_pair {
