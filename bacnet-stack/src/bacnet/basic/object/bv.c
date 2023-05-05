@@ -446,12 +446,12 @@ int Binary_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                 }
             } else {
                 if (rpdata->array_index <= BACNET_MAX_PRIORITY) {
-                    if (Binary_Value_Level[object_index - 1][rpdata->array_index] ==
+                    if (Binary_Value_Level[object_index - 1][rpdata->array_index - 1] ==
                         BINARY_NULL) {
                         apdu_len = encode_application_null(&apdu[apdu_len]);
                     } else {
                         present_value = Binary_Value_Level[object_index - 1]
-                                                          [rpdata->array_index];
+                                                          [rpdata->array_index - 1];
                         apdu_len = encode_application_enumerated(
                             &apdu[apdu_len], present_value);
                     }
