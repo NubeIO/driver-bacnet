@@ -1568,9 +1568,9 @@ void init_bacnet_client_service_handlers(void)
  */
 void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outlen, bacnet_client_cmd_opts *opts)
 {
-  int i = 0;
+  int i;
 
-  for ( ; kvps[i].key; i++);
+  for (i = 0; strlen(kvps[i].key); i++);
 
   if (opts->index != BACNET_ARRAY_ALL) {
     strcpy(kvps[i].key, "index");
@@ -2384,11 +2384,7 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
 
   switch (opts->object_type) {
     case OBJECT_ANALOG_INPUT:
-    case OBJECT_ANALOG_OUTPUT:
-    case OBJECT_ANALOG_VALUE:
     case OBJECT_BINARY_INPUT:
-    case OBJECT_BINARY_OUTPUT:
-    case OBJECT_BINARY_VALUE:
       if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE) {
         if (mqtt_debug) {
           printf("Unsupported object_type %d property: %d\n", opts->object_type, opts->property);
@@ -2396,49 +2392,62 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
 
         return(1);
       }
-
-      if (is_command_for_us(opts)) {
-        printf("command for us\n");
-        process_local_write_value_command(opts);
-      } else {
-        obj_data.device_instance = opts->device_instance;
-        obj_data.object_type = opts->object_type;
-        obj_data.object_instance = opts->object_instance;
-        obj_data.object_property = opts->property;
-        obj_data.priority = opts->priority;
-        obj_data.index = opts->index;
-        obj_data.dnet = opts->dnet;
-        strncpy(obj_data.mac, opts->mac, sizeof(obj_data.mac) - 1);
-        memcpy(&obj_data.value, opts->value, sizeof(opts->value));
-        if (opts->req_tokens_len > 0) {
-          obj_data.req_tokens_len = opts->req_tokens_len;
-          memcpy((char *)&obj_data.req_tokens[0], (char *)&opts->req_tokens[0],
-            sizeof(request_token_cb) * opts->req_tokens_len);
-        }
-
-        request_invoke_id = Send_Write_Property_Request(
-          opts->device_instance, opts->object_type,
-          opts->object_instance, opts->property,
-          &value,
-          obj_data.priority,
-          opts->index);
-        printf("write request_invoke_id: %d\n", request_invoke_id);
-
-        add_bacnet_client_request(request_invoke_id, &obj_data);
-
-        pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
-        if (pdu_len) {
-          npdu_handler(&src, &Rx_Buf[0], pdu_len);
-        }
-      }
-
       break;
 
-    default:
+    case OBJECT_ANALOG_OUTPUT:
+    case OBJECT_BINARY_OUTPUT:
+    case OBJECT_ANALOG_VALUE:
+    case OBJECT_BINARY_VALUE:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE &&
+        opts->property != PROP_PRIORITY_ARRAY) {
+        if (mqtt_debug) {
+          printf("Unsupported object_type %d property: %d\n", opts->object_type, opts->property);
+        }
+
+        return(1);
+      }
+      break;
+
+    default: 
       if (mqtt_debug) {
-        printf("Unknown write value object_type: [%d]\n", opts->object_type);
+        printf("Unknown object type: %d\n", opts->object_type);
       }
       return(1);
+  }
+
+  if (is_command_for_us(opts)) {
+    printf("command for us\n");
+    process_local_write_value_command(opts);
+  } else {
+    obj_data.device_instance = opts->device_instance;
+    obj_data.object_type = opts->object_type;
+    obj_data.object_instance = opts->object_instance;
+    obj_data.object_property = opts->property;
+    obj_data.priority = opts->priority;
+    obj_data.index = opts->index;
+    obj_data.dnet = opts->dnet;
+    strncpy(obj_data.mac, opts->mac, sizeof(obj_data.mac) - 1);
+    memcpy(&obj_data.value, opts->value, sizeof(opts->value));
+    if (opts->req_tokens_len > 0) {
+      obj_data.req_tokens_len = opts->req_tokens_len;
+      memcpy((char *)&obj_data.req_tokens[0], (char *)&opts->req_tokens[0],
+        sizeof(request_token_cb) * opts->req_tokens_len);
+    }
+
+    request_invoke_id = Send_Write_Property_Request(
+      opts->device_instance, opts->object_type,
+      opts->object_instance, opts->property,
+      &value,
+      obj_data.priority,
+      opts->index);
+    printf("write request_invoke_id: %d\n", request_invoke_id);
+
+    add_bacnet_client_request(request_invoke_id, &obj_data);
+
+    pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+    if (pdu_len) {
+      npdu_handler(&src, &Rx_Buf[0], pdu_len);
+    }
   }
 
   return(0);
@@ -2947,8 +2956,6 @@ void sweep_bacnet_client_aged_requests(void)
   llist_cb *ptr = bc_request_list_head;
   time_t cur_tt = time(NULL);
 
-  printf("- sweep_bacnet_client_aged_requests()\n");
-
   while (ptr != NULL) {
     if ((cur_tt - ptr->timestamp) >= BACNET_CLIENT_REQUEST_TTL) {
       printf("- Aged request found: %d\n", ptr->data.invoke_id);
@@ -3139,8 +3146,6 @@ void sweep_bacnet_client_whois_requests(void)
   llist_whois_cb *tmp, *prev = NULL;
   llist_whois_cb *ptr = bc_whois_head;
   time_t cur_tt = time(NULL);
-
-  printf("- sweep_bacnet_client_whois_requests()\n");
 
   while (ptr != NULL) {
     if ((ptr->timestamp + ptr->data.timeout) < cur_tt) {
