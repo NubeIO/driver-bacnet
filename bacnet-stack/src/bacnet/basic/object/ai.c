@@ -177,7 +177,7 @@ bool Analog_Input_Valid_Instance(uint32_t object_instance)
 /* more complex, and then count how many you have */
 unsigned Analog_Input_Count(void)
 {
-    return (Analog_Input_Instances + 1);
+    return (Analog_Input_Instances);
 }
 
 /* we simply have 0-n object instances.  Yours might be */

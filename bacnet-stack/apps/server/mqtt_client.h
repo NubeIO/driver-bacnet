@@ -29,6 +29,7 @@
 #define MQTT_TOPIC_VALUE_FLOAT           4
 #define MQTT_TOPIC_VALUE_FLOAT_MAX_PRIO  5
 #define MQTT_TOPIC_VALUE_BINARY_MAX_PRIO 6
+#define MQTT_TOPIC_VALUE_OBJECT_LIST     7
 
 #define MAX_TOPIC_TOKENS                 10
 #define MAX_TOPIC_TOKEN_LENGTH           31
@@ -48,7 +49,7 @@
 #define BACNET_CLIENT_REQUEST_TTL        12
 #define BACNET_CLIENT_WHOIS_TIMEOUT      3
 
-#define MAX_JSON_KEY_VALUE_PAIR          10
+#define MAX_JSON_KEY_VALUE_PAIR          25
 
 typedef struct _request_token_cb {
   char key[MAX_JSON_KEY_LENGTH];

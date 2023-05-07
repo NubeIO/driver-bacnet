@@ -178,7 +178,7 @@ bool Binary_Value_Valid_Instance(uint32_t object_instance)
  */
 unsigned Binary_Value_Count(void)
 {
-    return (Binary_Value_Instances + 1);
+    return (Binary_Value_Instances);
 }
 
 /**
