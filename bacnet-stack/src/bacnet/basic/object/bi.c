@@ -108,7 +108,7 @@ bool Binary_Input_Valid_Instance(uint32_t object_instance)
 /* more complex, and then count how many you have */
 unsigned Binary_Input_Count(void)
 {
-    return (Binary_Input_Instances + 1);
+    return (Binary_Input_Instances);
 }
 
 /* we simply have 0-n object instances.  Yours might be */

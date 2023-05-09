@@ -1265,11 +1265,8 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                     found = Device_Object_List_Identifier(
                         i, &object_type, &instance);
                     if (found) {
-                        if (instance == 0 && object_type <= 5) {
-                            /* nothing */
-                        } else {
                         len = encode_application_object_id(
-                            &apdu[apdu_len], object_type, instance);
+                            &apdu[apdu_len], object_type, instance + 1);
                         apdu_len += len;
                         /* assume next one is the same size as this one */
                         /* can we all fit into the APDU? Don't check for last
@@ -1280,7 +1277,6 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                                 ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED;
                             apdu_len = BACNET_STATUS_ABORT;
                             break;
-                        }
                         }
                     } else {
                         /* error: internal error? */
@@ -1295,7 +1291,7 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                     rpdata->array_index, &object_type, &instance);
                 if (found) {
                     apdu_len = encode_application_object_id(
-                        &apdu[0], object_type, instance);
+                        &apdu[0], object_type, instance + 1);
                 } else {
                     rpdata->error_class = ERROR_CLASS_PROPERTY;
                     rpdata->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
