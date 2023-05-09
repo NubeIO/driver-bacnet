@@ -217,6 +217,43 @@ static llist_whois_cb *bc_whois_tail = NULL;
 static int req_tokens_len = 0;
 static char req_tokens[MAX_JSON_KEY_VALUE_PAIR][MAX_JSON_KEY_LENGTH] = {0};
 
+
+/*
+ * Device status code to string.
+ */
+static void device_status_to_str(BACNET_DEVICE_STATUS device_status, char *buf, int buf_len)
+{
+  switch (device_status) {
+    case STATUS_OPERATIONAL:
+      snprintf(buf, buf_len, "operational");
+      break;
+
+    case STATUS_OPERATIONAL_READ_ONLY:
+      snprintf(buf, buf_len, "operational_read_only");
+      break;
+
+    case STATUS_DOWNLOAD_REQUIRED:
+      snprintf(buf, buf_len, "download_required");
+      break;
+
+    case STATUS_DOWNLOAD_IN_PROGRESS:
+      snprintf(buf, buf_len, "download_in_progress");
+      break;
+
+    case STATUS_NON_OPERATIONAL:
+      snprintf(buf, buf_len, "non_operational");
+      break;
+
+    case STATUS_BACKUP_IN_PROGRESS:
+      snprintf(buf, buf_len, "backup_in_progress");
+      break;
+
+    default:
+      break;
+  }
+}
+
+
 /*
  * MQTT subscribe connection lost callback.
  */
@@ -935,6 +972,22 @@ char *get_object_property_str(int object_property)
       str = "pri";
       break;
 
+    case PROP_OBJECT_IDENTIFIER:
+      str = "id";
+      break;
+
+    case PROP_SYSTEM_STATUS:
+      str = "system_status";
+      break;
+
+    case PROP_VENDOR_NAME:
+      str = "vendor_name";
+      break;
+
+    case PROP_VENDOR_IDENTIFIER:
+      str = "vendor_id";
+      break;
+
     case PROP_OBJECT_LIST:
       str = "object_list";
       break;
@@ -1136,6 +1189,27 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
 
     case OBJECT_DEVICE:
       switch(data->object_property) {
+        case PROP_OBJECT_NAME:
+          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          break;
+
+        case PROP_OBJECT_IDENTIFIER:
+          // sprintf(tmp, "%d", *((int*)&value.type));
+          sprintf(tmp, "%lu", (unsigned long)value.type.Object_Id.instance);
+          break;
+
+        case PROP_SYSTEM_STATUS:
+          device_status_to_str(*((unsigned int*)&value.type), tmp, sizeof(tmp) - 1);
+          break;
+
+        case PROP_VENDOR_NAME:
+          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          break;
+
+        case PROP_VENDOR_IDENTIFIER:
+          sprintf(tmp, "%d", *((int*)&value.type));
+          break;
+
         case PROP_OBJECT_LIST:
           encode_object_list_value_result(data, obj_data, tmp, sizeof(tmp) - 1);
           break;
@@ -1694,39 +1768,6 @@ void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outle
   }
 
   *kvps_outlen = i;
-}
-
-
-static void device_status_to_str(BACNET_DEVICE_STATUS device_status, char *buf, int buf_len)
-{
-  switch (device_status) {
-    case STATUS_OPERATIONAL:
-      snprintf(buf, buf_len, "operational");
-      break;
-
-    case STATUS_OPERATIONAL_READ_ONLY:
-      snprintf(buf, buf_len, "operational_read_only");
-      break;
-
-    case STATUS_DOWNLOAD_REQUIRED:
-      snprintf(buf, buf_len, "download_required");
-      break;
-
-    case STATUS_DOWNLOAD_IN_PROGRESS:
-      snprintf(buf, buf_len, "download_in_progress");
-      break;
-
-    case STATUS_NON_OPERATIONAL:
-      snprintf(buf, buf_len, "non_operational");
-      break;
-
-    case STATUS_BACKUP_IN_PROGRESS:
-      snprintf(buf, buf_len, "backup_in_progress");
-      break;
-
-    default:
-      break;
-  }
 }
 
 
