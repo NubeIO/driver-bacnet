@@ -657,8 +657,8 @@ int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
     global_broadcast = false;
   }
 
-  if (strlen(opts->daddr)) {
-    if (address_mac_from_ascii(&adr, opts->daddr)) {
+  if (strlen(opts->dadr)) {
+    if (address_mac_from_ascii(&adr, opts->dadr)) {
       global_broadcast = false;
     }
   }
@@ -1129,6 +1129,56 @@ void encode_object_list_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_
 }
 
 
+static bool append_str(char **str, size_t *rem_str_len, const char *add_str)
+{
+  bool retval;
+  int bytes_written;
+
+  bytes_written = snprintf(*str, *rem_str_len, "%s", add_str);
+  if ((bytes_written < 0) || (bytes_written >= *rem_str_len)) {
+    /* If there was an error or output was truncated, return error */
+    retval = false;
+  } else {
+    /* Successfully wrote the contents to the string. Let's advance the
+     * string pointer to the end, and account for the used space */
+    *str += bytes_written;
+    *rem_str_len -= bytes_written;
+    retval = true;
+  }
+
+  return retval;
+}
+
+
+/*
+ * Extract character string from bacnet application value string.
+ */
+int extract_char_string(char *buf, int buf_len, BACNET_APPLICATION_DATA_VALUE *value)
+{
+  int len, i;
+  int rem_str_len = buf_len;
+  char temp_str[512];
+  char *p_str = buf;
+  char *char_str;
+
+  len = characterstring_length(&value->type.Character_String);
+  char_str = characterstring_value(&value->type.Character_String);
+  for (i = 0; i < len; i++) {
+    if (isprint(*((unsigned char *)char_str))) {
+      snprintf(temp_str, sizeof(temp_str), "%c", *char_str);
+    } else {
+      snprintf(temp_str, sizeof(temp_str), "%c", '.');
+    }
+    if (!append_str(&p_str, &rem_str_len, temp_str)) {
+      break;
+    }
+    char_str++;
+  }
+
+  return(0);
+}
+
+
 /*
  * Encode value payload for bacnet client read command.
  */
@@ -1188,9 +1238,11 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
       break;
 
     case OBJECT_DEVICE:
+      printf("- value.tag: [%d]\n", value.tag);
       switch(data->object_property) {
         case PROP_OBJECT_NAME:
-          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          // characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          extract_char_string(tmp, sizeof(tmp), &value);
           break;
 
         case PROP_OBJECT_IDENTIFIER:
@@ -1239,6 +1291,11 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
   if (obj_data->dnet >= 0) {
     snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"dnet\" : \"%d\" ",
       obj_data->dnet);
+  }
+
+  if (strlen(obj_data->dadr)) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"dadr\" : \"%s\" ",
+      obj_data->dadr);
   }
 
   if (strlen(obj_data->mac)) {
@@ -1291,6 +1348,11 @@ int encode_write_value_result(llist_obj_data *obj_data, char *buf, int buf_len)
   if (obj_data->dnet >= 0) {
     snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"dnet\" : \"%d\" ",
       obj_data->dnet);
+  }
+
+  if (strlen(obj_data->dadr)) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"dadr\" : \"%s\" ",
+      obj_data->dadr);
   }
 
   if (strlen(obj_data->mac)) {
@@ -1393,8 +1455,8 @@ int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len)
     snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"mac\" : \"%s\"", cb->data.mac);
   }
 
-  if (strlen(cb->data.daddr)) {
-    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"daddr\" : \"%s\"", cb->data.daddr);
+  if (strlen(cb->data.dadr)) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ", \"dadr\" : \"%s\"", cb->data.dadr);
   }
 
   if (cb->data.device_instance_min >= 0) {
@@ -2212,7 +2274,9 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
   uint8_t Rx_Buf[MAX_MPDU] = { 0 };
   BACNET_ADDRESS src = { 0 };
   BACNET_MAC_ADDRESS mac = { 0 };
+  BACNET_MAC_ADDRESS dadr = { 0 };
   BACNET_ADDRESS dest = { 0 };
+  int dnet = -1;
   llist_obj_data obj_data = { 0 };
   bool specific_address = false;
   unsigned timeout = 100;
@@ -2235,16 +2299,47 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     }
   }
 
+  if (strlen(opts->dadr)) {
+    if (address_mac_from_ascii(&dadr, opts->dadr)) {
+      specific_address = true;
+    }
+  }
+
+  if (opts->dnet >= 0) {
+    dnet = opts->dnet;
+    if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+      specific_address = true;
+    }
+  }
+
   if (specific_address) {
-    if (mac.len) {
+    if (dadr.len && mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      memcpy(&dest.adr[0], &dadr.adr[0], dadr.len);
+      dest.len = dadr.len;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+    } else if (mac.len) {
       memcpy(&dest.mac[0], &mac.adr[0], mac.len);
       dest.mac_len = mac.len;
       dest.len = 0;
-      if ((opts->dnet >= 0) && (opts->dnet <= BACNET_BROADCAST_NETWORK)) {
-        dest.net = opts->dnet;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
       } else {
         dest.net = 0;
       }
+    } else {
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+      dest.mac_len = 0;
+      dest.len = 0;
     }
 
     address_add(opts->device_instance, MAX_APDU, &dest);
@@ -2304,6 +2399,9 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     obj_data.priority = opts->priority;
     obj_data.index = opts->index;
     obj_data.dnet = opts->dnet;
+    if (strlen(opts->dadr) > 0) {
+      strncpy(obj_data.dadr, opts->dadr, sizeof(obj_data.dadr) - 1);
+    }
     strncpy(obj_data.mac, opts->mac, sizeof(obj_data.mac) - 1);
     memcpy(&obj_data.value, opts->value, sizeof(opts->value));
     if (opts->req_tokens_len > 0) {
@@ -2557,7 +2655,9 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
   BACNET_ADDRESS src = { 0 };
   BACNET_APPLICATION_DATA_VALUE value = { 0 };
   BACNET_MAC_ADDRESS mac = { 0 };
+  BACNET_MAC_ADDRESS dadr = { 0 };
   BACNET_ADDRESS dest = { 0 };
+  int dnet = -1;
   llist_obj_data obj_data = { 0 };
   bool specific_address = false;
   unsigned timeout = 100;
@@ -2580,13 +2680,36 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
     }
   }
 
+  if (strlen(opts->dadr)) {
+    if (address_mac_from_ascii(&dadr, opts->dadr)) {
+      specific_address = true;
+    }
+  }
+
+  if (opts->dnet >= 0) {
+    dnet = opts->dnet;
+    if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+      specific_address = true;
+    }
+  }
+
   if (specific_address) {
-    if (mac.len) {
+    if (dadr.len && mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      memcpy(&dest.adr[0], &dadr.adr[0], dadr.len);
+      dest.len = dadr.len;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+    } else if (mac.len) {
       memcpy(&dest.mac[0], &mac.adr[0], mac.len);
       dest.mac_len = mac.len;
       dest.len = 0;
-      if ((opts->dnet >= 0) && (opts->dnet <= BACNET_BROADCAST_NETWORK)) {
-        dest.net = opts->dnet;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
       } else {
         dest.net = 0;
       }
@@ -2669,6 +2792,9 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
     obj_data.priority = opts->priority;
     obj_data.index = opts->index;
     obj_data.dnet = opts->dnet;
+    if (strlen(opts->dadr) > 0) {
+      strncpy(obj_data.dadr, opts->dadr, sizeof(obj_data.dadr) - 1);
+    }
     strncpy(obj_data.mac, opts->mac, sizeof(obj_data.mac) - 1);
     memcpy(&obj_data.value, opts->value, sizeof(opts->value));
     if (opts->req_tokens_len > 0) {
@@ -2745,7 +2871,7 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     "deviceInstance",
     "dnet",
     "mac",
-    "daddr",
+    "dadr",
     "tag",
     "value",
     "uuid",
@@ -2780,8 +2906,8 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
       cmd_opts->dnet = atoi(value);
     } else if (!strcmp(key, "mac")) {
       strncpy(cmd_opts->mac, value, sizeof(cmd_opts->mac) - 1);
-    } else if (!strcmp(key, "daddr")) {
-      strncpy(cmd_opts->daddr, value, sizeof(cmd_opts->daddr) - 1);
+    } else if (!strcmp(key, "dadr")) {
+      strncpy(cmd_opts->dadr, value, sizeof(cmd_opts->dadr) - 1);
     } else if (!strcmp(key, "value")) {
       strncpy(cmd_opts->value, value, sizeof(cmd_opts->value) - 1);
     } else if (!strcmp(key, "uuid")) {
@@ -3307,8 +3433,8 @@ int add_bacnet_client_whois(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts)
     strcpy(ptr->data.mac, opts->mac);
   }
 
-  if (strlen(opts->daddr)) {
-    strcpy(ptr->data.daddr, opts->daddr);
+  if (strlen(opts->dadr)) {
+    strcpy(ptr->data.dadr, opts->dadr);
   }
 
   if (opts->req_tokens_len > 0) {
