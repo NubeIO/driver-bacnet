@@ -65,6 +65,7 @@ typedef struct _llist_obj_data {
   int index;
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   int dnet;
+  char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
   int32_t req_tokens_len;
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
@@ -100,7 +101,7 @@ typedef struct _llist_whois_cb {
     BACNET_ADDRESS dest;
     int dnet;
     char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
-    char daddr[MAX_CMD_STR_OPT_VALUE_LENGTH];
+    char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
     int32_t device_instance_min;
     int32_t device_instance_max;
     address_table_cb address_table;
@@ -119,7 +120,7 @@ typedef struct _bacnet_client_cmd_opts {
   uint32_t device_instance;
   int dnet;
   char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
-  char daddr[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   uint32_t tag_flags;
   char uuid[MAX_CMD_STR_OPT_VALUE_LENGTH];
