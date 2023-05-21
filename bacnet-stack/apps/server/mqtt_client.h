@@ -30,10 +30,12 @@
 #define MQTT_TOPIC_VALUE_FLOAT_MAX_PRIO  5
 #define MQTT_TOPIC_VALUE_BINARY_MAX_PRIO 6
 #define MQTT_TOPIC_VALUE_OBJECT_LIST     7
+#define MQTT_TOPIC_VALUE_FLOAT_PRIO_ARRAY  8
+#define MQTT_TOPIC_VALUE_BINARY_PRIO_ARRAY 9
 
 #define MAX_TOPIC_TOKENS                 10
 #define MAX_TOPIC_TOKEN_LENGTH           31
-#define MAX_TOPIC_VALUE_LENGTH           255
+#define MAX_TOPIC_VALUE_LENGTH           1501
 
 #define MQTT_RETRY_LIMIT                 5
 #define MQTT_RETRY_INTERVAL              10
@@ -50,6 +52,13 @@
 #define BACNET_CLIENT_WHOIS_TIMEOUT      3
 
 #define MAX_JSON_KEY_VALUE_PAIR          25
+#define MAX_PRIORITY_ARRAY_LENGTH        16
+
+typedef struct _json_key_value_pair {
+  char key[MAX_JSON_KEY_LENGTH];
+  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  int index;
+} json_key_value_pair;
 
 typedef struct _request_token_cb {
   char key[MAX_JSON_KEY_LENGTH];
@@ -68,7 +77,9 @@ typedef struct _llist_obj_data {
   char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
   int32_t req_tokens_len;
+  int32_t prio_array_len;
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
+  json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
 } llist_obj_data;
 
 typedef struct _llist_cb {
@@ -128,13 +139,10 @@ typedef struct _bacnet_client_cmd_opts {
   int32_t device_instance_max;
   uint32_t timeout;
   int32_t req_tokens_len;
+  int32_t prio_array_len;
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
+  json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
 } bacnet_client_cmd_opts;
-
-typedef struct _json_key_value_pair {
-  char key[MAX_JSON_KEY_LENGTH];
-  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
-} json_key_value_pair;
 
 #ifdef __cplusplus
 extern "C" {

@@ -738,7 +738,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 BACNET_APPLICATION_TAG_ENUMERATED);
             if (status) {
                 if (wp_data->array_index > 0 && wp_data->array_index <= BACNET_MAX_PRIORITY) {
-                    if (value.type.Enumerated <= MAX_BINARY_PV) {
+                    if (value.type.Enumerated <= MAX_BINARY_PV || value.type.Enumerated == BINARY_NULL) {
                         level = (BACNET_BINARY_PV)value.type.Enumerated;
                         Binary_Value_Priority_Array_Set(wp_data->object_instance, level,
                             wp_data->array_index, NULL);
