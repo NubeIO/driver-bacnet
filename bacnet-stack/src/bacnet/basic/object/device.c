@@ -204,7 +204,6 @@ static object_functions_t My_Object_Table[] = {
         NULL /* ReadRangeInfo */, NULL /* Iterator */, NULL /* Value_Lists */,
         NULL /* COV */, NULL /* COV Clear */, NULL /* Intrinsic Reporting */ },
 #endif
-#if 0
     { OBJECT_MULTI_STATE_INPUT, Multistate_Input_Init, Multistate_Input_Count,
         Multistate_Input_Index_To_Instance, Multistate_Input_Valid_Instance,
         Multistate_Input_Object_Name, Multistate_Input_Read_Property,
@@ -226,7 +225,6 @@ static object_functions_t My_Object_Table[] = {
         Multistate_Value_Encode_Value_List, Multistate_Value_Change_Of_Value,
         Multistate_Value_Change_Of_Value_Clear,
         NULL /* Intrinsic Reporting */ },
-#endif
 #if 0
     { OBJECT_TRENDLOG, Trend_Log_Init, Trend_Log_Count,
         Trend_Log_Index_To_Instance, Trend_Log_Valid_Instance,

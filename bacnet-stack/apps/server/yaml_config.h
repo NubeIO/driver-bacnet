@@ -29,6 +29,12 @@ extern "C" {
 
   int yaml_config_av_max(void);
 
+  int yaml_config_msi_max(void);
+
+  int yaml_config_mso_max(void);
+
+  int yaml_config_msv_max(void);
+
   char *yaml_config_mqtt_broker_ip(void);
 
   int yaml_config_mqtt_broker_port(void);

@@ -972,6 +972,18 @@ char *get_object_type_str(int object_type)
     case OBJECT_DEVICE:
       str = "device";
       break;
+
+    case OBJECT_MULTI_STATE_INPUT:
+      str = "msi";
+      break;
+
+    case OBJECT_MULTI_STATE_OUTPUT:
+      str = "mso";
+      break;
+
+    case OBJECT_MULTI_STATE_VALUE:
+      str = "msv";
+      break;
   }
 
   return(str);
@@ -1262,7 +1274,6 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
       break;
 
     case OBJECT_DEVICE:
-      printf("- value.tag: [%d]\n", value.tag);
       switch(data->object_property) {
         case PROP_OBJECT_NAME:
           // characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
@@ -1291,6 +1302,25 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           break;
 
         default:
+          return(1);
+      }
+
+      break;
+
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      switch(data->object_property) {
+        case PROP_PRESENT_VALUE:
+          sprintf(tmp, "%d", *((unsigned int*)&value.type));
+          break;
+
+        case PROP_OBJECT_NAME:
+          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          break;
+
+        default:
+          printf("Unsupported object_type: %d\n", data->object_property);
           return(1);
       }
 
@@ -1377,6 +1407,9 @@ int encode_write_value_result(llist_obj_data *obj_data, char *buf, int buf_len)
     case OBJECT_BINARY_INPUT:
     case OBJECT_BINARY_OUTPUT:
     case OBJECT_BINARY_VALUE:
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
       if (obj_data->prio_array_len > 0) {
         prio_array_set_to_json_string(&obj_data->prio_array[0], obj_data->prio_array_len,
           prio_array_buf, sizeof(prio_array_buf) - 1);
@@ -1639,8 +1672,10 @@ int publish_bacnet_client_write_value_result(llist_obj_data *data)
 
   encode_write_value_result(data, topic_value, sizeof(topic_value));
 
-  printf("- write value result topic: %s\n", topic);
-  printf("- write value result topic value: %s\n", topic_value);
+  if (mqtt_debug) {
+    printf("- write value result topic: %s\n", topic);
+    printf("- write value result topic value: %s\n", topic_value);
+  }
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -1768,7 +1803,9 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
   if (len < 0) {
     printf("<decode failed!>\n");
   } else {
-    rp_ack_print_data(&data);
+    if (mqtt_debug) {
+      rp_ack_print_data(&data);
+    }
     publish_bacnet_client_read_value_result(&data, &obj_data);
   }
 }
@@ -1918,6 +1955,18 @@ static char *object_type_id_to_name(BACNET_OBJECT_TYPE object_type)
 
     case OBJECT_BINARY_VALUE:
       name = "binary-value";
+      break;
+
+    case OBJECT_MULTI_STATE_INPUT:
+      name = "multi-state-input";
+      break;
+
+    case OBJECT_MULTI_STATE_OUTPUT:
+      name = "multi-state-output";
+      break;
+
+    case OBJECT_MULTI_STATE_VALUE:
+      name = "multi-state-value";
       break;
 
     default:
@@ -2414,6 +2463,19 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
 
       break;
 
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE) {
+        if (mqtt_debug) {
+          printf("Unsupported object_type %d property: %d\n", opts->object_type, opts->property);
+        }
+
+        return(1);
+      }
+
+      break;
+
     case OBJECT_DEVICE:
       if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_OBJECT_IDENTIFIER &&
         opts->property != PROP_SYSTEM_STATUS && opts->property != PROP_VENDOR_NAME &&
@@ -2823,19 +2885,69 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts)
 /*
  * Set bacnet application data value from a string.
  */
-static int set_app_data_value_from_string(int object_type, char *str, BACNET_APPLICATION_DATA_VALUE *value)
+static int set_app_data_value_from_string(int object_type, int object_property, char *str, BACNET_APPLICATION_DATA_VALUE *value)
 {
   switch (object_type) {
     case OBJECT_ANALOG_INPUT:
     case OBJECT_ANALOG_OUTPUT:
     case OBJECT_ANALOG_VALUE:
-      bacapp_parse_application_data(4, str, value);
+      switch (object_property) {
+        case PROP_PRESENT_VALUE:
+        case PROP_PRIORITY_ARRAY:
+          bacapp_parse_application_data(4, str, value);
+          break;
+
+        case PROP_OBJECT_NAME:
+          bacapp_parse_application_data(7, str, value);
+          break;
+
+        default:
+          if (mqtt_debug) {
+            printf("Unknown object property: %d\n", object_property);
+          }
+          return(1);
+      }
       break;
 
     case OBJECT_BINARY_INPUT:
     case OBJECT_BINARY_OUTPUT:
     case OBJECT_BINARY_VALUE:
-      bacapp_parse_application_data(9, str, value);
+      switch (object_property) {
+        case PROP_PRESENT_VALUE:
+        case PROP_PRIORITY_ARRAY:
+          bacapp_parse_application_data(9, str, value);
+          break;
+
+        case PROP_OBJECT_NAME:
+          bacapp_parse_application_data(7, str, value);
+          break;
+
+        default:
+          if (mqtt_debug) {
+            printf("Unknown object property: %d\n", object_property);
+          }
+          return(1);
+      } 
+      break;
+
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      switch (object_property) {
+        case PROP_PRESENT_VALUE:
+          bacapp_parse_application_data(2, str, value);
+          break;
+
+        case PROP_OBJECT_NAME:
+          bacapp_parse_application_data(7, str, value);
+          break;
+
+        default:
+          if (mqtt_debug) {
+            printf("Unknown object property: %d\n", object_property);
+          }
+          return(1);
+      }
       break;
 
     default:
@@ -2995,6 +3107,18 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       }
       break;
 
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE) {
+        if (mqtt_debug) {
+          printf("Unsupported object_type %d property: %d\n", opts->object_type, opts->property);
+        }
+    
+        return(1);
+      }
+      break;
+
     default: 
       if (mqtt_debug) {
         printf("Unknown object type: %d\n", opts->object_type);
@@ -3024,7 +3148,7 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
 
         memset(&value, 0, sizeof(value));
         value.context_specific = false;
-        set_app_data_value_from_string(opts->object_type, opts->prio_array[i].value, &value);
+        set_app_data_value_from_string(opts->object_type, PROP_PRIORITY_ARRAY, opts->prio_array[i].value, &value);
 
         obj_data.device_instance = opts->device_instance;
         obj_data.object_type = opts->object_type;
@@ -3075,7 +3199,7 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
 
     memset(&value, 0, sizeof(value));
     value.context_specific = false;
-    set_app_data_value_from_string(opts->object_type, opts->value, &value);
+    set_app_data_value_from_string(opts->object_type, opts->property, opts->value, &value);
 
     request_invoke_id = Send_Write_Property_Request(
       opts->device_instance, opts->object_type,

@@ -51,6 +51,9 @@ struct _bacnet_config {
   unsigned int ai_max;
   unsigned int ao_max;
   unsigned int av_max;
+  unsigned int msi_max;
+  unsigned int mso_max;
+  unsigned int msv_max;
   struct _mqtt *mqtt;
   char **objects;
   unsigned int n_objects;
@@ -172,6 +175,18 @@ static const cyaml_schema_field_t config_fields_schema[] = {
     "av_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, av_max),
 
+  CYAML_FIELD_UINT(
+    "msi_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, msi_max),
+
+  CYAML_FIELD_UINT(
+    "mso_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, mso_max),
+
+  CYAML_FIELD_UINT(
+    "msv_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, msv_max),
+
   CYAML_FIELD_MAPPING_PTR(
     "mqtt", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, mqtt, mqtt_fields_schema),
@@ -248,6 +263,18 @@ void load_default_settings(void)
 
     if (!bacnet_config->av_max) {
       bacnet_config->av_max = 20;
+    }
+
+    if (!bacnet_config->msi_max) {
+      bacnet_config->msi_max = 20;
+    }
+
+    if (!bacnet_config->mso_max) {
+      bacnet_config->mso_max = 20;
+    }
+
+    if (!bacnet_config->msv_max) {
+      bacnet_config->msv_max = 20;
     }
 
     if (!bacnet_config->mqtt) {
@@ -421,6 +448,9 @@ void yaml_config_dump(void)
   printf("YAML Config: ai_max: %d\n", bacnet_config->ai_max);
   printf("YAML Config: ao_max: %d\n", bacnet_config->ao_max);
   printf("YAML Config: av_max: %d\n", bacnet_config->av_max);
+  printf("YAML Config: msi_max: %d\n", bacnet_config->msi_max);
+  printf("YAML Config: mso_max: %d\n", bacnet_config->mso_max);
+  printf("YAML Config: msv_max: %d\n", bacnet_config->msv_max);
   if (bacnet_config->mqtt) {
     printf("YAML Config: mqtt->broker_ip: %s\n", (bacnet_config->mqtt->broker_ip) ?
       bacnet_config->mqtt->broker_ip : "null");
@@ -565,6 +595,33 @@ int yaml_config_ao_max(void)
 int yaml_config_av_max(void)
 {
   return(bacnet_config->av_max);
+}
+
+
+/*
+ * Get MSI max.
+ */
+int yaml_config_msi_max(void)
+{
+  return(bacnet_config->msi_max);
+}
+
+
+/*
+ * Get MSO max.
+ */
+int yaml_config_mso_max(void)
+{
+  return(bacnet_config->mso_max);
+}
+
+
+/*
+ * Get MSV max.
+ */
+int yaml_config_msv_max(void)
+{
+  return(bacnet_config->msv_max);
 }
 
 
