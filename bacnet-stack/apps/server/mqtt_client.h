@@ -66,20 +66,21 @@ typedef struct _request_token_cb {
 } request_token_cb;
 
 typedef struct _llist_obj_data {
-  uint32_t device_instance;
   BACNET_OBJECT_TYPE object_type;
   uint32_t object_instance;
   BACNET_PROPERTY_ID object_property;
-  int priority;
-  int index;
-  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  int32_t index;
+  int32_t priority;
+  uint32_t device_instance;
   int dnet;
-  char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   int32_t req_tokens_len;
   int32_t prio_array_len;
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
+  int topic_id;
 } llist_obj_data;
 
 typedef struct _llist_cb {
