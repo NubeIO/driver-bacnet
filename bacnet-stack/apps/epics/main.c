@@ -176,6 +176,14 @@ static bool ShowValues = false;
 static bool ShowDeviceObjectOnly = false;
 /* read required and optional properties when RPM ALL does not work */
 static bool Optional_Properties = false;
+/* write result in json file */
+static bool WriteResultToJsonFile = false;
+static char JsonFilePath[251] = {0};
+static int JsonFileFd = -1;
+static bool FirstJsonItem = true;
+int WriteKeyValueToJsonFile(char *key, char *value, int comma_end);
+int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end);
+void StripDoubleQuotes(char *str);
 
 #if !defined(PRINT_ERRORS)
 #define PRINT_ERRORS 1
@@ -353,7 +361,8 @@ static void Init_Service_Handlers(void)
  */
 static void CheckIsWritableProperty(BACNET_OBJECT_TYPE object_type,
     /* uint32_t object_instance, */
-    BACNET_PROPERTY_REFERENCE *rpm_property)
+    BACNET_PROPERTY_REFERENCE *rpm_property,
+    char *buf, int buf_len)
 {
     bool bIsWritable = false;
     if ((object_type == OBJECT_ANALOG_OUTPUT) ||
@@ -429,7 +438,10 @@ static void CheckIsWritableProperty(BACNET_OBJECT_TYPE object_type,
      */
     if (bIsWritable) {
         fprintf(stdout, " Writable");
-}
+        if (WriteResultToJsonFile) {
+            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), " Writable");
+        }
+    }
 }
 
 static const char *protocol_services_supported_text(size_t bit_index)
@@ -467,7 +479,7 @@ static const char *protocol_services_supported_text(size_t bit_index)
  */
 
 static bool PrettyPrintPropertyValue(
-    FILE *stream, BACNET_OBJECT_PROPERTY_VALUE *object_value)
+    FILE *stream, BACNET_OBJECT_PROPERTY_VALUE *object_value, char *buf, int buf_len)
 {
     BACNET_APPLICATION_DATA_VALUE *value = NULL;
     bool status = true; /*return value */
@@ -482,9 +494,16 @@ static bool PrettyPrintPropertyValue(
             (property == PROP_PROTOCOL_SERVICES_SUPPORTED))) {
         len = bitstring_bits_used(&value->type.Bit_String);
         fprintf(stream, "( \n        ");
+        if (WriteResultToJsonFile) {
+            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+        }
         for (i = 0; i < len; i++) {
             fprintf(stream, "%s",
                 bitstring_bit(&value->type.Bit_String, (uint8_t)i) ? "T" : "F");
+            if (WriteResultToJsonFile) {
+                snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "%s\"%s\"",
+                    ((i == 0) ? "" : ","), bitstring_bit(&value->type.Bit_String, (uint8_t)i) ? "T" : "F");
+            }
             if (i < len - 1) {
                 fprintf(stream, ",");
             } else {
@@ -507,12 +526,15 @@ static bool PrettyPrintPropertyValue(
                         }
                     } else { /* not supported */
                         fprintf(stream, ",");
-}
+                    }
                 }
                 fprintf(stream, "\n        ");
             }
         }
         fprintf(stream, ") \n");
+        if (WriteResultToJsonFile) {
+            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+        }
     } else if ((value != NULL) && (value->tag == BACNET_APPLICATION_TAG_DATE)) {
         /* eg, property == PROP_LOCAL_DATE
          * VTS needs (3-Aug-2011,4) or (8/3/11,4), so we'll use the
@@ -522,13 +544,17 @@ static bool PrettyPrintPropertyValue(
         fprintf(stream, "(%u-%3s-%u, %u)", (unsigned)value->type.Date.day,
             short_month, (unsigned)value->type.Date.year,
             (unsigned)value->type.Date.wday);
+        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "(%u-%3s-%u, %u)", (unsigned)value->type.Date.day,
+            short_month, (unsigned)value->type.Date.year,
+            (unsigned)value->type.Date.wday);
     } else if (value != NULL) {
         assert(false); /* How did I get here?  Fix your code. */
         /* Meanwhile, a fallback plan */
         status = bacapp_print_value(stdout, object_value);
     } else {
         fprintf(stream, "? \n");
-}
+        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "?");
+    }
 
     return status;
 }
@@ -545,7 +571,7 @@ static bool PrettyPrintPropertyValue(
  */
 static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
     uint32_t object_instance,
-    BACNET_PROPERTY_REFERENCE *rpm_property)
+    BACNET_PROPERTY_REFERENCE *rpm_property, char *buf, int buf_len)
 {
     BACNET_OBJECT_PROPERTY_VALUE object_value; /* for bacapp printing */
     BACNET_APPLICATION_DATA_VALUE *value, *old_value;
@@ -587,11 +613,14 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                 }
                 if (object_type == OBJECT_DATETIME_VALUE) {
                     break; /* A special case - no braces for this pair */
-}
+                }
                 /* Else, fall through to normal processing. */
             default:
                 /* Normal array: open brace */
                 fprintf(stdout, "{ ");
+                if (WriteResultToJsonFile) {
+                    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+                }
                 print_brace = true; /* remember to close it */
                 break;
         }
@@ -599,7 +628,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
 
     if (!Using_Walked_List) {
         Walked_List_Index = Walked_List_Length = 0; /* In case we need this. */
-}
+    }
     /* value(s) loop until there is no "next" ... */
     while (value != NULL) {
         object_value.object_property = rpm_property->propertyIdentifier;
@@ -621,12 +650,12 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                         if (rpm_property->propertyIdentifier ==
                             PROP_OBJECT_LIST) {
                             Object_List_Length = value->type.Unsigned_Int;
-}
+                        }
                         break;
                     } else {
                         assert(Walked_List_Index ==
                             (uint32_t)rpm_property->propertyArrayIndex);
-}
+                    }
                 } else {
                     Walked_List_Index++;
                     /* If we got the whole Object List array in one RP call,
@@ -634,7 +663,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                      * through. */
                     if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST) {
                         Object_List_Length = ++Object_List_Index;
-}
+                    }
                 }
                 if (Walked_List_Index == 1) {
                     /* If the array is empty (nothing for this first entry),
@@ -650,9 +679,12 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                      * of values[] ) */
                     if (value->next == NULL) {
                         fprintf(stdout, "{ \n        ");
+                        if (WriteResultToJsonFile) {
+                            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+                        }
                     } else {
                         fprintf(stdout, "\n        ");
-}
+                    }
                 }
 
                 if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST) {
@@ -702,27 +734,42 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                  * braces */
                 if (isSequence) {
                     fprintf(stdout, "{");
-}
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+                    }
+                }
                 bacapp_print_value(stdout, &object_value);
+                if (WriteResultToJsonFile) {
+                    bacapp_snprintf_value2(&buf[strlen(buf)], buf_len - strlen(buf), &object_value);
+                }
                 if (isSequence) {
                     fprintf(stdout, "}");
-}
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+                    }
+                }
 
                 if ((Walked_List_Index < Walked_List_Length) ||
                     (value->next != NULL)) {
                     /* There are more. */
                     fprintf(stdout, ", ");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ",");
+                    }
                     if (!(Walked_List_Index % 3)) {
                         fprintf(stdout, "\n        ");
-}
+                    }
                 } else {
                     fprintf(stdout, " } \n");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+                    }
                 }
                 break;
 
             case PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED:
             case PROP_PROTOCOL_SERVICES_SUPPORTED:
-                PrettyPrintPropertyValue(stdout, &object_value);
+                PrettyPrintPropertyValue(stdout, &object_value, buf, buf_len);
                 break;
 
                 /* Our special non-existent case; do nothing further here. */
@@ -736,7 +783,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                     (object_value.value->tag == BACNET_APPLICATION_TAG_DATE)) {
                     /* This would be PROP_LOCAL_DATE, or OBJECT_DATETIME_VALUE,
                      * or OBJECT_DATE_VALUE                     */
-                    PrettyPrintPropertyValue(stdout, &object_value);
+                    PrettyPrintPropertyValue(stdout, &object_value, buf, buf_len);
                 } else {
                     /* Some properties are presented just as '?' in an EPICS;
                      * screen these out here, unless ShowValues is true.  */
@@ -764,19 +811,28 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                             /* Else, fall through and print value: */
                         default:
                             bacapp_print_value(stdout, &object_value);
+                            if (WriteResultToJsonFile) {
+                                bacapp_snprintf_value2(&buf[strlen(buf)], buf_len - strlen(buf), &object_value);
+                            }
                             break;
                     }
                 }
                 if (value->next != NULL) {
                     /* there's more! */
                     fprintf(stdout, ",");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ",");
+                    }
                 } else {
                     if (print_brace) {
                         /* Closing brace for this multi-valued array */
                         fprintf(stdout, " }");
+                        if (WriteResultToJsonFile) {
+                            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+                        }
                     }
                     CheckIsWritableProperty(object_type, /* object_instance, */
-                        rpm_property);
+                        rpm_property, buf, buf_len);
                     fprintf(stdout, "\n");
                 }
                 break;
@@ -799,6 +855,16 @@ static void Print_Property_Identifier(unsigned propertyIdentifier)
     } else {
         fprintf(stdout, "-- proprietary %u", propertyIdentifier);
     }
+}
+
+/* Get property identifier name. */
+static void get_property_identifier_name(unsigned propertyIdentifier, char *buf, int buf_len)
+{
+  if (propertyIdentifier < 512) {
+    snprintf(buf, buf_len - 1, "%s", bactext_property_name(propertyIdentifier));
+  } else {
+    snprintf(buf, buf_len - 1, "proprietary %u", propertyIdentifier);
+  }
 }
 
 /* Build a list of device properties to request with RPM. */
@@ -931,6 +997,8 @@ static EPICS_STATES ProcessRPMData(
     bool bHasObjectList = false;
     bool bHasStructuredViewList = false;
     int i = 0;
+    char json_key_buf[128] = {0};
+    char json_value_buf[2048] = {0};
 
     while (rpm_data) {
         rpm_property = rpm_data->listOfProperties;
@@ -969,7 +1037,14 @@ static EPICS_STATES ProcessRPMData(
                 Print_Property_Identifier(rpm_property->propertyIdentifier);
                 fprintf(stdout, ": ");
                 PrintReadPropertyData(rpm_data->object_type,
-                    rpm_data->object_instance, rpm_property);
+                    rpm_data->object_instance, rpm_property, json_value_buf, sizeof(json_value_buf) - 1);
+
+                if (WriteResultToJsonFile) {
+                    get_property_identifier_name(rpm_property->propertyIdentifier, json_key_buf, sizeof(json_key_buf));
+                    StripDoubleQuotes(json_value_buf);
+                    WriteKeyValueToJsonFile(json_key_buf, json_value_buf, ((rpm_property->next) ? true : false));
+                    json_value_buf[0] = '\0';
+                }
             }
             old_rpm_property = rpm_property;
             rpm_property = rpm_property->next;
@@ -1033,6 +1108,8 @@ static void print_help(char *filename)
     printf("    Use \"7F:00:00:01:BA:C0\" for loopback testing \n");
     printf("-n: specify target's DNET if not local BACnet network  \n");
     printf("    or on routed Virtual Network \n");
+    printf("-j: write result in a json file(out.json)\n");
+    printf("-J: specify json output file. epics.json is the default.\n");
     printf("\n");
     printf("You can redirect the output to a .tpi file for VTS use,\n");
     printf("e.g., bacepics 2701876 > epics-2701876.tpi \n");
@@ -1137,6 +1214,14 @@ static int CheckCommandLineArgs(int argc, char *argv[])
                     }
                     /* Either break or fall through, as above */
                     /* break; */
+                case 'j':
+                    WriteResultToJsonFile = true;
+                    break;
+                case 'J':
+                    if (++i < argc) {
+                        strncpy(JsonFilePath, argv[i], sizeof(JsonFilePath) - 1);
+                    }
+                    break;
                 default:
                     print_usage(filename);
                     exit(0);
@@ -1161,6 +1246,10 @@ static int CheckCommandLineArgs(int argc, char *argv[])
         exit(0);
     }
 
+    if (WriteResultToJsonFile && !strlen(JsonFilePath)) {
+        strcpy(JsonFilePath, "epics.json");
+    }
+
     return 0; /* All OK if we reach here */
 }
 
@@ -1168,6 +1257,9 @@ static void PrintHeading(void)
 {
     BACNET_APPLICATION_DATA_VALUE *value = NULL;
     BACNET_OBJECT_PROPERTY_VALUE property_value;
+    char buf[256];
+    char str_value[128];
+    int last_element_index = 0;
 
     printf("PICS 0\n");
     printf("BACnet Protocol Implementation Conformance Statement\n\n");
@@ -1182,8 +1274,14 @@ static void PrintHeading(void)
         (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
         printf("Vendor Name: \"%s\"\n",
             characterstring_value(&value->type.Character_String));
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Vendor Name", characterstring_value(&value->type.Character_String), true);
+        }
     } else {
         printf("Vendor Name: \"your vendor name here\"\n");
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Vendor Name", "", true);
+        }
     }
 
     value = object_property_value(PROP_PRODUCT_NAME);
@@ -1192,8 +1290,14 @@ static void PrintHeading(void)
         (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
         printf("Product Name: \"%s\"\n",
             characterstring_value(&value->type.Character_String));
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Product Name", characterstring_value(&value->type.Character_String), true);
+        }
     } else {
         printf("Product Name: \"your product name here\"\n");
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Product Name", "", true);
+        }
     }
 
     value = object_property_value(PROP_MODEL_NAME);
@@ -1201,8 +1305,14 @@ static void PrintHeading(void)
         (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
         printf("Product Model Number: \"%s\"\n",
             characterstring_value(&value->type.Character_String));
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Product Model Number", characterstring_value(&value->type.Character_String), true);
+        }
     } else {
         printf("Product Model Number: \"your model number here\"\n");
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Product Model Number", "", true);
+        }
     }
 
     value = object_property_value(PROP_DESCRIPTION);
@@ -1210,13 +1320,25 @@ static void PrintHeading(void)
         (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
         printf("Product Description: \"%s\"\n\n",
             characterstring_value(&value->type.Character_String));
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Product Description", characterstring_value(&value->type.Character_String), true);
+        }
     } else {
         printf("Product Description: "
                "\"your product description here\"\n\n");
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Product Description", "", true);
+        }
     }
     printf("BIBBs Supported:\n");
     printf("{\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("BIBBs Supported", "[", false);
+    }
     printf(" DS-RP-B\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"DS-RP-B\"", NULL, false);
+    }
     printf("-- possible BIBBs in this device\n");
     printf("-- DS-RPM-B\n");
     printf("-- DS-WP-B\n");
@@ -1238,8 +1360,14 @@ static void PrintHeading(void)
         printf("-- NM-RC-B\n");
 #endif
     printf("}\n\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("]", NULL, true);
+    }
     printf("BACnet Standard Application Services Supported:\n");
     printf("{\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("BACnet Standard Application Services Supported", "[", false);
+    }
     value = object_property_value(PROP_PROTOCOL_SERVICES_SUPPORTED);
     /* We have to process this bit string and determine which Object Types we
      * have, and show them
@@ -1247,10 +1375,19 @@ static void PrintHeading(void)
     if ((value != NULL) && (value->tag == BACNET_APPLICATION_TAG_BIT_STRING)) {
         int i, len = bitstring_bits_used(&value->type.Bit_String);
         printf("-- services reported by this device\n");
+        for (i = 0, last_element_index = len - 1; i < len; i++) {
+            if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
+                last_element_index = i;
+            }
+        }
         for (i = 0; i < len; i++) {
             if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
                 printf(" %s\n", protocol_services_supported_text(i));
-}
+                if (WriteResultToJsonFile) {
+                    snprintf(buf, sizeof(buf) - 1, "\"%s\"", protocol_services_supported_text(i));
+                    WriteKeyValueToJsonFile(buf, NULL, (i != last_element_index));
+                }
+            }
         }
     } else {
         printf("-- use \'Initiate\' or \'Execute\' or both for services.\n");
@@ -1285,9 +1422,15 @@ static void PrintHeading(void)
 #endif
     }
     printf("}\n\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("]", NULL, true);
+    }
 
     printf("Standard Object-Types Supported:\n");
     printf("{\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("Standard Object-Types Supported", "[", false);
+    }
     value = object_property_value(PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED);
     /* We have to process this bit string and determine which Object Types we
      * have, and show them
@@ -1295,10 +1438,20 @@ static void PrintHeading(void)
     if ((value != NULL) && (value->tag == BACNET_APPLICATION_TAG_BIT_STRING)) {
         int i, len = bitstring_bits_used(&value->type.Bit_String);
         printf("-- objects reported by this device\n");
+        for (i = 0, last_element_index = len - 1; i < len; i++) {
+            if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
+                last_element_index = i;
+            }
+        }
+
         for (i = 0; i < len; i++) {
             if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
                 printf(" %s\n", bactext_object_type_name(i));
-}
+                if (WriteResultToJsonFile) {
+                    snprintf(buf, sizeof(buf) - 1, "\"%s\"", bactext_object_type_name(i));
+                    WriteKeyValueToJsonFile(buf, NULL, (i != last_element_index));
+                }
+            }
         }
     } else {
         printf("-- possible objects in this device\n");
@@ -1330,6 +1483,9 @@ static void PrintHeading(void)
         printf("-- Time Value\n");
     }
     printf("}\n\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("]", NULL, true);
+    }
 
     printf("Data Link Layer Option:\n");
     printf("{\n");
@@ -1367,6 +1523,9 @@ static void PrintHeading(void)
 
     printf("Special Functionality:\n");
     printf("{\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("Special Functionality", "{", false);
+    }
     value = object_property_value(PROP_MAX_APDU_LENGTH_ACCEPTED);
     printf(" Maximum APDU size in octets: ");
     if (value != NULL) {
@@ -1376,37 +1535,104 @@ static void PrintHeading(void)
         property_value.array_index = BACNET_ARRAY_ALL;
         property_value.value = value;
         bacapp_print_value(stdout, &property_value);
+        bacapp_snprintf_value(str_value, sizeof(str_value), &property_value);
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("Maximum APDU size in octets", str_value, false);
+        }
     } else {
         printf("?");
     }
     printf("\n}\n\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("}", NULL, true);
+    }
 
     printf("Default Property Value Restrictions:\n");
     printf("{\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("Default Property Value Restrictions", "{", false);
+    }
     printf("  unsigned-integer: <minimum: 0; maximum: 4294967295>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"unsigned-integer\" : {\"minimum\" : \"0\", \"maximum\": \"4294967295\"}", NULL, true);
+    }
     printf("  signed-integer: <minimum: -2147483647; maximum: 2147483647>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"signed-integer\" : {\"minimum\" : \"-2147483647\", \"maximum\" : \"2147483647\"}", NULL, true);
+    }
     printf(
         "  real: <minimum: -3.40282347E38; maximum: 3.40282347E38; resolution: "
         "1.0>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"real\" : {\"minimum\" : \"-3.40282347E38\" , \"maximum\": \"3.40282347E38\"}", NULL, true);
+    }
     printf("  double: <minimum: 2.2250738585072016E-38; maximum: "
            "1.7976931348623157E38; resolution: 0.0001>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"double\" : {\"minimum\" : \"2.2250738585072016E-38\" , \"maximum\" : \"1.7976931348623157E38\" , \"resolution\" : \"0.0001\"}", NULL, true);
+    }
     printf("  date: <minimum: 01-January-1970; maximum: 31-December-2038>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"date\" : {\"minimum\" : \"01-January-1970\" , \"maximum\" : \"31-December-2038\"}", NULL, true);
+    }
     printf("  octet-string: <maximum length string: 122>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"octet-string\" : {\"maximum length string\" : \"122\"}", NULL, true);
+    }
     printf("  character-string: <maximum length string: 122>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"character-string\" : {\"maximum length string\" : \"122\"}", NULL, true);
+    }
     printf("  list: <maximum length list: 10>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"list\" : {\"maximum length list\" : \"10\"}", NULL, true);
+    }
     printf("  variable-length-array: <maximum length array: 10>\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"variable-length-array\" : {\"maximum length array\" : \"10\"}", NULL, false);
+    }
     printf("}\n\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("}", NULL, true);
+    }
 
     printf("Fail Times:\n");
     printf("{\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("Fail Times", "{", false);
+    }
     printf("  Notification Fail Time: 2\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"Notification Fail Time\" : \"2\"", NULL, true);
+    }
     printf("  Internal Processing Fail Time: 0.5\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"Internal Processing Fail Time\" : \"0.5\"", NULL, true);
+    }
     printf("  Minimum ON/OFF Time: 5\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"Minimum ON/OFF Time\" : \"5\"", NULL, true);
+    }
     printf("  Schedule Evaluation Fail Time: 1\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"Schedule Evaluation Fail Time\" : \"1\"", NULL, true);
+    }
     printf("  External Command Fail Time: 1\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"External Command Fail Time\" : \"1\"", NULL, true);
+    }
     printf("  Program Object State Change Fail Time: 2\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"Program Object State Change Fail Time\" : \"2\"", NULL, true);
+    }
     printf("  Acknowledgement Fail Time: 2\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("\"Acknowledgement Fail Time\" : \"2\"", NULL, false);
+    }
     printf("}\n\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("}", NULL, true);
+    }
 }
 
 static void Print_Device_Heading(void)
@@ -1414,7 +1640,14 @@ static void Print_Device_Heading(void)
     printf("List of Objects in Test Device:\n");
     /* Print Opening brace, then kick off the Device Object */
     printf("{\n");
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("List of Objects in Test Device", "[", false);
+    }
     printf("  {\n"); /* And opening brace for the first object */
+    if (WriteResultToJsonFile) {
+        WriteKeyValueToJsonFile("{", NULL, false);
+        FirstJsonItem = true;
+    }
 }
 
 /* Initialize fields for a new Object */
@@ -1432,6 +1665,118 @@ static void StartNextObject(
     assert(rpm_property);
     rpm_property->propertyIdentifier = PROP_ALL;
     rpm_property->propertyArrayIndex = BACNET_ARRAY_ALL;
+}
+
+/* Open JSON Output file */
+static int OpenJsonFile(void)
+{
+    char *str = "{\n";
+    int ret;
+
+    JsonFileFd = open(JsonFilePath, O_CREAT|O_TRUNC|O_RDWR, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+    if (JsonFileFd < 0) {
+        return(1);
+    }
+
+    ret = write(JsonFileFd, str, strlen(str));
+    if (ret < 0){
+        printf("Warning: Error writing to file: %s\n", JsonFilePath);
+    }
+
+    return(0);
+}
+
+/* Close JSON Output file */
+static void CloseJsonFile(void)
+{
+    char *str = "}";
+    int ret;
+
+    if (JsonFileFd >= 0) {
+        ret = write(JsonFileFd, str, strlen(str));
+        if (ret < 0){
+            printf("Warning: Error writing to file: %s\n", JsonFilePath);
+        }
+
+        close(JsonFileFd);
+        JsonFileFd = -1;
+    }
+}
+
+/* Write key/value pair into JSON Output file */
+int WriteKeyValueToJsonFile(char *key, char *value, int comma_end)
+{
+  char buf[2048] = {0};
+
+  if (value == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s\n", key,
+      (comma_end) ? "," : "");
+  } else if (key == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s\n", value,
+      (comma_end) ? "," : "");
+  } else if ((strlen(value) == 1) && (*value == '{' || *value == '[')) {
+    snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s\n", key, value);
+  } else {
+    if (*value == '[' || *value == '{') {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s%s\n", key, value,
+        (comma_end) ? "," : "");
+    } else {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : \"%s\"%s\n", key, value,
+        (comma_end) ? "," : "");
+    }
+  }
+
+  if (write(JsonFileFd, buf, strlen(buf)) < 0) {
+    return(1);
+  }
+
+  return(0);
+}
+
+/* Write key/value pair into JSON Output file */
+int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end)
+{
+  char buf[2048] = {0};
+
+  if (value == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s", key,
+      (comma_end) ? "," : "");
+  } else if (key == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s", value,
+      (comma_end) ? "," : "");
+  } else if ((strlen(value) == 1) && (*value == '{' || *value == '[')) {
+    snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s", key, value);
+  } else {
+    if (*value == '[' || *value == '{') {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s%s", key, value,
+        (comma_end) ? "," : "");
+    } else {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : \"%s\"%s", key, value,
+        (comma_end) ? "," : "");
+    }
+  }
+
+  if (write(JsonFileFd, buf, strlen(buf)) < 0) {
+    return(1);
+  }
+
+  return(0);
+}
+
+/* Strip double quotes in string */
+void StripDoubleQuotes(char *str)
+{
+  char *ptr, *runner;
+
+  if (*str == '"') {
+    for(runner = str; *runner == '"'; runner++);
+    for(ptr = str; *runner != '\0'; runner++, ptr++) {
+      *ptr = *runner;
+    }
+    *ptr = '\0';
+  }
+
+  for (runner = &str[strlen(str) - 1]; *runner == '"'; *runner = '\0', runner--);
 }
 
 /** Main function of the bacepics program.
@@ -1462,6 +1807,8 @@ int main(int argc, char *argv[])
     uint8_t buffer[MAX_PDU] = { 0 };
     BACNET_READ_ACCESS_DATA *rpm_object = NULL;
     KEY nextKey;
+    char json_key_buf[128] = {0};
+    char json_value_buf[2048] = {0};
 
     CheckCommandLineArgs(argc, argv); /* Won't return if there is an issue. */
     memset(&src, 0, sizeof(BACNET_ADDRESS));
@@ -1529,6 +1876,13 @@ int main(int argc, char *argv[])
                 Target_Device_Object_Instance, Target_Device_Object_Instance);
         }
     }
+
+    /* open json output file */
+    if (WriteResultToJsonFile && OpenJsonFile()) {
+        printf("Error opening JSON output file: %s\n", JsonFilePath);
+        exit(0);
+    }
+
     myObject.type = OBJECT_DEVICE;
     myObject.instance = Target_Device_Object_Instance;
     myState = INITIAL_BINDING;
@@ -1617,7 +1971,7 @@ int main(int argc, char *argv[])
                         myState = GET_LIST_OF_ALL_RESPONSE;
                     } else {
                         myState = GET_ALL_RESPONSE;
-}
+                    }
                 }
                 break;
 
@@ -1674,7 +2028,7 @@ int main(int argc, char *argv[])
                         myState = GET_ALL_REQUEST; /* Let's try again */
                     } else {
                         myState = GET_PROPERTY_REQUEST;
-}
+                    }
                 } else if (tsm_invoke_id_failed(Request_Invoke_ID)) {
                     fprintf(stderr, "\rError: TSM Timeout!\n");
                     tsm_free_invoke_id(Request_Invoke_ID);
@@ -1685,7 +2039,7 @@ int main(int argc, char *argv[])
                     /* just press ahead without the data */
                     } else {
                         myState = GET_ALL_REQUEST; /* Let's try again */
-}
+                    }
                 } else if (Error_Detected) {
                     /* Don't think we'll ever actually reach this point. */
                     elapsed_seconds = 0;
@@ -1695,7 +2049,7 @@ int main(int argc, char *argv[])
                     /* just press ahead without the data */
                     } else {
                         myState = NEXT_OBJECT; 
-}/* Give up and move on to the
+                    }/* Give up and move on to the
                                                   next. */
                     Error_Count++;
                 }
@@ -1715,7 +2069,7 @@ int main(int argc, char *argv[])
                     myState = NEXT_OBJECT; /* Move on to the next. */
                 } else {
                     myState = GET_PROPERTY_RESPONSE;
-}
+                }
                 break;
 
             case GET_PROPERTY_RESPONSE:
@@ -1731,10 +2085,23 @@ int main(int argc, char *argv[])
                     (Request_Invoke_ID ==
                         Read_Property_Multiple_Data.service_data.invoke_id)) {
                     Read_Property_Multiple_Data.new_data = false;
+                    json_value_buf[0] = '\0';
                     PrintReadPropertyData(
                         Read_Property_Multiple_Data.rpm_data->object_type,
                         Read_Property_Multiple_Data.rpm_data->object_instance,
-                        Read_Property_Multiple_Data.rpm_data->listOfProperties);
+                        Read_Property_Multiple_Data.rpm_data->listOfProperties,
+                        json_value_buf, sizeof(json_value_buf));
+                    if (WriteResultToJsonFile) {
+                        get_property_identifier_name(Read_Property_Multiple_Data.rpm_data->listOfProperties->propertyIdentifier,
+                             json_key_buf, sizeof(json_key_buf));
+                        StripDoubleQuotes(json_value_buf);
+                        if (FirstJsonItem) {
+                            FirstJsonItem = false;
+                        } else {
+                            WriteKeyValueNoNLToJsonFile(",\n", NULL, false);
+                        }
+                        WriteKeyValueNoNLToJsonFile(json_key_buf, json_value_buf, false); 
+                    }
                     if (tsm_invoke_id_free(Request_Invoke_ID)) {
                         Request_Invoke_ID = 0;
                     } else {
@@ -1815,6 +2182,9 @@ int main(int argc, char *argv[])
                     if (ShowDeviceObjectOnly) {
                         /* Closing brace for the Device Object */
                         printf("  }, \n");
+                        if (WriteResultToJsonFile) {
+                            WriteKeyValueToJsonFile("}", NULL, true);
+                        }
                         /* done with all Objects, signal end of this while loop
                          */
                         myObject.type = MAX_BACNET_OBJECT_TYPE;
@@ -1832,11 +2202,18 @@ int main(int argc, char *argv[])
                         /* Don't re-list the Device Object among its objects */
                         if (myObject.type == OBJECT_DEVICE) {
                             continue;
-}
+                        }
                         /* Closing brace for the previous Object */
                         printf("  }, \n");
+                        if (WriteResultToJsonFile) {
+                            WriteKeyValueToJsonFile("}", NULL, true);
+                        }
                         /* Opening brace for the new Object */
                         printf("  { \n");
+                        if (WriteResultToJsonFile) {
+                            WriteKeyValueToJsonFile("{", NULL, false);
+                            FirstJsonItem = true;
+                        }
                         /* Test code:
                            if ( myObject.type == OBJECT_STRUCTURED_VIEW )
                            printf( "    -- Structured View %d \n",
@@ -1845,6 +2222,9 @@ int main(int argc, char *argv[])
                     } else {
                         /* Closing brace for the last Object */
                         printf("  } \n");
+                        if (WriteResultToJsonFile) {
+                            WriteKeyValueToJsonFile("}", NULL, false);
+                        }
                         /* done with all Objects, signal end of this while loop
                          */
                         myObject.type = MAX_BACNET_OBJECT_TYPE;
@@ -1886,8 +2266,16 @@ int main(int argc, char *argv[])
     /* Closing brace for all Objects, if we got any, and closing footer  */
     if (myState != INITIAL_BINDING) {
         printf("} \n");
+        if (WriteResultToJsonFile) {
+            WriteKeyValueToJsonFile("]", NULL, false);
+        }
         printf("End of BACnet Protocol Implementation Conformance Statement\n");
         printf("\n");
+    }
+
+    /* Close json output file */
+    if (WriteResultToJsonFile) {
+        CloseJsonFile();
     }
 
     return 0;
