@@ -240,6 +240,12 @@ extern "C" {
         size_t str_len,
         BACNET_OBJECT_PROPERTY_VALUE * object_value);
 
+    BACNET_STACK_EXPORT
+    int bacapp_snprintf_value2(
+        char *str,
+        size_t str_len,
+        BACNET_OBJECT_PROPERTY_VALUE *object_value);
+
 #ifdef BACAPP_PRINT_ENABLED
     BACNET_STACK_EXPORT
     bool bacapp_parse_application_data(
