@@ -26,5 +26,7 @@ RUN cd /opt/bacnet-stack \
 WORKDIR /
 
 RUN mkdir -p /opt/bacnet-stack/app/ \
-    && cp /opt/bacnet-stack/bin/bacserv /opt/bacnet-stack/app
+    && mkdir -p /opt/bacnet-stack/epics/ \
+    && cp /opt/bacnet-stack/bin/bacserv /opt/bacnet-stack/app \
+    && cp /opt/bacnet-stack/bin/bacepics /opt/bacnet-stack/epics
 
