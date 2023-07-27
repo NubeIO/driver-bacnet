@@ -17,6 +17,10 @@ For example:
 ```
 g=/data/bacnet-server-c s=config.yml ./app 
 ```
+on your pc
+```
+g=/home/user/code/bacnet s=config.yml ./app-amd64 
+```
 
 Updating BACnet Object Property Values Via MQTT
 --
