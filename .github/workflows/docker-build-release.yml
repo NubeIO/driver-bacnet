@@ -15,7 +15,6 @@ on:
 
 env:
   APP_NAME: bacnet-server-c
-  EPICS_NAME: bacnet-server-c-epics
   GHCR_IMAGE: ghcr.io/nubeio/bacnet-server-c
   PLATFORMS: linux/amd64,linux/arm/v7
 
@@ -32,7 +31,6 @@ jobs:
       sha: ${{ steps.context.outputs.commitId }}
       version: ${{ steps.context.outputs.version }}
       fqn: ${{ env.APP_NAME }}-${{ steps.context.outputs.version }}-${{ steps.context.outputs.shortCommitId }}
-      fqn_epics: ${{ env.EPICS_NAME }}-${{ steps.context.outputs.version }}-${{ steps.context.outputs.shortCommitId }}
 
     steps:
       - uses: actions/checkout@v2
@@ -122,7 +120,6 @@ jobs:
         run: |
           image=localhost:5000/${{ env.APP_NAME }}:${{ needs.context.outputs.sha }}
           output=/opt/bacnet-stack/app/
-          output_epics=/opt/bacnet-stack/epics/
           mkdir -p /tmp/zip /tmp/images
           IFS=',' read -ra ARR <<< "${{ env.PLATFORMS }}"
           for plat in "${ARR[@]}"; do
@@ -130,12 +127,9 @@ jobs:
             p=$(echo "${p//linux/}")
             perImage=$(docker buildx imagetools inspect $image | grep -B 2 $plat | grep Name: | awk '{print $2}')
             artifact=${{ needs.context.outputs.fqn }}.$p
-            artifact_epics=${{ needs.context.outputs.fqn_epics }}.$p
             folder=/tmp/images/$artifact
-            folder_epics=/tmp/images/$artifact_epics
-            docker create --name $artifact $perImage && docker cp $artifact:$output $folder && docker cp $artifact:$output_epics $folder_epics && docker rm $artifact
+            docker create --name $artifact $perImage && docker cp $artifact:$output $folder && docker rm $artifact
             cd $folder; mv bacserv app-$p; zip -r /tmp/zip/$artifact.zip ./; cd -
-            cd $folder_epics; mv bacepics bacepics-$p; zip -r /tmp/zip/$artifact_epics.zip ./; cd -
           done
 
       - name: Login to GitHub Container Registry
@@ -156,5 +150,4 @@ jobs:
           prerelease: false
           files: |
             /tmp/zip/${{ needs.context.outputs.fqn }}.*.zip
-            /tmp/zip/${{ needs.context.outputs.fqn_epics }}.*.zip
 
