@@ -628,7 +628,7 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                    object. */
                 status =
                     Analog_Output_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority, NULL, false);
+                        value.type.Real, wp_data->priority, NULL, true);
                 if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -666,7 +666,7 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Output_Instance_Names[0]));
             if (status) {
                 Analog_Output_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL, false);
+                    &value.type.Character_String, NULL, true);
             }
             break;
         case PROP_OBJECT_TYPE:
