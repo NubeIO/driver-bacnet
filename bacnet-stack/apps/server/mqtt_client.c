@@ -1229,6 +1229,7 @@ int extract_char_string(char *buf, int buf_len, BACNET_APPLICATION_DATA_VALUE *v
  */
 int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data, char *buf, int buf_len)
 {
+  BACNET_OBJECT_PROPERTY_VALUE object_value = {0};
   BACNET_APPLICATION_DATA_VALUE value;
   char tmp[25000] = {0};
   int i;
@@ -1246,7 +1247,12 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           break;
 
         case PROP_OBJECT_NAME:
-          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
           break;
 
         case PROP_PRIORITY_ARRAY:
@@ -1269,7 +1275,12 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           break;
 
         case PROP_OBJECT_NAME:
-          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
           break;
 
         case PROP_PRIORITY_ARRAY:
@@ -1285,12 +1296,15 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
     case OBJECT_DEVICE:
       switch(data->object_property) {
         case PROP_OBJECT_NAME:
-          // characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
-          extract_char_string(tmp, sizeof(tmp), &value);
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
           break;
 
         case PROP_OBJECT_IDENTIFIER:
-          // sprintf(tmp, "%d", *((int*)&value.type));
           sprintf(tmp, "%lu", (unsigned long)value.type.Object_Id.instance);
           break;
 
@@ -1299,7 +1313,12 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           break;
 
         case PROP_VENDOR_NAME:
-          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
           break;
 
         case PROP_VENDOR_IDENTIFIER:
@@ -1325,7 +1344,12 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           break;
 
         case PROP_OBJECT_NAME:
-          characterstring_ansi_copy(tmp, sizeof(tmp) - 1, (BACNET_CHARACTER_STRING*)&value.type);
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
           break;
 
         default:
@@ -1347,8 +1371,13 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
     snprintf(buf, buf_len, "{ \"value\" : %s , \"deviceInstance\" : \"%d\" ",
       tmp, obj_data->device_instance);
   } else {
-    snprintf(buf, buf_len, "{ \"value\" : \"%s\" , \"deviceInstance\" : \"%d\" ",
-      tmp, obj_data->device_instance);
+    if (tmp[0] == '"') {
+      snprintf(buf, buf_len, "{ \"value\" : %s , \"deviceInstance\" : \"%d\" ",
+        tmp, obj_data->device_instance);
+    } else {
+      snprintf(buf, buf_len, "{ \"value\" : \"%s\" , \"deviceInstance\" : \"%d\" ",
+        tmp, obj_data->device_instance);
+    }
   }
 
   if (obj_data->dnet >= 0) {
