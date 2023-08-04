@@ -579,7 +579,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                        main loop (i.e. check out of service before changing
                        output) */
                     Binary_Output_Present_Value_Set(wp_data->object_instance,
-                        (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL, false);
+                        (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL, true);
                     status = true;
                 } else if (priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
@@ -610,7 +610,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                            main loop (i.e. check out of service before changing
                            output) */
                         Binary_Output_Present_Value_Set(wp_data->object_instance,
-                            level, wp_data->priority, NULL, false);
+                            level, wp_data->priority, NULL, true);
                         status = true;
                     } else {
                         status = false;
@@ -635,7 +635,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Binary_Output_Instance_Names[0]));
             if (status) {
                 Binary_Output_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL, false);
+                    &value.type.Character_String, NULL, true);
             }
             break;
 

@@ -1000,7 +1000,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                    algorithm and may not be used for other purposes in any
                    object. */
                 status = Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority, NULL, false);
+                        value.type.Real, wp_data->priority, NULL, true);
                 if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -1016,7 +1016,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     BACNET_APPLICATION_TAG_NULL);
                 if (status) {
                     status = Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        AV_LEVEL_NULL, wp_data->priority, NULL, false);
+                        AV_LEVEL_NULL, wp_data->priority, NULL, true);
                     if (!status) {
                         wp_data->error_class = ERROR_CLASS_PROPERTY;
                         wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
@@ -1152,7 +1152,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Value_Instance_Names[0]));
             if (status) {
                 Analog_Value_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL, false);
+                    &value.type.Character_String, NULL, true);
             }
             break;
         case PROP_OBJECT_TYPE:

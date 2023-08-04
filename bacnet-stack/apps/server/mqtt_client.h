@@ -120,6 +120,7 @@ typedef struct _llist_whois_cb {
     uint32_t timeout;
     int32_t req_tokens_len;
     request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
+    int publish_per_device;
   } data;
 } llist_whois_cb;
 
@@ -141,6 +142,7 @@ typedef struct _bacnet_client_cmd_opts {
   uint32_t timeout;
   int32_t req_tokens_len;
   int32_t prio_array_len;
+  int publish_per_device;
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
 } bacnet_client_cmd_opts;

@@ -149,6 +149,8 @@ int encode_write_value_result(llist_obj_data *data, char *buf, int buf_len);
 int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data);
 int publish_bacnet_client_write_value_result(llist_obj_data *data);
 int publish_bacnet_client_whois_result(llist_whois_cb *cb);
+int publish_whois_device(char *topic, char *topic_value);
+int publish_bacnet_client_whois_result_per_device(llist_whois_cb *cb);
 void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outlen, bacnet_client_cmd_opts *opts);
 int process_local_read_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts);
@@ -213,7 +215,7 @@ static int mqtt_broker_port = DEFAULT_MQTT_BROKER_PORT;
 static char mqtt_client_id[124] = {0};
 static MQTTAsync mqtt_client = NULL;
 static int mqtt_client_connected = false;
-static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = {-1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, -1, {0}, {0}, {0}, 0, {0}, -1, -1, 0, 0, 0};
+static bacnet_client_cmd_opts init_bacnet_client_cmd_opts = {-1, BACNET_MAX_INSTANCE, -1, BACNET_ARRAY_ALL, 0, BACNET_MAX_INSTANCE, -1, {0}, {0}, {0}, 0, {0}, -1, -1, 0, 0, 0, 0};
 
 static llist_cb *bc_request_list_head = NULL;
 static llist_cb *bc_request_list_tail = NULL;
@@ -1808,6 +1810,162 @@ int publish_bacnet_client_whois_result(llist_whois_cb *cb)
     } else {
       printf("MQTT published topic: \"%s\"\n", topic);
     }
+  }
+
+  return(0);
+}
+
+
+/*
+ * Publish whois device.
+ */
+int publish_whois_device(char *topic, char *topic_value)
+{
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+  int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
+  int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
+  int rc, i;
+
+  printf("- write value result topic: %s\n", topic);
+  printf("- write value result topic value: %s\n", topic_value);
+
+  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
+    for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
+      }
+
+      mqtt_check_reconnect();
+      sleep(mqtt_retry_interval);
+    }
+
+    if (i >= mqtt_retry_limit) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect limit reached: %d\n", i);
+      }
+
+      return(1);
+    }
+  }
+
+  opts.onSuccess = mqtt_on_send_success;
+  opts.onFailure = mqtt_on_send_failure;
+  opts.context = mqtt_client;
+
+  pubmsg.payload = topic_value;
+  pubmsg.payloadlen = strlen(topic_value);
+  pubmsg.qos = DEFAULT_PUB_QOS;
+  pubmsg.retained = 0;
+  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
+  if (mqtt_debug) {
+    if (rc != MQTTASYNC_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
+    } else {
+      printf("MQTT published topic: \"%s\"\n", topic);
+    }
+  }
+
+  return(0);
+}
+
+
+/*
+ * Publish bacnet client whois result per device.
+ */
+int publish_bacnet_client_whois_result_per_device(llist_whois_cb *cb)
+{
+  address_entry_cb *addr;
+  char topic[512];
+  char value[20000];
+  char mac_buf[51] = {0};
+  int i, value_len = sizeof(value);
+  uint8_t local_sadr = 0;
+
+  sprintf(topic, "bacnet/cmd_result/whois");
+  addr = cb->data.address_table.first;
+  if (!addr) {
+    sprintf(value, "{ \"value\" : [ ]");
+    if (cb->data.dnet >= 0) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dnet\" : \"%d\"", cb->data.dnet);
+    }
+
+    if (strlen(cb->data.mac)) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"mac\" : \"%s\"", cb->data.mac);
+    }
+
+    if (strlen(cb->data.dadr)) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dadr\" : \"%s\"", cb->data.dadr);
+    }
+
+    if (cb->data.device_instance_min >= 0) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"device_instance_min\" : \"%d\"", cb->data.device_instance_min);
+    }
+
+    if (cb->data.device_instance_max >= 0 && cb->data.device_instance_min != cb->data.device_instance_max) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"device_instance_max\" : \"%d\"", cb->data.device_instance_max);
+    }
+
+    for (i = 0; i < cb->data.req_tokens_len; i++) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"%s\" : \"%s\"",
+        cb->data.req_tokens[i].key, cb->data.req_tokens[i].value);
+    }
+
+    snprintf(&value[strlen(value)], value_len - strlen(value), " }");
+    publish_whois_device(topic, value);
+
+    return(0);
+  }
+
+  while (addr) {
+    sprintf(value, "{ \"value\" : [ {\"device_id\" : \"%u\"", addr->device_id);
+    if (addr->address.mac_len > 0) {
+      if (addr->address.mac_len == 6) {
+        macaddr_to_ip_port_str(addr->address.mac, addr->address.mac_len, mac_buf, sizeof(mac_buf));
+      } else {
+        macaddr_to_str(addr->address.mac, addr->address.mac_len, mac_buf, sizeof(mac_buf));
+      }
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"mac_address\" : \"%s\"", mac_buf);
+    }
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"snet\" : \"%u\"", addr->address.net);
+    mac_buf[0] = '\0';
+    if (addr->address.net) {
+      macaddr_to_str(addr->address.adr, addr->address.len, mac_buf, sizeof(mac_buf));
+    } else {
+      macaddr_to_str(&local_sadr, 1, mac_buf, sizeof(mac_buf));
+    }
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"sadr\" : \"%s\"", mac_buf);
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"apdu\" : \"%u\"", addr->max_apdu);
+    snprintf(&value[strlen(value)], value_len - strlen(value), "} ]");
+
+    if (cb->data.dnet >= 0) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dnet\" : \"%d\"", cb->data.dnet);
+    }
+
+    if (strlen(cb->data.mac)) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"mac\" : \"%s\"", cb->data.mac);
+    }
+
+    if (strlen(cb->data.dadr)) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dadr\" : \"%s\"", cb->data.dadr);
+    }
+
+    if (cb->data.device_instance_min >= 0) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"device_instance_min\" : \"%d\"", cb->data.device_instance_min);
+    }
+
+    if (cb->data.device_instance_max >= 0 && cb->data.device_instance_min != cb->data.device_instance_max) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"device_instance_max\" : \"%d\"", cb->data.device_instance_max);
+    }
+
+    for (i = 0; i < cb->data.req_tokens_len; i++) {
+      snprintf(&value[strlen(value)], value_len - strlen(value), ", \"%s\" : \"%s\"",
+        cb->data.req_tokens[i].key, cb->data.req_tokens[i].value);
+    }
+
+    snprintf(&value[strlen(value)], value_len - strlen(value), " }");
+    publish_whois_device(topic, value);
+    addr = addr->next;
   }
 
   return(0);
@@ -3527,6 +3685,7 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     "device_instance_max",
     "timeout",
     "priorityArray",
+    "device_per_publish",
     NULL
   };
 
@@ -3584,6 +3743,9 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     } else if (!strcmp(key, "timeout")) {
       strncpy(value, json_object_get_string(json_field), sizeof(value) - 1);
       cmd_opts->timeout = atoi(value);
+    } else if (!strcmp(key, "device_per_publish")) {
+      strncpy(value, json_object_get_string(json_field), sizeof(value) - 1);
+      cmd_opts->publish_per_device = (!strcasecmp(value, "true")) ? 1 : 0;
     } else if (!strcmp(key, "priorityArray")) {
       struct json_object_iterator it;
       struct json_object_iterator itEnd;
@@ -4188,6 +4350,8 @@ int add_bacnet_client_whois(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts)
       sizeof(request_token_cb) * opts->req_tokens_len);
   }
 
+  ptr->data.publish_per_device = opts->publish_per_device;
+
   ptr->next = NULL;
 
   if (!bc_whois_head) {
@@ -4286,7 +4450,11 @@ void sweep_bacnet_client_whois_requests(void)
         ptr = ptr->next;
       }
 
-      publish_bacnet_client_whois_result(tmp);
+      if (tmp->data.publish_per_device) {
+        publish_bacnet_client_whois_result_per_device(tmp);
+      } else {
+        publish_bacnet_client_whois_result(tmp);
+      }
 
       free(tmp);
       continue;
