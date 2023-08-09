@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <assert.h>
 
 #include "bacnet/indtext.h"
 #include "bacnet/bacenum.h"
@@ -36,6 +37,21 @@
 #ifndef BAC_ADDRESS_MULT
 #define BAC_ADDRESS_MULT 1
 #endif
+
+typedef enum {
+        /** Initial state to establish a binding with the target device. */
+    INITIAL_BINDING,
+        /** Get selected device information and put out the heading information. */
+    GET_HEADING_INFO, GET_HEADING_RESPONSE, PRINT_HEADING,
+        /** Getting ALL properties and values at once with RPM. */
+    GET_ALL_REQUEST, GET_ALL_RESPONSE,
+        /** Getting ALL properties with array index = 0, just to get the list. */
+    GET_LIST_OF_ALL_REQUEST, GET_LIST_OF_ALL_RESPONSE,
+        /** Processing the properties individually with ReadProperty. */
+    GET_PROPERTY_REQUEST, GET_PROPERTY_RESPONSE,
+        /** Done with this Object; move onto the next. */
+    NEXT_OBJECT
+} EPICS_STATES;
 
 /* forward decls */
 extern bool Analog_Input_Set_Object_Name(
@@ -134,9 +150,11 @@ int mqtt_subscribe_to_topics(void *context);
 int subscribe_bacnet_client_whois_command(void *context);
 int subscribe_bacnet_client_read_value_command(void *context);
 int subscribe_bacnet_client_write_value_command(void *context);
+int subscribe_bacnet_client_pics_command(void *context);
 int mqtt_subscribe_to_bacnet_client_topics(void *context);
 int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_opts *cmd_opts);
 int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts);
+int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts);
 int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int priority,
   int vtype, void *vptr, int topic_id, json_key_value_pair *kv_pairs, int kvps_length);
 bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr);
@@ -195,6 +213,8 @@ void mqtt_on_subscribe(void* context, MQTTAsync_successData* response);
 void mqtt_on_subscribe_failure(void* context, MQTTAsync_failureData* response);
 int mqtt_publish_command_error(char *err_msg, bacnet_client_cmd_opts *opts, int topic_id);
 
+int get_pics_target_address(bacnet_client_cmd_opts *opts);
+
 int iam_decode_service_request(uint8_t *apdu,
   uint32_t *pDevice_id,
   unsigned *pMax_apdu,
@@ -226,6 +246,39 @@ static llist_whois_cb *bc_whois_tail = NULL;
 
 static int req_tokens_len = 0;
 static char req_tokens[MAX_JSON_KEY_VALUE_PAIR][MAX_JSON_KEY_LENGTH] = {0};
+
+static BACNET_ADDRESS pics_Target_Address = {0};
+static uint32_t pics_Target_Device_Object_Instance = BACNET_MAX_INSTANCE;
+static bool pics_Provided_Targ_MAC = false;
+static EPICS_STATES myState = INITIAL_BINDING;
+static uint8_t pics_Request_Invoke_ID = 0;
+static bool Error_Detected = false;
+
+typedef struct BACnet_RPM_Service_Data_t {
+    bool new_data;
+    BACNET_CONFIRMED_SERVICE_ACK_DATA service_data;
+    BACNET_READ_ACCESS_DATA *rpm_data;
+} BACNET_RPM_SERVICE_DATA;
+static BACNET_RPM_SERVICE_DATA pics_Read_Property_Multiple_Data;
+
+#define MAX_PROPS 128
+static uint32_t Property_List_Length = 0;
+static uint32_t Property_List_Index = 0;
+static int32_t Property_List[MAX_PROPS + 2];
+
+struct property_value_list_t {
+  int32_t property_id;
+  BACNET_APPLICATION_DATA_VALUE *value;
+};
+
+static struct property_value_list_t Property_Value_List[] = {
+  { PROP_VENDOR_NAME, NULL }, { PROP_MODEL_NAME, NULL },
+  { PROP_MAX_APDU_LENGTH_ACCEPTED, NULL },
+  { PROP_PROTOCOL_SERVICES_SUPPORTED, NULL },
+  { PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED, NULL }, { PROP_DESCRIPTION, NULL },
+  { PROP_PRODUCT_NAME, NULL },
+  { -1, NULL }
+};
 
 /* crude request list locking mechanism */
 static int request_list_locked = false;
@@ -953,6 +1006,7 @@ int is_command_for_us(bacnet_client_cmd_opts *opts)
 
 char *get_object_type_str(int object_type)
 {
+  static char strbuf[15];
   char *str = NULL;
 
   switch(object_type) {
@@ -980,8 +1034,32 @@ char *get_object_type_str(int object_type)
       str = "bv";
       break;
 
+    case OBJECT_CALENDAR:
+      str = "cal";
+      break;
+
+    case OBJECT_COMMAND:
+      str = "com";
+      break;
+
     case OBJECT_DEVICE:
       str = "device";
+      break;
+
+    case OBJECT_EVENT_ENROLLMENT:
+      str = "ee";
+      break;
+
+    case OBJECT_FILE:
+      str = "file";
+      break;
+
+    case OBJECT_GROUP:
+      str = "group";
+      break;
+
+    case OBJECT_LOOP:
+      str = "loop";
       break;
 
     case OBJECT_MULTI_STATE_INPUT:
@@ -992,8 +1070,101 @@ char *get_object_type_str(int object_type)
       str = "mso";
       break;
 
+    case OBJECT_NOTIFICATION_CLASS:
+      str = "noti";
+      break;
+
+    case OBJECT_PROGRAM:
+      str = "prog";
+      break;
+
+    case OBJECT_SCHEDULE:
+      str = "sched";
+      break;
+
+    case OBJECT_AVERAGING:
+      str = "ave";
+      break;
+
     case OBJECT_MULTI_STATE_VALUE:
       str = "msv";
+      break;
+
+    case OBJECT_TRENDLOG:
+      str = "tlog";
+      break;
+
+    case OBJECT_LIFE_SAFETY_POINT:
+      str = "lsp";
+      break;
+
+    case OBJECT_LIFE_SAFETY_ZONE:
+      str = "lsz";
+      break;
+
+    case OBJECT_ACCUMULATOR:
+      str = "accu";
+      break;
+
+    case OBJECT_PULSE_CONVERTER:
+      str = "pcon";
+      break;
+
+    case OBJECT_EVENT_LOG:
+      str = "elog";
+      break;
+
+    case OBJECT_GLOBAL_GROUP:
+      str = "gg";
+      break;
+
+    case OBJECT_TREND_LOG_MULTIPLE:
+      str = "tlm";
+      break;
+
+    case OBJECT_LOAD_CONTROL:
+      str = "lc";
+      break;
+
+    case OBJECT_STRUCTURED_VIEW:
+      str = "sv";
+      break;
+
+    case OBJECT_ACCESS_DOOR:
+      str = "ad";
+      break;
+
+    case OBJECT_TIMER:
+      str = "timer";
+      break;
+
+    case OBJECT_ACCESS_CREDENTIAL:
+      str = "acred";
+      break;
+
+    case OBJECT_ACCESS_POINT:
+      str = "ap";
+      break;
+
+    case OBJECT_ACCESS_RIGHTS:
+      str = "ar";
+      break;
+
+    case OBJECT_ACCESS_USER:
+      str = "au";
+      break;
+
+    case OBJECT_ACCESS_ZONE:
+      str = "az";
+      break;
+
+    case OBJECT_CREDENTIAL_DATA_INPUT:
+      str = "cdi";
+      break;
+
+    default:
+      sprintf(strbuf, "%d", object_type);
+      str = &strbuf[0];
       break;
   }
 
@@ -1003,9 +1174,62 @@ char *get_object_type_str(int object_type)
 
 char *get_object_property_str(int object_property)
 {
+  static char strbuf[15];
   char *str = NULL;
 
   switch(object_property) {
+    case PROP_ACKED_TRANSITIONS:
+      str = "ack_trans";
+      break;
+
+    case PROP_ACK_REQUIRED:
+      str = "ack_req";
+      break;
+
+    case PROP_ACTION:
+      str = "act";
+      break;
+
+    case PROP_ACTION_TEXT:
+      str = "actn_text";
+      break;
+
+    case PROP_ACTIVE_TEXT:
+      str = "actv_text";
+      break;
+
+    case PROP_ACTIVE_VT_SESSIONS:
+      str = "avs";
+      break;
+
+    case PROP_ALARM_VALUE:
+      str = "av";
+      break;
+
+    case PROP_ALARM_VALUES:
+      str = "avs";
+      break;
+
+    case PROP_ALL:
+      str = "all";
+      break;
+
+    case PROP_ALL_WRITES_SUCCESSFUL:
+      str = "aws";
+      break;
+
+    case PROP_APDU_SEGMENT_TIMEOUT:
+      str = "ast";
+      break;
+
+    case PROP_APDU_TIMEOUT:
+      str = "at";
+      break;
+
+    case PROP_APPLICATION_SOFTWARE_VERSION:
+      str = "asv";
+      break;
+
     case PROP_PRESENT_VALUE:
       str = "pv";
       break;
@@ -1036,6 +1260,11 @@ char *get_object_property_str(int object_property)
 
     case PROP_OBJECT_LIST:
       str = "object_list";
+      break;
+
+    default:
+      sprintf(strbuf, "%d", object_property);
+      str = &strbuf[0];
       break;
   }
 
@@ -1244,11 +1473,11 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
     case OBJECT_ANALOG_OUTPUT:
     case OBJECT_ANALOG_VALUE:
       switch(data->object_property) {
-        case PROP_PRESENT_VALUE:
-          sprintf(tmp, "%.6f", *((float*)&value.type));
+        case PROP_PRIORITY_ARRAY:
+          encode_array_value_result(data, obj_data, tmp, sizeof(tmp) - 1);
           break;
 
-        case PROP_OBJECT_NAME:
+        default:
           object_value.object_type = data->object_type;
           object_value.object_instance = data->object_instance;
           object_value.object_property = data->object_property;
@@ -1256,75 +1485,32 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           object_value.value = &value;
           bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
           break;
-
-        case PROP_PRIORITY_ARRAY:
-          encode_array_value_result(data, obj_data, tmp, sizeof(tmp) - 1);
-          break;
-
-        default:
-          printf("Unsupported object_type: %d\n", data->object_property);
-          return(1);
       }
-
       break;
 
     case OBJECT_BINARY_INPUT:
     case OBJECT_BINARY_OUTPUT:
     case OBJECT_BINARY_VALUE:
       switch(data->object_property) {
-        case PROP_PRESENT_VALUE:
-          sprintf(tmp, "%d", *((int*)&value.type));
-          break;
-
-        case PROP_OBJECT_NAME:
-          object_value.object_type = data->object_type;
-          object_value.object_instance = data->object_instance;
-          object_value.object_property = data->object_property;
-          object_value.array_index = data->array_index;
-          object_value.value = &value;
-          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
-          break;
-
         case PROP_PRIORITY_ARRAY:
           encode_array_value_result(data, obj_data, tmp, sizeof(tmp) - 1);
           break;
 
         default:
-          return(1);
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
+          break;
       }
-
       break;
 
     case OBJECT_DEVICE:
       switch(data->object_property) {
-        case PROP_OBJECT_NAME:
-          object_value.object_type = data->object_type;
-          object_value.object_instance = data->object_instance;
-          object_value.object_property = data->object_property;
-          object_value.array_index = data->array_index;
-          object_value.value = &value;
-          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
-          break;
-
-        case PROP_OBJECT_IDENTIFIER:
-          sprintf(tmp, "%lu", (unsigned long)value.type.Object_Id.instance);
-          break;
-
         case PROP_SYSTEM_STATUS:
           device_status_to_str(*((unsigned int*)&value.type), tmp, sizeof(tmp) - 1);
-          break;
-
-        case PROP_VENDOR_NAME:
-          object_value.object_type = data->object_type;
-          object_value.object_instance = data->object_instance;
-          object_value.object_property = data->object_property;
-          object_value.array_index = data->array_index;
-          object_value.value = &value;
-          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
-          break;
-
-        case PROP_VENDOR_IDENTIFIER:
-          sprintf(tmp, "%d", *((int*)&value.type));
           break;
 
         case PROP_OBJECT_LIST:
@@ -1332,20 +1518,6 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           break;
 
         default:
-          return(1);
-      }
-
-      break;
-
-    case OBJECT_MULTI_STATE_INPUT:
-    case OBJECT_MULTI_STATE_OUTPUT:
-    case OBJECT_MULTI_STATE_VALUE:
-      switch(data->object_property) {
-        case PROP_PRESENT_VALUE:
-          sprintf(tmp, "%d", *((unsigned int*)&value.type));
-          break;
-
-        case PROP_OBJECT_NAME:
           object_value.object_type = data->object_type;
           object_value.object_instance = data->object_instance;
           object_value.object_property = data->object_property;
@@ -1353,16 +1525,29 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           object_value.value = &value;
           bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
           break;
-
-        default:
-          printf("Unsupported object_type: %d\n", data->object_property);
-          return(1);
       }
 
       break;
 
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      object_value.object_type = data->object_type;
+      object_value.object_instance = data->object_instance;
+      object_value.object_property = data->object_property;
+      object_value.array_index = data->array_index;
+      object_value.value = &value;
+      bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
+      break;
+
     default:
-      return(1);
+      object_value.object_type = data->object_type;
+      object_value.object_instance = data->object_instance;
+      object_value.object_property = data->object_property;
+      object_value.array_index = data->array_index;
+      object_value.value = &value;
+      bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
+      break;
   }
 
   if (data->object_property == PROP_PRIORITY_ARRAY && obj_data->index == BACNET_ARRAY_ALL) {
@@ -2080,6 +2265,43 @@ static void bacnet_client_whois_handler(uint8_t *service_request, uint16_t servi
 
 
 /*
+ * Bacnet client read prop multiple handler.
+ */
+static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
+  uint16_t service_len,
+  BACNET_ADDRESS *src,
+  BACNET_CONFIRMED_SERVICE_ACK_DATA *service_data)
+{
+  int len = 0;
+  BACNET_READ_ACCESS_DATA *rpm_data;
+
+  fprintf(stderr, "- bacnet_client_multiple_ack_handler()\n");
+
+  if (address_match(&pics_Target_Address, src) &&
+    (service_data->invoke_id == pics_Request_Invoke_ID)) {
+    rpm_data = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
+    if (rpm_data) {
+      len = rpm_ack_decode_service_request(
+        service_request, service_len, rpm_data);
+    }
+    if (len > 0) {
+      memmove(&pics_Read_Property_Multiple_Data.service_data, service_data,
+        sizeof(BACNET_CONFIRMED_SERVICE_ACK_DATA));
+      pics_Read_Property_Multiple_Data.rpm_data = rpm_data;
+      pics_Read_Property_Multiple_Data.new_data = true;
+      /* Will process and free the RPM data later */
+    } else {
+      if (len < 0) { /* Eg, failed due to no segmentation */
+        Error_Detected = true;
+      }
+      rpm_data = rpm_data_free(rpm_data);
+      free(rpm_data);
+    }
+  }
+}
+
+
+/*
  * Bacnet client error handler.
  */
 static void bacnet_client_error_handler(BACNET_ADDRESS *src,
@@ -2151,6 +2373,8 @@ void init_bacnet_client_service_handlers(void)
   apdu_set_confirmed_simple_ack_handler(
     SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_write_value_handler);
   apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, bacnet_client_whois_handler);
+  apdu_set_confirmed_ack_handler(
+    SERVICE_CONFIRMED_READ_PROP_MULTIPLE, bacnet_client_multiple_ack_handler);
   apdu_set_error_handler(SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_error_handler);
   apdu_set_error_handler(SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_error_handler);
 }
@@ -2639,7 +2863,7 @@ int mqtt_publish_command_error(char *err_msg, bacnet_client_cmd_opts *opts, int 
   int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
   int rc, i;
 
-  if (!mqtt_create_topic(opts->object_type, opts->object_instance, opts->property, topic, sizeof(topic),
+  if (!mqtt_create_error_topic(opts->object_type, opts->object_instance, opts->property, topic, sizeof(topic),
     topic_id)) {
     printf("Failed to create MQTT topic: %d/%d\n", opts->object_type, opts->property);
     return(1);
@@ -2683,6 +2907,11 @@ int mqtt_publish_command_error(char *err_msg, bacnet_client_cmd_opts *opts, int 
   if (opts->dnet >= 0) {
     snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value), ", \"dnet\" : \"%d\" ",
       opts->dnet);
+  }
+
+  if (strlen(opts->value) > 0) {
+    snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value), ", \"value\" : \"%s\" ",
+      opts->value);
   }
 
   if (opts->prio_array_len > 0) {
@@ -2819,66 +3048,6 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     }
 
     address_add(opts->device_instance, MAX_APDU, &dest);
-  }
-
-  switch (opts->object_type) {
-    case OBJECT_ANALOG_INPUT:
-    case OBJECT_ANALOG_OUTPUT:
-    case OBJECT_ANALOG_VALUE:
-    case OBJECT_BINARY_INPUT:
-    case OBJECT_BINARY_OUTPUT:
-    case OBJECT_BINARY_VALUE:
-      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE &&
-        opts->property != PROP_PRIORITY_ARRAY) {
-        sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
-        if (mqtt_debug) {
-          printf("%s\n", err_msg);
-        }
-
-        mqtt_publish_command_error(err_msg, opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-        return(1);
-      }
-
-      break;
-
-    case OBJECT_MULTI_STATE_INPUT:
-    case OBJECT_MULTI_STATE_OUTPUT:
-    case OBJECT_MULTI_STATE_VALUE:
-      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE) {
-        sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
-        if (mqtt_debug) {
-          printf("%s\n", err_msg);
-        }
-
-        mqtt_publish_command_error(err_msg, opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-        return(1);
-      }
-
-      break;
-
-    case OBJECT_DEVICE:
-      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_OBJECT_IDENTIFIER &&
-        opts->property != PROP_SYSTEM_STATUS && opts->property != PROP_VENDOR_NAME &&
-        opts->property != PROP_VENDOR_IDENTIFIER && opts->property != PROP_OBJECT_LIST) {
-        sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
-        if (mqtt_debug) {
-          printf("%s\n", err_msg);
-        }
-
-        mqtt_publish_command_error(err_msg, opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-        return(1);
-      }
-
-      break;
-
-    default:
-      sprintf(err_msg, "Unknown read value object_type: %d", opts->object_type);
-      if (mqtt_debug) {
-        printf("%s\n", err_msg);
-      }
-
-      mqtt_publish_command_error(err_msg, opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
-      return(1);
   }
 
   if (is_command_for_us(opts)) {
@@ -3644,6 +3813,8 @@ int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_
     process_bacnet_client_read_value_command(opts);
   } else if (!strcasecmp(topic_tokens[2], "write_value")) {
     process_bacnet_client_write_value_command(opts);
+  } else if (!strcasecmp(topic_tokens[2], "pics")) {
+    process_bacnet_client_pics_command(opts);
   } else {
     if (mqtt_debug) {
       printf("Unknown Bacnet client command: [%s]\n", topic_tokens[2]);
@@ -4878,6 +5049,72 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
 
 
 /*
+ * Create mqtt error topic from the topic mappings.
+ */
+char *mqtt_create_error_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len, int topic_type)
+{
+  char *object_type_str;
+
+  switch(object_type) {
+    case OBJECT_ANALOG_INPUT:
+      object_type_str = "ai";
+      break;
+
+    case OBJECT_ANALOG_OUTPUT:
+      object_type_str = "ao";
+      break;
+
+    case OBJECT_ANALOG_VALUE:
+      object_type_str = "av";
+      break;
+
+    case OBJECT_BINARY_INPUT:
+      object_type_str = "bi";
+      break;
+
+    case OBJECT_BINARY_OUTPUT:
+      object_type_str = "bo";
+      break;
+
+    case OBJECT_BINARY_VALUE:
+      object_type_str = "bv";
+      break;
+
+    case OBJECT_DEVICE:
+      object_type_str = "device";
+      break;
+
+    case OBJECT_PROGRAM:
+      object_type_str = "program";
+      break;
+
+    default:
+      object_type_str = "unknown";
+      break;
+  }
+
+  switch(topic_type) {
+    case MQTT_READ_VALUE_CMD_RESULT_TOPIC:
+      snprintf(buf, buf_len - 1, "bacnet/cmd_result/read_value/%s/%d", object_type_str,
+        object_instance);
+      break;
+
+    case MQTT_WRITE_VALUE_CMD_RESULT_TOPIC:
+      snprintf(buf, buf_len - 1, "bacnet/cmd_result/write_value/%s/%d", object_type_str,
+        object_instance);
+      break;
+
+    default:
+      snprintf(buf, buf_len - 1, "bacnet/%s/%d", object_type_str,
+        object_instance);
+      break;
+  }
+
+  return(buf);
+}
+
+
+/*
  * Publish topic.
  */
 int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr, char *uuid_value)
@@ -5093,6 +5330,45 @@ int subscribe_bacnet_client_write_value_command(void *context)
 
 
 /*
+ * Subscribe to bacnet client pics command topics.
+ */
+int subscribe_bacnet_client_pics_command(void *context)
+{
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  int rc;
+  const char *topics[] = {
+    "bacnet/cmd/pics",
+    NULL
+  };
+
+  if (mqtt_debug) {
+     printf("MQTT subscribing to bacnet client command topic\n");
+  }
+
+  for (int i = 0; topics[i] != NULL; i++) {
+    if (mqtt_debug) {
+      printf("- topic[%d] = [%s]\n", i, topics[i]);
+    }
+
+    opts.onSuccess = mqtt_on_subscribe;
+    opts.onFailure = mqtt_on_subscribe_failure;
+    opts.context = client;
+    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
+      if (mqtt_debug) {
+        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
+      }
+
+      // return(1);
+    }
+  }
+
+  return(0);
+}
+
+
+/*
  * Subscribe to bacnet client topics.
  */ 
 int mqtt_subscribe_to_bacnet_client_topics(void *context)
@@ -5116,6 +5392,10 @@ int mqtt_subscribe_to_bacnet_client_topics(void *context)
       }
     } else if (!strncmp(commands[i], "write_value", 11)) {
       if (subscribe_bacnet_client_write_value_command(context)) {
+        // return(1);
+      }
+    } else if (!strncmp(commands[i], "pics", 4)) {
+      if (subscribe_bacnet_client_pics_command(context)) {
         // return(1);
       }
     }
@@ -5154,5 +5434,220 @@ void init_request_tokens(void)
   for (i = 0; i < req_tokens_len; i++) {
     strcpy(req_tokens[i], tokens[i]);
   }
+}
+
+
+int get_pics_target_address(bacnet_client_cmd_opts *opts)
+{
+  BACNET_MAC_ADDRESS mac = {0};
+
+  if (opts->device_instance >= 0) {
+    pics_Target_Device_Object_Instance = opts->device_instance;
+  }
+
+  if (strlen(opts->mac)) {
+    if (address_mac_from_ascii(&mac, opts->mac)) {
+      memcpy(&pics_Target_Address.mac[0], &mac.adr[0], mac.len);
+      pics_Target_Address.mac_len = mac.len;
+      pics_Target_Address.len = 0;
+      pics_Target_Address.net = 0;
+      pics_Provided_Targ_MAC = true;
+    }
+  }
+
+  if (opts->dnet >= 0 && (opts->dnet <= BACNET_BROADCAST_NETWORK)) {
+    pics_Target_Address.net = opts->dnet;
+  }
+
+  return(0);
+}
+
+
+/* Initialize fields for a new Object */
+static void StartNextObject(
+    BACNET_READ_ACCESS_DATA *rpm_object, BACNET_OBJECT_ID *pNewObject)
+{
+    BACNET_PROPERTY_REFERENCE *rpm_property;
+    Error_Detected = false;
+    Property_List_Index = Property_List_Length = 0;
+    rpm_object->object_type = pNewObject->type;
+    rpm_object->object_instance = pNewObject->instance;
+    rpm_property = calloc(1, sizeof(BACNET_PROPERTY_REFERENCE));
+    rpm_object->listOfProperties = rpm_property;
+    rpm_object->next = NULL;
+    assert(rpm_property);
+    rpm_property->propertyIdentifier = PROP_ALL;
+    rpm_property->propertyArrayIndex = BACNET_ARRAY_ALL;
+}
+
+
+/* Build a list of device properties to request with RPM. */
+static void BuildPropRequest(BACNET_READ_ACCESS_DATA *rpm_object)
+{
+    int i;
+    /* To start with, StartNextObject() has prepopulated one propEntry,
+     * but we will overwrite it and link more to it
+     */
+    BACNET_PROPERTY_REFERENCE *propEntry = rpm_object->listOfProperties;
+    BACNET_PROPERTY_REFERENCE *oldEntry = rpm_object->listOfProperties;
+    for (i = 0; Property_Value_List[i].property_id != -1; i++) {
+        if (propEntry == NULL) {
+            propEntry = calloc(1, sizeof(BACNET_PROPERTY_REFERENCE));
+            assert(propEntry);
+            oldEntry->next = propEntry;
+        }
+        propEntry->propertyIdentifier = Property_Value_List[i].property_id;
+        propEntry->propertyArrayIndex = BACNET_ARRAY_ALL;
+        propEntry->next = NULL;
+        oldEntry = propEntry;
+        propEntry = NULL;
+    }
+}
+
+
+static void PrintHeading(void)
+{
+  printf("PICS 0\n");
+  printf("BACnet Protocol Implementation Conformance Statement\n\n");
+}
+
+
+static void Print_Device_Heading(void)
+{
+  printf("List of Objects in Test Device:\n");
+}
+
+
+/*
+ * Process Bacnet client PICS command.
+ */
+int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
+{
+  BACNET_READ_ACCESS_DATA *rpm_object = NULL;
+  BACNET_OBJECT_ID myObject;
+  BACNET_ADDRESS src;
+  uint16_t pdu_len = 0;
+  unsigned timeout = 100;
+  uint8_t Rx_Buf[MAX_MPDU] = { 0 };
+  uint8_t buffer[MAX_PDU] = { 0 };
+  time_t elapsed_seconds = 0;
+  time_t last_seconds = 0;
+  time_t current_seconds = 0;
+  time_t timeout_seconds = 0;
+  unsigned max_apdu = MAX_APDU;
+  bool found = false;
+  int ret;
+
+  memset(&pics_Target_Address, 0, sizeof(pics_Target_Address));
+  pics_Target_Device_Object_Instance = BACNET_MAX_INSTANCE;
+  pics_Provided_Targ_MAC = false;
+
+  ret = get_pics_target_address(opts);
+  if (ret) {
+    if (mqtt_debug) {
+      printf("Error: Invalid PICS command options!\n");
+    }
+
+    return(1);
+  }
+
+  if (!pics_Provided_Targ_MAC) {
+    if (mqtt_debug) {
+      printf("Error: No target address for PICS command!\n");
+    }
+
+    return(1);
+  }
+
+  // address_add_binding(
+  //   pics_Target_Device_Object_Instance, max_apdu, &pics_Target_Address);
+  found = address_bind_request(
+    pics_Target_Device_Object_Instance, &max_apdu, &pics_Target_Address);
+  if (!found) {
+    address_add_binding(
+      pics_Target_Device_Object_Instance, max_apdu, &pics_Target_Address);
+  }
+
+  myObject.type = OBJECT_DEVICE;
+  myObject.instance = pics_Target_Device_Object_Instance;
+  myState = INITIAL_BINDING;
+  do {
+    last_seconds = current_seconds;
+    current_seconds = time(NULL);
+
+    switch (myState) {
+      case INITIAL_BINDING:
+        pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+        if (pdu_len) {
+          npdu_handler(&src, &Rx_Buf[0], pdu_len);
+        }
+
+        found = address_bind_request(
+          pics_Target_Device_Object_Instance, &max_apdu, &pics_Target_Address);
+        if (!found) {
+          printf("- pics_Target_Address NOT_FOUND\n");
+          elapsed_seconds += (current_seconds - last_seconds);
+          if (elapsed_seconds > timeout_seconds) {
+            printf("- Unable to bind to %u after waiting %ld seconds.\n",
+              pics_Target_Device_Object_Instance, (long int)elapsed_seconds);
+            break;
+          }
+
+          continue;
+        } else {
+          printf("- pics_Target_Address FOUND!\n");
+          rpm_object = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
+          assert(rpm_object);
+          myState = GET_HEADING_INFO;
+        }
+
+        break;
+
+      case GET_HEADING_INFO:
+        last_seconds = current_seconds;
+        StartNextObject(rpm_object, &myObject);
+        BuildPropRequest(rpm_object);
+        pics_Request_Invoke_ID = Send_Read_Property_Multiple_Request(
+          buffer, MAX_PDU, pics_Target_Device_Object_Instance, rpm_object);
+        if (pics_Request_Invoke_ID > 0) {
+          elapsed_seconds = 0;
+        } else {
+          printf("\r-- Failed to get Heading info \n");
+        }
+printf("** GET_HEADING_INFO **\n");
+        myState = GET_HEADING_RESPONSE;
+        break;
+
+      case PRINT_HEADING:
+        PrintHeading();
+        Print_Device_Heading();
+        myState = GET_ALL_REQUEST;
+
+      case GET_ALL_REQUEST:
+      case GET_LIST_OF_ALL_REQUEST:
+        break;
+
+      case GET_HEADING_RESPONSE:
+      case GET_ALL_RESPONSE:
+      case GET_LIST_OF_ALL_RESPONSE:
+printf("** GET_HEADING_RESPONSE|GET_ALL_RESPONSE|GET_LIST_OF_ALL_RESPONSE**\n");
+        pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+
+        /* process */
+        if (pdu_len) {
+          npdu_handler(&src, &Rx_Buf[0], pdu_len);
+        }
+
+        /* force quit */
+        myObject.type = MAX_BACNET_OBJECT_TYPE;
+        break;
+
+      default:
+        assert(false);
+        break;
+    }
+  } while (myObject.type < MAX_BACNET_OBJECT_TYPE);
+
+  return(0);
 }
 

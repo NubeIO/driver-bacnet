@@ -156,6 +156,7 @@ int mqtt_client_init(void);
 void mqtt_client_shutdown(void);
 char *mqtt_form_publish_topic(char *device_id, char *object_name);
 char *mqtt_create_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len, int topic_type);
+char *mqtt_create_error_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len, int topic_type);
 int mqtt_publish_topic(int object_type, int object_instance, int property_id, int vtype, void *vptr, char *uuid_value);
 void sweep_bacnet_client_aged_requests(void);
 void sweep_bacnet_client_whois_requests(void);
