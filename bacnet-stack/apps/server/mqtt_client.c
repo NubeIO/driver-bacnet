@@ -328,6 +328,7 @@ static bool FirstJsonItem = true;
 int WriteKeyValueToJsonFile(char *key, char *value, int comma_end);
 int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end);
 void StripDoubleQuotes(char *str);
+void StripLastDoubleQuote(char *str);
 
 /* crude request list locking mechanism */
 static int request_list_locked = false;
@@ -2116,7 +2117,6 @@ int publish_topic_value(char *topic, char *topic_value)
   int rc, i;
 
   printf("- write value result topic: %s\n", topic);
-  printf("- write value result topic value: %s\n", topic_value);
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -2341,6 +2341,7 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
     } else {
       if (len < 0) { /* Eg, failed due to no segmentation */
         Error_Detected = true;
+printf("*** Error_Detected in bacnet_client_read_value_handler()\n");
       }
 
       free(rp_data);
@@ -2428,6 +2429,10 @@ static void bacnet_client_whois_handler(uint8_t *service_request, uint16_t servi
       whois_address_table_add(table, device_id, max_apdu, src);
     } else {
       printf("- WARNING: No existing whois request found!\n");
+      if (len > 0) {
+        printf("- Adding address for PICS command\n");
+        address_add_binding(device_id, max_apdu, src);
+      }
     }
   } else {
     fprintf(stderr, ", but unable to decode it.\n");
@@ -2463,6 +2468,7 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
       if (len < 0) { /* Eg, failed due to no segmentation */
         fprintf(stderr, "- Error_Detected\n");
         Error_Detected = true;
+printf("*** Error_Detected in bacnet_client_multiple_ack_handler()\n");
       }
       rpm_data = rpm_data_free(rpm_data);
       free(rpm_data);
@@ -2533,20 +2539,74 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
 }
 
 
+static void bacnet_client_abort_handler(
+  BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t abort_reason, bool server)
+{
+  (void)server;
+  if (address_match(&pics_Target_Address, src) &&
+    (invoke_id == pics_Request_Invoke_ID)) {
+#if PRINT_ERRORS
+    /* It is normal for this to fail, so don't print. */
+    if ((myState != GET_ALL_RESPONSE) && !IsLongArray && ShowValues) {
+      fprintf(stderr, "-- BACnet Abort: %s \n",
+        bactext_abort_reason_name(abort_reason));
+    }
+#endif
+    Error_Detected = true;
+    Last_Error_Class = ERROR_CLASS_SERVICES;
+    if (abort_reason < MAX_BACNET_ABORT_REASON) {
+      Last_Error_Code =
+        (ERROR_CODE_ABORT_BUFFER_OVERFLOW - 1) + abort_reason;
+    } else {
+      Last_Error_Code = ERROR_CODE_ABORT_OTHER;
+    }
+  }
+}
+
+
+static void bacnet_client_reject_handler(
+  BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t reject_reason)
+{
+  if (address_match(&pics_Target_Address, src) &&
+    (invoke_id == pics_Request_Invoke_ID)) {
+#if PRINT_ERRORS
+    if (ShowValues) {
+      fprintf(stderr, "BACnet Reject: %s\n",
+        bactext_reject_reason_name(reject_reason));
+    }
+#endif
+    Error_Detected = true;
+    Last_Error_Class = ERROR_CLASS_SERVICES;
+    if (reject_reason < MAX_BACNET_REJECT_REASON) {
+      Last_Error_Code =
+        (ERROR_CODE_REJECT_BUFFER_OVERFLOW - 1) + reject_reason;
+    } else {
+      Last_Error_Code = ERROR_CODE_REJECT_OTHER;
+    }
+  }
+}
+
+
 /*
  * Initialize bacnet client service handlers.
  */
 void init_bacnet_client_service_handlers(void)
 {
+  apdu_set_confirmed_handler(
+    SERVICE_CONFIRMED_READ_PROPERTY, handler_read_property);
   apdu_set_confirmed_ack_handler(
     SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_read_value_handler);
   apdu_set_confirmed_simple_ack_handler(
     SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_write_value_handler);
+  apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_IS, handler_who_is);
   apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, bacnet_client_whois_handler);
   apdu_set_confirmed_ack_handler(
     SERVICE_CONFIRMED_READ_PROP_MULTIPLE, bacnet_client_multiple_ack_handler);
   apdu_set_error_handler(SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_error_handler);
   apdu_set_error_handler(SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_error_handler);
+  apdu_set_unrecognized_service_handler_handler(handler_unrecognized_service);
+  apdu_set_abort_handler(bacnet_client_abort_handler);
+  apdu_set_reject_handler(bacnet_client_reject_handler);
 }
 
 
@@ -5766,6 +5826,7 @@ static void CloseJsonFile(void)
   if (JsonFileFd >= 0) {
     close(JsonFileFd);
     JsonFileFd = -1;
+    unlink(JsonFilePath);
   }
 }
 
@@ -5844,6 +5905,15 @@ void StripDoubleQuotes(char *str)
     }
     *ptr = '\0';
   }
+
+  for (runner = &str[strlen(str) - 1]; *runner == '"'; *runner = '\0', runner--);
+}
+
+
+/* Strip double quotes in string */
+void StripLastDoubleQuote(char *str)
+{
+  char *runner;
 
   for (runner = &str[strlen(str) - 1]; *runner == '"'; *runner = '\0', runner--);
 }
@@ -6510,6 +6580,7 @@ static void CheckIsWritableProperty(BACNET_OBJECT_TYPE object_type,
     if (bIsWritable) {
         fprintf(stdout, " Writable");
         if (WriteResultToJsonFile) {
+            StripLastDoubleQuote(buf);
             snprintf(&buf[strlen(buf)], buf_len - strlen(buf), " Writable");
         }
     }
@@ -6846,6 +6917,9 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                              * as a value. */
                             if (value->tag == BACNET_APPLICATION_TAG_NULL) {
                                 fprintf(stdout, "?");
+                                if (WriteResultToJsonFile) {
+                                  snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "\"?\"");
+                                }
                                 break;
                             }
                             /* Else, fall through for normal processing. */
@@ -6859,6 +6933,9 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                         case PROP_DATABASE_REVISION:
                             if (!ShowValues) {
                                 fprintf(stdout, "?");
+                                if (WriteResultToJsonFile) {
+                                  snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "\"?\"");
+                                }
                                 break;
                             }
                             /* Else, fall through and print value: */
@@ -6971,6 +7048,7 @@ static EPICS_STATES ProcessRPMData(
                     StripDoubleQuotes(json_value_buf);
                     WriteKeyValueToJsonFile(json_key_buf, json_value_buf, ((rpm_property->next) ? true : false));
                     json_value_buf[0] = '\0';
+                    json_key_buf[0] = '\0';
                 }
             }   
             old_rpm_property = rpm_property;
@@ -7011,6 +7089,41 @@ static EPICS_STATES ProcessRPMData(
 
 
 /*
+ * Check if the last character in the JSON file is a comma.
+ */
+static int is_json_file_last_comma(void)
+{
+  int is_comma = false;
+  int n, l;
+  char ch;
+
+  n = lseek(JsonFileFd, 0, SEEK_END);
+  if (n) {
+    while (n--) {
+      lseek(JsonFileFd, n, SEEK_SET);
+      l = read(JsonFileFd, &ch, 1);
+      if (l != 1) {
+        break;
+      }
+
+      if (isspace(ch)) {
+        continue;
+      } else if (ch == ',') {
+        is_comma = true;
+        break;
+      } else {
+        break;
+      }
+    }
+  }
+
+  lseek(JsonFileFd, 0, SEEK_END);
+
+  return(is_comma);
+}
+
+
+/*
  * Process Bacnet client PICS command.
  */
 int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
@@ -7026,7 +7139,7 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   time_t last_seconds = 0;
   time_t current_seconds = 0;
   time_t timeout_seconds = 0;
-  unsigned max_apdu = MAX_APDU;
+  unsigned max_apdu = 0;
   bool found = false;
   int ret;
   int json_file_len;
@@ -7034,12 +7147,32 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   char json_key_buf[128] = {0};
   char json_value_buf[2048] = {0};
   char *json_file_buff;
-  
+
+  address_init();
+
+  Object_List_Length = 0;
+  Object_List_Index = 0;
   Object_List = Keylist_Create();
+
+  Walked_List_Length = 0;
+  Walked_List_Index = 0;
+  Using_Walked_List = false;
+  IsLongArray = false;
+
+  Property_List_Length = 0;
+  Property_List_Index = 0;
+  memset((char*)&Property_List[0], 0, sizeof(Property_List));
 
   memset(&pics_Target_Address, 0, sizeof(pics_Target_Address));
   pics_Target_Device_Object_Instance = BACNET_MAX_INSTANCE;
   pics_Provided_Targ_MAC = false;
+  memset(&src, 0, sizeof(BACNET_ADDRESS));
+
+  Error_Detected = false;
+  Last_Error_Class = 0;
+  Last_Error_Code = 0;
+  Error_Count = 0;
+  Has_RPM = true;
 
   ret = get_pics_target_address(opts);
   if (ret) {
@@ -7058,11 +7191,29 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
     return(1);
   }
 
+  current_seconds = time(NULL);
+  timeout_seconds = (apdu_timeout() / 1000) * apdu_retries();
+
   found = address_bind_request(
     pics_Target_Device_Object_Instance, &max_apdu, &pics_Target_Address);
   if (!found) {
-    address_add_binding(
-      pics_Target_Device_Object_Instance, max_apdu, &pics_Target_Address);
+    if (pics_Target_Address.net > 0) {
+      if (mqtt_debug) {
+        printf("Sending WHO_IS\n");
+      }
+      Send_WhoIs_Remote(&pics_Target_Address,
+        pics_Target_Device_Object_Instance,
+        pics_Target_Device_Object_Instance);
+
+        tsm_timer_milliseconds(2000);
+    } else {
+      if (max_apdu == 0) {
+        max_apdu = MAX_APDU;
+      }
+
+      address_add_binding(
+        pics_Target_Device_Object_Instance, max_apdu, &pics_Target_Address);
+    }
   }
 
   /* open json output file */
@@ -7077,6 +7228,10 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   do {
     last_seconds = current_seconds;
     current_seconds = time(NULL);
+    if (current_seconds != last_seconds) {
+      tsm_timer_milliseconds(
+        (uint16_t)((current_seconds - last_seconds) * 1000));
+    }
 
     switch (myState) {
       case INITIAL_BINDING:
@@ -7255,16 +7410,30 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
             pics_Read_Property_Multiple_Data.rpm_data->object_instance,
             pics_Read_Property_Multiple_Data.rpm_data->listOfProperties,
             json_value_buf, sizeof(json_value_buf));
+
           if (WriteResultToJsonFile) {
             get_property_identifier_name(pics_Read_Property_Multiple_Data.rpm_data->listOfProperties->propertyIdentifier,
-            json_key_buf, sizeof(json_key_buf));
+              json_key_buf, sizeof(json_key_buf));
             StripDoubleQuotes(json_value_buf);
             if (FirstJsonItem) {
               FirstJsonItem = false;
             } else {
-              WriteKeyValueNoNLToJsonFile(",\n", NULL, false);
+              if (!is_json_file_last_comma()) {
+                WriteKeyValueNoNLToJsonFile(",\n", NULL, false);
+              }
             }
-            WriteKeyValueNoNLToJsonFile(json_key_buf, json_value_buf, false);
+
+            if (!strcmp(json_key_buf, "object-list")) {
+              if (strlen(json_value_buf) > 0) {
+                if ((json_value_buf[0] == '[') && (json_value_buf[1] == '[')) {
+                  WriteKeyValueNoNLToJsonFile(json_key_buf, json_value_buf, false);
+                } else {
+                  WriteKeyValueNoNLToJsonFile(NULL, json_value_buf, false);
+                }
+              }
+            } else {
+              WriteKeyValueNoNLToJsonFile(json_key_buf, json_value_buf, false);
+            }
           }
           if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
             pics_Request_Invoke_ID = 0;
@@ -7405,6 +7574,17 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
         assert(false);
         break;
     }
+
+    if (!found || (pics_Request_Invoke_ID > 0)) {
+      /* increment timer - exit if timed out */
+      elapsed_seconds += (current_seconds - last_seconds);
+      if (elapsed_seconds > timeout_seconds) {
+        fprintf(stderr, "\rError: APDU Timeout! (%lds)\n",
+          (long int)elapsed_seconds);
+        break;
+      }
+    }
+
   } while (myObject.type < MAX_BACNET_OBJECT_TYPE);
 
   /* Closing brace for all Objects, if we got any, and closing footer  */
@@ -7415,6 +7595,10 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
     }   
     printf("End of BACnet Protocol Implementation Conformance Statement\n");
     printf("\n");
+  } else {
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("}", NULL, false);
+    }
   }
 
   /* read the contents of the result and publish */

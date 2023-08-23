@@ -43,3 +43,4 @@ bacnet_client:
     - whois
     - read_value
     - write_value
+    - pics
