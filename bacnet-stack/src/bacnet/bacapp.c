@@ -1700,39 +1700,42 @@ int bacapp_snprintf_value2(
 #endif
 #if defined(BACAPP_DATE)
             case BACNET_APPLICATION_TAG_DATE:
+                if (!append_str(&p_str, &rem_str_len, "\"")) {
+                    break;
+                }
                 if (!append_str(&p_str, &rem_str_len,
                         bactext_day_of_week_name(value->type.Date.wday))) {
                     break;
-}
-                if (!append_str(&p_str, &rem_str_len, ", ")) {
+                }
+                if (!append_str(&p_str, &rem_str_len, "\", \"")) {
                     break;
-}
+                }
 
                 if (!append_str(&p_str, &rem_str_len,
                         bactext_month_name(value->type.Date.month))) {
                     break;
-}
+                }
                 if (value->type.Date.day == 255) {
-                    if (!append_str(&p_str, &rem_str_len, " (unspecified), ")) {
+                    if (!append_str(&p_str, &rem_str_len, " (unspecified)\", ")) {
                         break;
-}
+                    }
                 } else {
-                    snprintf(temp_str, sizeof(temp_str), " %u, ",
+                    snprintf(temp_str, sizeof(temp_str), " %u\", ",
                         (unsigned)value->type.Date.day);
                     if (!append_str(&p_str, &rem_str_len, temp_str)) {
                         break;
-}
+                    }
                 }
                 if (value->type.Date.year == 2155) {
-                    if (!append_str(&p_str, &rem_str_len, "(unspecified)")) {
+                    if (!append_str(&p_str, &rem_str_len, "\"(unspecified)\"")) {
                         break;
-}
+                    }
                 } else {
-                    snprintf(temp_str, sizeof(temp_str), "%u",
+                    snprintf(temp_str, sizeof(temp_str), "\"%u\"",
                         (unsigned)value->type.Date.year);
                     if (!append_str(&p_str, &rem_str_len, temp_str)) {
                         break;
-}
+                    }
                 }
                 /* If we get here, then everything is OK. Indicate how many */
                 /* bytes were written. */
@@ -1741,49 +1744,55 @@ int bacapp_snprintf_value2(
 #endif
 #if defined(BACAPP_TIME)
             case BACNET_APPLICATION_TAG_TIME:
+                if (!append_str(&p_str, &rem_str_len, "\"")) {
+                    break;
+                }
                 if (value->type.Time.hour == 255) {
                     if (!append_str(&p_str, &rem_str_len, "**:")) {
                         break;
-}
+                    }
                 } else {
                     snprintf(temp_str, sizeof(temp_str),
                         "%02u:", (unsigned)value->type.Time.hour);
                     if (!append_str(&p_str, &rem_str_len, temp_str)) {
                         break;
-}
+                    }
                 }
                 if (value->type.Time.min == 255) {
                     if (!append_str(&p_str, &rem_str_len, "**:")) {
                         break;
-}
+                    }
                 } else {
                     snprintf(temp_str, sizeof(temp_str),
                         "%02u:", (unsigned)value->type.Time.min);
                     if (!append_str(&p_str, &rem_str_len, temp_str)) {
                         break;
-}
+                    }
                 }
                 if (value->type.Time.sec == 255) {
                     if (!append_str(&p_str, &rem_str_len, "**.")) {
                         break;
-}
+                    }
                 } else {
                     snprintf(temp_str, sizeof(temp_str), "%02u.",
                         (unsigned)value->type.Time.sec);
                     if (!append_str(&p_str, &rem_str_len, temp_str)) {
                         break;
-}
+                    }
                 }
                 if (value->type.Time.hundredths == 255) {
                     if (!append_str(&p_str, &rem_str_len, "**")) {
                         break;
-}
+                    }
                 } else {
                     snprintf(temp_str, sizeof(temp_str), "%02u",
                         (unsigned)value->type.Time.hundredths);
                     if (!append_str(&p_str, &rem_str_len, temp_str)) {
                         break;
-}
+                    }
+                }
+                if (!append_str(&p_str, &rem_str_len, "\"")) {
+                    break;
                 }
                 /* If we get here, then everything is OK. Indicate how many */
                 /* bytes were written. */

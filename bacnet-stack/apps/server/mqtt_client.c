@@ -1,11 +1,18 @@
 /*
  * MQTT client module
  */
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <assert.h>
 
 #include "bacnet/indtext.h"
@@ -16,8 +23,11 @@
 #include "bacnet/apdu.h"
 #include "bacnet/datalink/datalink.h"
 #include "bacnet/bactext.h"
+#include "bacnet/basic/tsm/tsm.h"
+#include "bacnet/property.h"
 
 #include "bacnet/basic/services.h"
+#include "bacnet/basic/sys/keylist.h"
 
 #include "MQTTAsync.h"
 #include "json-c/json.h"
@@ -167,6 +177,8 @@ int encode_write_value_result(llist_obj_data *data, char *buf, int buf_len);
 int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data);
 int publish_bacnet_client_write_value_result(llist_obj_data *data);
 int publish_bacnet_client_whois_result(llist_whois_cb *cb);
+int publish_topic_value(char *topic, char *topic_value);
+int publish_bacnet_client_pics_result(bacnet_client_cmd_opts *opts, char *epics_json);
 int publish_whois_device(char *topic, char *topic_value);
 int publish_bacnet_client_whois_result_per_device(llist_whois_cb *cb);
 void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outlen, bacnet_client_cmd_opts *opts);
@@ -202,6 +214,12 @@ void whois_address_table_add(address_table_cb *table, uint32_t device_id,
 void whois_address_table_add(address_table_cb *table, uint32_t device_id,
   unsigned max_apdu, BACNET_ADDRESS *src);
 int encode_whois_result(llist_whois_cb *cb, char *buf, int buf_len);
+
+void init_bacnet_client_pics_list(void);
+void shutdown_bacnet_client_pics_list(void);
+int is_bacnet_client_pics_present(uint8_t invoke_id);
+int add_bacnet_client_pics(uint8_t invoke_id);
+int del_bacnet_client_pics(uint8_t invoke_id);
 
 void mqtt_on_send_success(void* context, MQTTAsync_successData* response);
 void mqtt_on_send_failure(void* context, MQTTAsync_failureData* response);
@@ -244,15 +262,22 @@ static uint32_t bc_whois_request_ctr = 0;
 static llist_whois_cb *bc_whois_head = NULL;
 static llist_whois_cb *bc_whois_tail = NULL;
 
+static llist_pics_cb *bc_pics_head = NULL;
+static llist_pics_cb *bc_pics_tail = NULL;
+
 static int req_tokens_len = 0;
 static char req_tokens[MAX_JSON_KEY_VALUE_PAIR][MAX_JSON_KEY_LENGTH] = {0};
 
 static BACNET_ADDRESS pics_Target_Address = {0};
 static uint32_t pics_Target_Device_Object_Instance = BACNET_MAX_INSTANCE;
 static bool pics_Provided_Targ_MAC = false;
+static bool Error_Detected = false;
+static uint16_t Last_Error_Class = 0;
+static uint16_t Last_Error_Code = 0;
+static uint16_t Error_Count = 0;
+static bool Has_RPM = true;
 static EPICS_STATES myState = INITIAL_BINDING;
 static uint8_t pics_Request_Invoke_ID = 0;
-static bool Error_Detected = false;
 
 typedef struct BACnet_RPM_Service_Data_t {
     bool new_data;
@@ -279,6 +304,31 @@ static struct property_value_list_t Property_Value_List[] = {
   { PROP_PRODUCT_NAME, NULL },
   { -1, NULL }
 };
+
+/* We get the length of the object list,
+   and then get the objects one at a time */
+static uint32_t Object_List_Length = 0;
+static int32_t Object_List_Index = 0;
+/* object that we are currently printing */
+static OS_Keylist Object_List;
+
+static uint32_t Walked_List_Length = 0;
+static uint32_t Walked_List_Index = 0;
+static bool Using_Walked_List = false;
+static bool IsLongArray = false;
+/* Show value instead of '?' */
+static bool ShowValues = false;
+/* show only device object properties */
+static bool ShowDeviceObjectOnly = false;
+static bool Optional_Properties = false;
+static bool WriteResultToJsonFile = true;
+static char JsonFilePath[251] = {0};
+static int JsonFileFd = -1;
+static bool FirstJsonItem = true;
+int WriteKeyValueToJsonFile(char *key, char *value, int comma_end);
+int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end);
+void StripDoubleQuotes(char *str);
+void StripLastDoubleQuote(char *str);
 
 /* crude request list locking mechanism */
 static int request_list_locked = false;
@@ -2056,6 +2106,59 @@ int publish_whois_device(char *topic, char *topic_value)
 
 
 /*
+ * Publish topic value.
+ */
+int publish_topic_value(char *topic, char *topic_value)
+{
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+  int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
+  int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
+  int rc, i;
+
+  printf("- write value result topic: %s\n", topic);
+
+  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
+    for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
+      }
+
+      mqtt_check_reconnect();
+      sleep(mqtt_retry_interval);
+    }
+
+    if (i >= mqtt_retry_limit) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect limit reached: %d\n", i);
+      }
+
+      return(1);
+    }
+  }
+
+  opts.onSuccess = mqtt_on_send_success;
+  opts.onFailure = mqtt_on_send_failure;
+  opts.context = mqtt_client;
+
+  pubmsg.payload = topic_value;
+  pubmsg.payloadlen = strlen(topic_value);
+  pubmsg.qos = DEFAULT_PUB_QOS;
+  pubmsg.retained = 0;
+  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
+  if (mqtt_debug) {
+    if (rc != MQTTASYNC_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
+    } else {
+      printf("MQTT published topic: \"%s\"\n", topic);
+    }
+  }
+
+  return(0);
+}
+
+
+/*
  * Publish bacnet client whois result per device.
  */
 int publish_bacnet_client_whois_result_per_device(llist_whois_cb *cb)
@@ -2158,6 +2261,53 @@ int publish_bacnet_client_whois_result_per_device(llist_whois_cb *cb)
 
 
 /*
+ * Publish bacnet client pics result.
+ */
+int publish_bacnet_client_pics_result(bacnet_client_cmd_opts *opts, char *epics_json)
+{
+  char topic[512];
+  char *value;
+  int value_len = strlen(epics_json) + 1000;
+  int i;
+
+  value = malloc(value_len);
+  if (value == NULL) {
+    fprintf(stderr, "Error: Failed to allocate memory for PICs publish message!\n");
+    return(0);
+  }
+
+  sprintf(topic, "bacnet/cmd_result/pics");
+  sprintf(value, "{ \"value\" : %s", epics_json);
+
+  if (opts->dnet >= 0) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dnet\" : \"%d\"", opts->dnet);
+  }
+
+  if (strlen(opts->mac)) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"mac\" : \"%s\"", opts->mac);
+  }
+
+  if (strlen(opts->dadr)) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dadr\" : \"%s\"", opts->dadr);
+  }
+
+  if (opts->device_instance > 0) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"deviceInstance\" : \"%d\"", opts->device_instance);
+  }
+
+  for (i = 0; i < opts->req_tokens_len; i++) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"%s\" : \"%s\"",
+      opts->req_tokens[i].key, opts->req_tokens[i].value);
+  }
+
+  snprintf(&value[strlen(value)], value_len - strlen(value), " }");
+  publish_topic_value(topic, value);
+
+  return(0);
+}
+
+
+/*
  * Bacnet client read value handler.
  */
 static void bacnet_client_read_value_handler(uint8_t *service_request,
@@ -2166,8 +2316,9 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
   BACNET_CONFIRMED_SERVICE_ACK_DATA *service_data)
 {
   BACNET_READ_PROPERTY_DATA data;
+  BACNET_READ_ACCESS_DATA *rp_data;
   llist_obj_data obj_data = {0};
-  int len;
+  int len = 0;
 
   printf("- bacnet_client_read_value_handler() => %d\n", getpid());
   printf("-- service_data->invoke_id: %d\n", service_data->invoke_id);
@@ -2175,6 +2326,27 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
   if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
     printf("-- Request with pending reply found!\n");
     del_bacnet_client_request(service_data->invoke_id);
+  } else if (address_match(&pics_Target_Address, src) &&
+    (service_data->invoke_id == pics_Request_Invoke_ID)) {
+    rp_data = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
+    if (rp_data) {
+      len = rp_ack_fully_decode_service_request(
+        service_request, service_len, rp_data);
+    }
+    if (len > 0) {
+      memmove(&pics_Read_Property_Multiple_Data.service_data, service_data,
+        sizeof(BACNET_CONFIRMED_SERVICE_ACK_DATA));
+      pics_Read_Property_Multiple_Data.rpm_data = rp_data;
+      pics_Read_Property_Multiple_Data.new_data = true;
+    } else {
+      if (len < 0) { /* Eg, failed due to no segmentation */
+        Error_Detected = true;
+printf("*** Error_Detected in bacnet_client_read_value_handler()\n");
+      }
+
+      free(rp_data);
+    }
+    return;
   } else {
     printf("-- Request with pending reply NOT found! Discarding reply!\n");
     return;
@@ -2257,6 +2429,10 @@ static void bacnet_client_whois_handler(uint8_t *service_request, uint16_t servi
       whois_address_table_add(table, device_id, max_apdu, src);
     } else {
       printf("- WARNING: No existing whois request found!\n");
+      if (len > 0) {
+        printf("- Adding address for PICS command\n");
+        address_add_binding(device_id, max_apdu, src);
+      }
     }
   } else {
     fprintf(stderr, ", but unable to decode it.\n");
@@ -2275,8 +2451,6 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
   int len = 0;
   BACNET_READ_ACCESS_DATA *rpm_data;
 
-  fprintf(stderr, "- bacnet_client_multiple_ack_handler()\n");
-
   if (address_match(&pics_Target_Address, src) &&
     (service_data->invoke_id == pics_Request_Invoke_ID)) {
     rpm_data = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
@@ -2292,7 +2466,9 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
       /* Will process and free the RPM data later */
     } else {
       if (len < 0) { /* Eg, failed due to no segmentation */
+        fprintf(stderr, "- Error_Detected\n");
         Error_Detected = true;
+printf("*** Error_Detected in bacnet_client_multiple_ack_handler()\n");
       }
       rpm_data = rpm_data_free(rpm_data);
       free(rpm_data);
@@ -2363,20 +2539,74 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
 }
 
 
+static void bacnet_client_abort_handler(
+  BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t abort_reason, bool server)
+{
+  (void)server;
+  if (address_match(&pics_Target_Address, src) &&
+    (invoke_id == pics_Request_Invoke_ID)) {
+#if PRINT_ERRORS
+    /* It is normal for this to fail, so don't print. */
+    if ((myState != GET_ALL_RESPONSE) && !IsLongArray && ShowValues) {
+      fprintf(stderr, "-- BACnet Abort: %s \n",
+        bactext_abort_reason_name(abort_reason));
+    }
+#endif
+    Error_Detected = true;
+    Last_Error_Class = ERROR_CLASS_SERVICES;
+    if (abort_reason < MAX_BACNET_ABORT_REASON) {
+      Last_Error_Code =
+        (ERROR_CODE_ABORT_BUFFER_OVERFLOW - 1) + abort_reason;
+    } else {
+      Last_Error_Code = ERROR_CODE_ABORT_OTHER;
+    }
+  }
+}
+
+
+static void bacnet_client_reject_handler(
+  BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t reject_reason)
+{
+  if (address_match(&pics_Target_Address, src) &&
+    (invoke_id == pics_Request_Invoke_ID)) {
+#if PRINT_ERRORS
+    if (ShowValues) {
+      fprintf(stderr, "BACnet Reject: %s\n",
+        bactext_reject_reason_name(reject_reason));
+    }
+#endif
+    Error_Detected = true;
+    Last_Error_Class = ERROR_CLASS_SERVICES;
+    if (reject_reason < MAX_BACNET_REJECT_REASON) {
+      Last_Error_Code =
+        (ERROR_CODE_REJECT_BUFFER_OVERFLOW - 1) + reject_reason;
+    } else {
+      Last_Error_Code = ERROR_CODE_REJECT_OTHER;
+    }
+  }
+}
+
+
 /*
  * Initialize bacnet client service handlers.
  */
 void init_bacnet_client_service_handlers(void)
 {
+  apdu_set_confirmed_handler(
+    SERVICE_CONFIRMED_READ_PROPERTY, handler_read_property);
   apdu_set_confirmed_ack_handler(
     SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_read_value_handler);
   apdu_set_confirmed_simple_ack_handler(
     SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_write_value_handler);
+  apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_IS, handler_who_is);
   apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, bacnet_client_whois_handler);
   apdu_set_confirmed_ack_handler(
     SERVICE_CONFIRMED_READ_PROP_MULTIPLE, bacnet_client_multiple_ack_handler);
   apdu_set_error_handler(SERVICE_CONFIRMED_READ_PROPERTY, bacnet_client_error_handler);
   apdu_set_error_handler(SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_error_handler);
+  apdu_set_unrecognized_service_handler_handler(handler_unrecognized_service);
+  apdu_set_abort_handler(bacnet_client_abort_handler);
+  apdu_set_reject_handler(bacnet_client_reject_handler);
 }
 
 
@@ -4638,6 +4868,114 @@ void sweep_bacnet_client_whois_requests(void)
 
 
 /*
+ * Intialize bacnet client pics list.
+ */
+void init_bacnet_client_pics_list(void)
+{
+  bc_pics_head = bc_pics_tail = NULL;
+}
+
+
+/*
+ * Shutdown bacnet client pics list.
+ */
+void shutdown_bacnet_client_pics_list(void)
+{
+  llist_pics_cb *tmp, *ptr = bc_pics_head;
+
+  while (ptr != NULL) {
+    tmp = ptr;
+    ptr = ptr->next;
+    free(tmp);
+  }
+}
+
+
+/*
+ * Check if bacnet client pics request is present.
+ */
+int is_bacnet_client_pics_present(uint8_t invoke_id)
+{
+  llist_pics_cb *ptr = bc_pics_head;
+  int present = false;
+
+  while (ptr != NULL) {
+    if (ptr->data.invoke_id == invoke_id) {
+      present = true;
+      break;
+    }
+
+    ptr = ptr->next;
+  }
+
+  return(present);
+}
+
+
+/*
+ * Add bacnet client pics request.
+ */
+int add_bacnet_client_pics(uint8_t invoke_id)
+{
+  llist_pics_cb *ptr;
+
+  ptr = malloc(sizeof(llist_pics_cb));
+  if (!ptr) {
+    printf("Error allocating memory for llist_pics_cb!\n");
+    return(1);
+  }
+
+  ptr->data.invoke_id = invoke_id;
+  ptr->timestamp = time(NULL);
+  ptr->next = NULL;
+
+  if (!bc_pics_head) {
+    bc_pics_head = bc_pics_tail = ptr;
+  } else {
+    bc_pics_tail->next = ptr;
+    bc_pics_tail = ptr;
+  }
+
+  return(0);
+}
+
+
+/*
+ * Delete backet client pics request.
+ */
+int del_bacnet_client_pics(uint8_t invoke_id)
+{
+  llist_pics_cb *prev = NULL;
+  llist_pics_cb *ptr = bc_pics_head;
+
+  while (ptr != NULL) {
+    if (ptr->data.invoke_id == invoke_id) {
+      break;
+    }
+
+    prev = ptr;
+    ptr = ptr->next;
+  }
+
+  if (ptr) {
+    printf("- PICS request with ID: %d found for deleting\n", ptr->data.invoke_id);
+    if (ptr == bc_pics_head) {
+      bc_pics_head = ptr->next;
+    } else {
+      prev->next = ptr->next;
+      if (ptr == bc_pics_tail) {
+        bc_pics_tail = prev;
+      }
+    }
+
+    free(ptr);
+  }
+
+  return(0);
+}
+
+
+/*
  * Initialize mqtt client module.
  */
 int mqtt_client_init(void)
@@ -4722,6 +5060,7 @@ int mqtt_client_init(void)
   init_bacnet_client_request_list();
   init_bacnet_client_whois_list();
   init_request_tokens();
+  init_bacnet_client_pics_list();
 
   return(0);
 }
@@ -4923,6 +5262,7 @@ void mqtt_client_shutdown(void)
 
   shutdown_bacnet_client_request_list();
   shutdown_bacnet_client_whois_list();
+  shutdown_bacnet_client_pics_list();
 }
 
 
@@ -5437,6 +5777,148 @@ void init_request_tokens(void)
 }
 
 
+static BACNET_APPLICATION_DATA_VALUE *object_property_value(int32_t property_id)
+{
+  BACNET_APPLICATION_DATA_VALUE *value = NULL;
+  int32_t index = 0;
+
+  do {
+    if (Property_Value_List[index].property_id == property_id) {
+      value = Property_Value_List[index].value;
+      break;
+    }
+    index++;
+  } while (Property_Value_List[index].property_id != -1);
+
+  return value;
+}
+
+
+/* Open JSON Output file */
+static int OpenJsonFile(void)
+{
+  char tmp_name[128] = {0};
+  char *str = "{\n";
+  int fd, ret;
+
+  strcpy(tmp_name, "/tmp/bacnet-server-pics-XXXXXX");
+  fd = mkstemp(tmp_name);
+  if (fd < 0) {
+    printf("Error: Failed to create %s temp file!\n", tmp_name);
+    return(1);
+  }
+
+  JsonFileFd = fd;
+  strncpy(JsonFilePath, tmp_name, sizeof(JsonFilePath) - 1);
+
+  ret = write(JsonFileFd, str, strlen(str));
+  if (ret < 0){
+    printf("Warning: Error writing to file: %s\n", JsonFilePath);
+  }
+
+  return(0);
+}
+
+
+/* Close JSON Output file */
+static void CloseJsonFile(void)
+{
+  if (JsonFileFd >= 0) {
+    close(JsonFileFd);
+    JsonFileFd = -1;
+    unlink(JsonFilePath);
+  }
+}
+
+
+/* Write key/value pair into JSON Output file */
+int WriteKeyValueToJsonFile(char *key, char *value, int comma_end)
+{
+  char buf[2048] = {0};
+
+  if (value == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s\n", key,
+      (comma_end) ? "," : "");
+  } else if (key == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s\n", value,
+      (comma_end) ? "," : "");
+  } else if ((strlen(value) == 1) && (*value == '{' || *value == '[')) {
+    snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s\n", key, value);
+  } else {
+    if (*value == '[' || *value == '{') {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s%s\n", key, value,
+        (comma_end) ? "," : "");
+    } else {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : \"%s\"%s\n", key, value,
+        (comma_end) ? "," : "");
+    }
+  }
+
+  if (write(JsonFileFd, buf, strlen(buf)) < 0) {
+    return(1);
+  }
+
+  return(0);
+}
+
+
+/* Write key/value pair into JSON Output file */
+int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end)
+{
+  char buf[2048] = {0};
+
+  if (value == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s", key,
+      (comma_end) ? "," : "");
+  } else if (key == NULL) {
+    snprintf(buf, sizeof(buf) - 1, "%s%s", value,
+      (comma_end) ? "," : "");
+  } else if ((strlen(value) == 1) && (*value == '{' || *value == '[')) {
+    snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s", key, value);
+  } else {
+    if (*value == '[' || *value == '{') {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : %s%s", key, value,
+        (comma_end) ? "," : "");
+    } else {
+      snprintf(buf, sizeof(buf) - 1, "\"%s\" : \"%s\"%s", key, value,
+        (comma_end) ? "," : "");
+    }
+  }
+
+  if (write(JsonFileFd, buf, strlen(buf)) < 0) {
+    return(1);
+  }
+
+  return(0);
+}
+
+
+/* Strip double quotes in string */
+void StripDoubleQuotes(char *str)
+{
+  char *ptr, *runner;
+
+  if (*str == '"') {
+    for(runner = str; *runner == '"'; runner++);
+    for(ptr = str; *runner != '\0'; runner++, ptr++) {
+      *ptr = *runner;
+    }
+    *ptr = '\0';
+  }
+
+  for (runner = &str[strlen(str) - 1]; *runner == '"'; *runner = '\0', runner--);
+}
+
+
+/* Strip double quotes in string */
+void StripLastDoubleQuote(char *str)
+{
+  char *runner;
+
+  for (runner = &str[strlen(str) - 1]; *runner == '"'; *runner = '\0', runner--);
+}
+
+
 int get_pics_target_address(bacnet_client_cmd_opts *opts)
 {
   BACNET_MAC_ADDRESS mac = {0};
@@ -5460,6 +5942,27 @@ int get_pics_target_address(bacnet_client_cmd_opts *opts)
   }
 
   return(0);
+}
+
+
+static const char *protocol_services_supported_text(size_t bit_index)
+{
+    bool is_confirmed = false;
+    size_t text_index = 0;
+    bool found = false;
+    const char *services_text = "unknown";
+
+    found =
+        apdu_service_supported_to_index(bit_index, &text_index, &is_confirmed);
+    if (found) {
+        if (is_confirmed) {
+            services_text = bactext_confirmed_service_name(text_index);
+        } else {
+            services_text = bactext_unconfirmed_service_name(text_index);
+        }
+    }
+
+    return services_text;
 }
 
 
@@ -5505,16 +6008,1118 @@ static void BuildPropRequest(BACNET_READ_ACCESS_DATA *rpm_object)
 }
 
 
+/** Print the property identifier name to stdout,
+ *  handling the proprietary property numbers.
+ * @param propertyIdentifier [in] The property identifier number.
+ */
+static void Print_Property_Identifier(unsigned propertyIdentifier)
+{
+    if (propertyIdentifier < 512) {
+        fprintf(stdout, "%s", bactext_property_name(propertyIdentifier));
+    } else {
+        fprintf(stdout, "-- proprietary %u", propertyIdentifier);
+    }
+}
+
+
+/** Send an RP request to read one property from the current Object.
+ * Singly process large arrays too, like the Device Object's Object_List.
+ * If GET_LIST_OF_ALL_RESPONSE failed, we will fall back to using just
+ * the list of known Required properties for this type of object.
+ *
+ * @param device_instance [in] Our target device's instance.
+ * @param pMyObject [in] The current Object's type and instance numbers.
+ * @return The invokeID of the message sent, or 0 if reached the end
+ *         of the property list.
+ */
+static uint8_t Read_Properties(
+  uint32_t device_instance, BACNET_OBJECT_ID *pMyObject)
+{
+  uint8_t invoke_id = 0;
+  struct special_property_list_t PropertyListStruct;
+  unsigned int i = 0, j = 0;
+
+  if ((!Has_RPM && (Property_List_Index == 0)) ||
+    (Property_List_Length == 0)) {
+    /* If we failed to get the Properties with RPM, just settle for what we
+     * know is the fixed list of Required and Optional properties.
+     * In practice, this should only happen for simple devices that don't
+     * implement RPM or have really limited MAX_APDU size.
+     */
+    property_list_special(pMyObject->type, &PropertyListStruct);
+    if (Optional_Properties) {
+      Property_List_Length = PropertyListStruct.Required.count +
+        PropertyListStruct.Optional.count;
+    } else {
+      Property_List_Length = PropertyListStruct.Required.count;
+    }
+    if (Property_List_Length > MAX_PROPS) {
+      Property_List_Length = MAX_PROPS;
+    }
+    /* Copy this list for later one-by-one processing */
+    for (i = 0; i < Property_List_Length; i++) {
+      if (i < PropertyListStruct.Required.count) {
+        Property_List[i] = PropertyListStruct.Required.pList[i];
+      } else if (Optional_Properties) {
+        Property_List[i] = PropertyListStruct.Optional.pList[j];
+        j++;
+      }
+    }
+    /* Just to be sure we terminate */
+    Property_List[i] = -1;
+  }
+  if (Property_List[Property_List_Index] != -1) {
+    int prop = Property_List[Property_List_Index];
+    uint32_t array_index;
+    IsLongArray = false;
+    if (Using_Walked_List) {
+      if (Walked_List_Length == 0) {
+        array_index = 0;
+      } else {
+        array_index = Walked_List_Index;
+      }
+    } else {
+      fprintf(stdout, "    ");
+      Print_Property_Identifier(prop);
+      fprintf(stdout, ": ");
+      array_index = BACNET_ARRAY_ALL;
+
+      switch (prop) {
+        /* These are all potentially long arrays, so they may abort
+         */
+        case PROP_OBJECT_LIST:
+        case PROP_STATE_TEXT:
+        case PROP_STRUCTURED_OBJECT_LIST:
+        case PROP_SUBORDINATE_ANNOTATIONS:
+        case PROP_SUBORDINATE_LIST:
+          IsLongArray = true;
+          break;
+      }
+    }
+    invoke_id = Send_Read_Property_Request(device_instance, pMyObject->type,
+      pMyObject->instance, prop, array_index);
+  }
+
+  return invoke_id;
+}
+
+
 static void PrintHeading(void)
 {
+  BACNET_APPLICATION_DATA_VALUE *value = NULL;
+  BACNET_OBJECT_PROPERTY_VALUE property_value;
+  char buf[256];
+  char str_value[128];
+  int last_element_index = 0;
+
   printf("PICS 0\n");
   printf("BACnet Protocol Implementation Conformance Statement\n\n");
+
+  value = object_property_value(PROP_VENDOR_NAME);
+  if ((value != NULL) &&
+    (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
+    printf("Vendor Name: \"%s\"\n",
+      characterstring_value(&value->type.Character_String));
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Vendor Name", characterstring_value(&value->type.Character_String), true);
+    }
+  } else {
+    printf("Vendor Name: \"your vendor name here\"\n");
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Vendor Name", "", true);
+    }
+  }
+
+  value = object_property_value(PROP_PRODUCT_NAME);
+  /* Best we can do with Product Name and Model Number is use the same text */
+  if ((value != NULL) &&
+    (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
+    printf("Product Name: \"%s\"\n",
+      characterstring_value(&value->type.Character_String));
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Product Name", characterstring_value(&value->type.Character_String), true);
+    }
+  } else {
+    printf("Product Name: \"your product name here\"\n");
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Product Name", "", true);
+    }
+  }
+
+  value = object_property_value(PROP_MODEL_NAME);
+  if ((value != NULL) &&
+    (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
+    printf("Product Model Number: \"%s\"\n",
+      characterstring_value(&value->type.Character_String));
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Product Model Number", characterstring_value(&value->type.Character_String), true);
+    }
+  } else {
+    printf("Product Model Number: \"your model number here\"\n");
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Product Model Number", "", true);
+    }
+  }
+
+  value = object_property_value(PROP_DESCRIPTION);
+  if ((value != NULL) &&
+    (value->tag == BACNET_APPLICATION_TAG_CHARACTER_STRING)) {
+    printf("Product Description: \"%s\"\n\n",
+      characterstring_value(&value->type.Character_String));
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Product Description", characterstring_value(&value->type.Character_String), true);
+    }
+  } else {
+    printf("Product Description: "
+      "\"your product description here\"\n\n");
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Product Description", "", true);
+    }
+  }
+
+  printf("BIBBs Supported:\n");
+  printf("{\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("BIBBs Supported", "[", false);
+  }
+  printf(" DS-RP-B\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"DS-RP-B\"", NULL, false);
+  }
+
+  printf("}\n\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("]", NULL, true);
+  }
+  printf("BACnet Standard Application Services Supported:\n");
+  printf("{\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("BACnet Standard Application Services Supported", "[", false);
+  }
+  value = object_property_value(PROP_PROTOCOL_SERVICES_SUPPORTED);
+  /* We have to process this bit string and determine which Object Types we
+   * have, and show them
+   */
+  if ((value != NULL) && (value->tag == BACNET_APPLICATION_TAG_BIT_STRING)) {
+    int i, len = bitstring_bits_used(&value->type.Bit_String);
+    printf("-- services reported by this device\n");
+    for (i = 0, last_element_index = len - 1; i < len; i++) {
+      if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
+        last_element_index = i;
+      }
+    }
+    for (i = 0; i < len; i++) {
+      if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
+        printf(" %s\n", protocol_services_supported_text(i));
+        if (WriteResultToJsonFile) {
+          snprintf(buf, sizeof(buf) - 1, "\"%s\"", protocol_services_supported_text(i));
+          WriteKeyValueToJsonFile(buf, NULL, (i != last_element_index));
+        }
+      }
+    }
+  } else {
+    printf("-- use \'Initiate\' or \'Execute\' or both for services.\n");
+    printf(" ReadProperty                   Execute\n");
+    printf("-- ReadPropertyMultiple           Initiate Execute\n");
+    printf("-- WriteProperty                  Initiate Execute\n");
+    printf("-- DeviceCommunicationControl     Initiate Execute\n");
+    printf("-- Who-Has                        Initiate Execute\n");
+    printf("-- I-Have                         Initiate Execute\n");
+    printf("-- Who-Is                         Initiate Execute\n");
+    printf("-- I-Am                           Initiate Execute\n");
+    printf("-- ReinitializeDevice             Initiate Execute\n");
+    printf("-- AcknowledgeAlarm               Initiate Execute\n");
+    printf("-- ConfirmedCOVNotification       Initiate Execute\n");
+    printf("-- UnconfirmedCOVNotification     Initiate Execute\n");
+    printf("-- ConfirmedEventNotification     Initiate Execute\n");
+    printf("-- UnconfirmedEventNotification   Initiate Execute\n");
+    printf("-- GetAlarmSummary                Initiate Execute\n");
+    printf("-- GetEnrollmentSummary           Initiate Execute\n");
+    printf("-- WritePropertyMultiple          Initiate Execute\n");
+    printf("-- ReadRange                      Initiate Execute\n");
+    printf("-- GetEventInformation            Initiate Execute\n");
+    printf("-- SubscribeCOVProperty           Initiate Execute\n");
+#ifdef BAC_ROUTING
+    if (Target_Address.net == 0) {
+      printf("-- Note: The following Routing Services are Supported:\n");
+      printf("-- Who-Is-Router-To-Network    Initiate Execute\n");
+      printf("-- I-Am-Router-To-Network      Initiate Execute\n");
+      printf("-- Initialize-Routing-Table    Execute\n");
+      printf("-- Initialize-Routing-Table-Ack Initiate\n");
+    }
+#endif
+  }
+  printf("}\n\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("]", NULL, true);
+  }
+
+  printf("Standard Object-Types Supported:\n");
+  printf("{\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("Standard Object-Types Supported", "[", false);
+  }
+  value = object_property_value(PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED);
+  /* We have to process this bit string and determine which Object Types we
+   * have, and show them
+   */
+  if ((value != NULL) && (value->tag == BACNET_APPLICATION_TAG_BIT_STRING)) {
+    int i, len = bitstring_bits_used(&value->type.Bit_String);
+    printf("-- objects reported by this device\n");
+    for (i = 0, last_element_index = len - 1; i < len; i++) {
+      if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
+        last_element_index = i;
+      }
+    }
+
+    for (i = 0; i < len; i++) {
+      if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
+        printf(" %s\n", bactext_object_type_name(i));
+        if (WriteResultToJsonFile) {
+          snprintf(buf, sizeof(buf) - 1, "\"%s\"", bactext_object_type_name(i));
+          WriteKeyValueToJsonFile(buf, NULL, (i != last_element_index));
+        }
+      }
+    }
+  } else {
+    printf("-- possible objects in this device\n");
+    printf("-- use \'Createable\' or \'Deleteable\' or both or none.\n");
+    printf("-- Analog Input            Createable Deleteable\n");
+    printf("-- Analog Output           Createable Deleteable\n");
+    printf("-- Analog Value            Createable Deleteable\n");
+    printf("-- Binary Input            Createable Deleteable\n");
+    printf("-- Binary Output           Createable Deleteable\n");
+    printf("-- Binary Value            Createable Deleteable\n");
+    printf("-- Device                  Createable Deleteable\n");
+    printf("-- Multi-state Input       Createable Deleteable\n");
+    printf("-- Multi-state Output      Createable Deleteable\n");
+    printf("-- Multi-state Value       Createable Deleteable\n");
+    printf("-- Structured View         Createable Deleteable\n");
+    printf("-- Characterstring Value\n");
+    printf("-- Datetime Value\n");
+    printf("-- Integer Value\n");
+    printf("-- Positive Integer Value\n");
+    printf("-- Trend Log\n");
+    printf("-- Load Control\n");
+    printf("-- Bitstring Value\n");
+    printf("-- Date Pattern Value\n");
+    printf("-- Date Value\n");
+    printf("-- Datetime Pattern Value\n");
+    printf("-- Large Analog Value\n");
+    printf("-- Octetstring Value\n");
+    printf("-- Time Pattern Value\n");
+    printf("-- Time Value\n");
+  }
+  printf("}\n\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("]", NULL, true);
+  }
+
+  printf("Data Link Layer Option:\n");
+  printf("{\n");
+  printf("-- choose the data link options supported\n");
+  printf("-- ISO 8802-3, 10BASE5\n");
+  printf("-- ISO 8802-3, 10BASE2\n");
+  printf("-- ISO 8802-3, 10BASET\n");
+  printf("-- ISO 8802-3, fiber\n");
+  printf("-- ARCNET, coax star\n");
+  printf("-- ARCNET, coax bus\n");
+  printf("-- ARCNET, twisted pair star \n");
+  printf("-- ARCNET, twisted pair bus\n");
+  printf("-- ARCNET, fiber star\n");
+  printf("-- ARCNET, twisted pair, EIA-485, Baud rate(s): 156000\n");
+  printf("-- MS/TP master. Baud rate(s): 9600, 38400\n");
+  printf("-- MS/TP slave. Baud rate(s): 9600, 38400\n");
+  printf("-- Point-To-Point. EIA 232, Baud rate(s): 9600\n");
+  printf("-- Point-To-Point. Modem, Baud rate(s): 9600\n");
+  printf("-- Point-To-Point. Modem, Baud rate(s): 9600 to 115200\n");
+  printf("-- BACnet/IP, 'DIX' Ethernet\n");
+  printf("-- BACnet/IP, Other\n");
+  printf("-- Other\n");
+  printf("}\n\n");
+
+  printf("Character Sets Supported:\n");
+  printf("{\n");
+  printf("-- choose any character sets supported\n");
+  printf("-- ANSI X3.4\n");
+  printf("-- IBM/Microsoft DBCS\n");
+  printf("-- JIS C 6226\n");
+  printf("-- ISO 8859-1\n");
+  printf("-- ISO 10646 (UCS-4)\n");
+  printf("-- ISO 10646 (UCS2)\n");
+  printf("}\n\n");
+
+  printf("Special Functionality:\n");
+  printf("{\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("Special Functionality", "{", false);
+  }
+  value = object_property_value(PROP_MAX_APDU_LENGTH_ACCEPTED);
+  printf(" Maximum APDU size in octets: ");
+  if (value != NULL) {
+    property_value.object_type = OBJECT_DEVICE;
+    property_value.object_instance = 0;
+    property_value.object_property = PROP_MAX_APDU_LENGTH_ACCEPTED;
+    property_value.array_index = BACNET_ARRAY_ALL;
+    property_value.value = value;
+    bacapp_print_value(stdout, &property_value);
+    bacapp_snprintf_value(str_value, sizeof(str_value), &property_value);
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("Maximum APDU size in octets", str_value, false);
+    }
+  } else {
+    printf("?");
+  }
+  printf("\n}\n\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("}", NULL, true);
+  }
+
+  printf("Default Property Value Restrictions:\n");
+  printf("{\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("Default Property Value Restrictions", "{", false);
+  }
+  printf("  unsigned-integer: <minimum: 0; maximum: 4294967295>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"unsigned-integer\" : {\"minimum\" : \"0\", \"maximum\": \"4294967295\"}", NULL, true);
+  }
+  printf("  signed-integer: <minimum: -2147483647; maximum: 2147483647>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"signed-integer\" : {\"minimum\" : \"-2147483647\", \"maximum\" : \"2147483647\"}", NULL, true);
+  }
+  printf(
+    "  real: <minimum: -3.40282347E38; maximum: 3.40282347E38; resolution: "
+    "1.0>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"real\" : {\"minimum\" : \"-3.40282347E38\" , \"maximum\": \"3.40282347E38\"}", NULL, true);
+  }
+  printf("  double: <minimum: 2.2250738585072016E-38; maximum: "
+    "1.7976931348623157E38; resolution: 0.0001>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"double\" : {\"minimum\" : \"2.2250738585072016E-38\" , \"maximum\" : \"1.7976931348623157E38\" , \"resolution\" : \"0.0001\"}", NULL, true);
+  }
+  printf("  date: <minimum: 01-January-1970; maximum: 31-December-2038>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"date\" : {\"minimum\" : \"01-January-1970\" , \"maximum\" : \"31-December-2038\"}", NULL, true);
+  }
+  printf("  octet-string: <maximum length string: 122>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"octet-string\" : {\"maximum length string\" : \"122\"}", NULL, true);
+  }
+  printf("  character-string: <maximum length string: 122>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"character-string\" : {\"maximum length string\" : \"122\"}", NULL, true);
+  }
+  printf("  list: <maximum length list: 10>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"list\" : {\"maximum length list\" : \"10\"}", NULL, true);
+  }
+  printf("  variable-length-array: <maximum length array: 10>\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"variable-length-array\" : {\"maximum length array\" : \"10\"}", NULL, false);
+  }
+  printf("}\n\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("}", NULL, true);
+  }
+
+  printf("Fail Times:\n");
+  printf("{\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("Fail Times", "{", false);
+  }
+  printf("  Notification Fail Time: 2\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"Notification Fail Time\" : \"2\"", NULL, true);
+  }
+  printf("  Internal Processing Fail Time: 0.5\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"Internal Processing Fail Time\" : \"0.5\"", NULL, true);
+  }
+  printf("  Minimum ON/OFF Time: 5\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"Minimum ON/OFF Time\" : \"5\"", NULL, true);
+  }
+  printf("  Schedule Evaluation Fail Time: 1\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"Schedule Evaluation Fail Time\" : \"1\"", NULL, true);
+  }
+  printf("  External Command Fail Time: 1\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"External Command Fail Time\" : \"1\"", NULL, true);
+  }
+  printf("  Program Object State Change Fail Time: 2\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"Program Object State Change Fail Time\" : \"2\"", NULL, true);
+  }
+  printf("  Acknowledgement Fail Time: 2\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("\"Acknowledgement Fail Time\" : \"2\"", NULL, false);
+  }
+  printf("}\n\n");
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("}", NULL, true);
+  }
 }
 
 
 static void Print_Device_Heading(void)
 {
   printf("List of Objects in Test Device:\n");
+  /* Print Opening brace, then kick off the Device Object */
+  printf("{\n");  
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("List of Objects in Test Device", "[", false);
+  }           
+  printf("  {\n"); /* And opening brace for the first object */
+  if (WriteResultToJsonFile) {
+    WriteKeyValueToJsonFile("{", NULL, false);
+    FirstJsonItem = true;
+  }
+}
+
+
+/* Get property identifier name. */
+static void get_property_identifier_name(unsigned propertyIdentifier, char *buf, int buf_len)
+{
+  if (propertyIdentifier < 512) {
+    snprintf(buf, buf_len - 1, "%s", bactext_property_name(propertyIdentifier));
+  } else {
+    snprintf(buf, buf_len - 1, "proprietary %u", propertyIdentifier);
+  }
+}
+
+
+/** Determine if this is a writable property, and, if so,
+ * note that in the EPICS output.
+ * This function may need a lot of customization for different implementations.
+ *
+ * @param object_type [in] The BACnet Object type of this object.
+ * @note  object_instance [in] The ID number for this object.
+ * @param rpm_property [in] Points to structure holding the Property,
+ *                          Value, and Error information.
+ */
+static void CheckIsWritableProperty(BACNET_OBJECT_TYPE object_type,
+    /* uint32_t object_instance, */
+    BACNET_PROPERTY_REFERENCE *rpm_property,
+    char *buf, int buf_len)
+{
+    bool bIsWritable = false;
+    if ((object_type == OBJECT_ANALOG_OUTPUT) ||
+        (object_type == OBJECT_BINARY_OUTPUT) ||
+        (object_type == OBJECT_COMMAND) ||
+        (object_type == OBJECT_MULTI_STATE_OUTPUT) ||
+        (object_type == OBJECT_ACCESS_DOOR)) {
+        if (rpm_property->propertyIdentifier == PROP_PRESENT_VALUE) {
+            bIsWritable = true;
+        }
+    } else if (object_type == OBJECT_AVERAGING) {
+        if ((rpm_property->propertyIdentifier == PROP_ATTEMPTED_SAMPLES) ||
+            (rpm_property->propertyIdentifier == PROP_WINDOW_INTERVAL) ||
+            (rpm_property->propertyIdentifier == PROP_WINDOW_SAMPLES)) {
+            bIsWritable = true;
+        }
+    } else if (object_type == OBJECT_FILE) {
+        if (rpm_property->propertyIdentifier == PROP_ARCHIVE) {
+            bIsWritable = true;
+        }
+    } else if ((object_type == OBJECT_LIFE_SAFETY_POINT) ||
+        (object_type == OBJECT_LIFE_SAFETY_ZONE)) {
+        if (rpm_property->propertyIdentifier == PROP_MODE) {
+            bIsWritable = true;
+        }
+    } else if (object_type == OBJECT_PROGRAM) {
+        if (rpm_property->propertyIdentifier == PROP_PROGRAM_CHANGE) {
+            bIsWritable = true;
+        }
+    } else if (object_type == OBJECT_PULSE_CONVERTER) {
+        if (rpm_property->propertyIdentifier == PROP_ADJUST_VALUE) {
+            bIsWritable = true;
+        }
+    } else if ((object_type == OBJECT_TRENDLOG) ||
+        (object_type == OBJECT_EVENT_LOG) ||
+        (object_type == OBJECT_TREND_LOG_MULTIPLE)) {
+        if ((rpm_property->propertyIdentifier == PROP_ENABLE) ||
+            (rpm_property->propertyIdentifier == PROP_RECORD_COUNT)) {
+            bIsWritable = true;
+        }
+    } else if (object_type == OBJECT_LOAD_CONTROL) {
+        if ((rpm_property->propertyIdentifier == PROP_REQUESTED_SHED_LEVEL) ||
+            (rpm_property->propertyIdentifier == PROP_START_TIME) ||
+            (rpm_property->propertyIdentifier == PROP_SHED_DURATION) ||
+            (rpm_property->propertyIdentifier == PROP_DUTY_WINDOW) ||
+            (rpm_property->propertyIdentifier == PROP_SHED_LEVELS)) {
+            bIsWritable = true;
+        }
+    } else if ((object_type == OBJECT_ACCESS_ZONE) ||
+        (object_type == OBJECT_ACCESS_USER) ||
+        (object_type == OBJECT_ACCESS_RIGHTS) ||
+        (object_type == OBJECT_ACCESS_CREDENTIAL)) {
+        if (rpm_property->propertyIdentifier == PROP_GLOBAL_IDENTIFIER) {
+            bIsWritable = true;
+        }
+    } else if (object_type == OBJECT_NETWORK_SECURITY) {
+        if ((rpm_property->propertyIdentifier ==
+                PROP_BASE_DEVICE_SECURITY_POLICY) ||
+            (rpm_property->propertyIdentifier ==
+                PROP_NETWORK_ACCESS_SECURITY_POLICIES) ||
+            (rpm_property->propertyIdentifier == PROP_SECURITY_TIME_WINDOW) ||
+            (rpm_property->propertyIdentifier == PROP_PACKET_REORDER_TIME) ||
+            (rpm_property->propertyIdentifier == PROP_LAST_KEY_SERVER) ||
+            (rpm_property->propertyIdentifier == PROP_SECURITY_PDU_TIMEOUT) ||
+            (rpm_property->propertyIdentifier == PROP_DO_NOT_HIDE)) {
+            bIsWritable = true;
+        }
+    }
+    /* Add more checking here, eg for Time_Synchronization_Recipients,
+     * Manual_Slave_Address_Binding, Object_Property_Reference,
+     * Life Safety Tracking_Value, Reliability, Mode,
+     * or Present_Value when Out_Of_Service is TRUE.
+     */
+    if (bIsWritable) {
+        fprintf(stdout, " Writable");
+        if (WriteResultToJsonFile) {
+            StripLastDoubleQuote(buf);
+            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), " Writable");
+        }
+    }
+}
+
+
+/** Provide a nicer output for Supported Services and Object Types bitfields
+ * and Date fields.
+ * We have to override the library's normal bitfield print because the
+ * EPICS format wants just T and F, and we want to provide (as comments)
+ * the names of the active types.
+ * These bitfields use opening and closing parentheses instead of braces.
+ * We also limit the output to 4 bit fields per line.
+ *
+ * @param stream [in] Normally stdout
+ * @param object_value [in] The structure holding this property's description
+ *                          and value.
+ * @return True if success.  Or otherwise.
+ */
+static bool PrettyPrintPropertyValue(
+    FILE *stream, BACNET_OBJECT_PROPERTY_VALUE *object_value, char *buf, int buf_len)
+{
+    BACNET_APPLICATION_DATA_VALUE *value = NULL;
+    bool status = true; /*return value */
+    size_t len = 0, i = 0, j = 0;
+    BACNET_PROPERTY_ID property = PROP_ALL;
+    char short_month[4];
+
+    value = object_value->value;
+    property = object_value->object_property;
+    if ((value != NULL) && (value->tag == BACNET_APPLICATION_TAG_BIT_STRING) &&
+        ((property == PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED) ||
+            (property == PROP_PROTOCOL_SERVICES_SUPPORTED))) {
+        len = bitstring_bits_used(&value->type.Bit_String);
+        fprintf(stream, "( \n        ");
+        if (WriteResultToJsonFile) {
+            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+        }
+        for (i = 0; i < len; i++) {
+            fprintf(stream, "%s",
+                bitstring_bit(&value->type.Bit_String, (uint8_t)i) ? "T" : "F");
+            if (WriteResultToJsonFile) {
+                snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "%s\"%s\"",
+                    ((i == 0) ? "" : ","), bitstring_bit(&value->type.Bit_String, (uint8_t)i) ? "T" : "F");
+            }
+            if (i < len - 1) {
+                fprintf(stream, ",");
+            } else {
+                fprintf(stream, " ");
+            }
+            /* Tried with 8 per line, but with the comments, got way too long.
+             */
+            if ((i == (len - 1)) || ((i % 4) == 3)) { /* line break every 4 */
+                fprintf(stream, "   -- "); /* EPICS comments begin with "--" */
+                /* Now rerun the same 4 bits, but print labels for true ones */
+                for (j = i - (i % 4); j <= i; j++) {
+                    if (bitstring_bit(&value->type.Bit_String, (uint8_t)j)) {
+                        if (property == PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED) {
+                            fprintf(
+                                stream, " %s,", bactext_object_type_name(j));
+                        } else {
+                            /* PROP_PROTOCOL_SERVICES_SUPPORTED */
+                            fprintf(stream, " %s,",
+                                protocol_services_supported_text(j));
+                        }
+                    } else { /* not supported */
+                        fprintf(stream, ",");
+                    }
+                }
+                fprintf(stream, "\n        ");
+            }
+        }
+        fprintf(stream, ") \n");
+        if (WriteResultToJsonFile) {
+            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+        }
+    } else if ((value != NULL) && (value->tag == BACNET_APPLICATION_TAG_DATE)) {
+        /* eg, property == PROP_LOCAL_DATE
+         * VTS needs (3-Aug-2011,4) or (8/3/11,4), so we'll use the
+         * clearer, international form. */
+        strncpy(short_month, bactext_month_name(value->type.Date.month), 3);
+        short_month[3] = 0;
+        fprintf(stream, "(%u-%3s-%u, %u)", (unsigned)value->type.Date.day,
+            short_month, (unsigned)value->type.Date.year,
+            (unsigned)value->type.Date.wday);
+        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "(%u-%3s-%u, %u)", (unsigned)value->type.Date.day,
+            short_month, (unsigned)value->type.Date.year,
+            (unsigned)value->type.Date.wday);
+    } else if (value != NULL) {
+        assert(false); /* How did I get here?  Fix your code. */
+        /* Meanwhile, a fallback plan */
+        status = bacapp_print_value(stdout, object_value);
+    } else {
+        fprintf(stream, "? \n");
+        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "?");
+    }
+
+    return status;
+}
+
+
+/** Print out the value(s) for one Property.
+ * This function may be called repeatedly for one property if we are walking
+ * through a list (Using_Walked_List is True) to show just one value of the
+ * array per call. 
+ *              
+ * @param object_type [in] The BACnet Object type of this object.
+ * @param object_instance [in] The ID number for this object.
+ * @param rpm_property [in] Points to structure holding the Property,
+ *                          Value, and Error information.
+ */             
+static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
+    uint32_t object_instance,
+    BACNET_PROPERTY_REFERENCE *rpm_property, char *buf, int buf_len)
+{                   
+    BACNET_OBJECT_PROPERTY_VALUE object_value; /* for bacapp printing */
+    BACNET_APPLICATION_DATA_VALUE *value, *old_value;
+    bool print_brace = false;
+    KEY object_list_element;
+    bool isSequence = false; /* Ie, will need bracketing braces {} */
+                    
+    if (rpm_property == NULL) {
+        fprintf(stdout, "    -- Null Property data \n");
+        return;
+    }       
+    value = rpm_property->value;
+    if (value == NULL) {
+        /* Then we print the error information */
+        fprintf(stdout, "?  -- BACnet Error: %s: %s\n",
+            bactext_error_class_name((int)rpm_property->error.error_class),
+            bactext_error_code_name((int)rpm_property->error.error_code));
+        return;
+    }
+
+    object_value.object_type = object_type;
+    object_value.object_instance = object_instance;
+    if ((value != NULL) && (value->next != NULL)) {
+        /* Then this is an array of values.
+         * But are we showing Values?  We (VTS3) want ? instead of {?,?} to show
+         * up. */
+        switch (rpm_property->propertyIdentifier) {
+                /* Screen the Properties that can be arrays or Sequences */
+            case PROP_PRESENT_VALUE:
+            case PROP_PRIORITY_ARRAY:
+                if (!ShowValues) {
+                    fprintf(stdout, "? \n");
+                    /* We want the Values freed below, but don't want to
+                     * print anything for them.  To achieve this, swap
+                     * out the Property for a non-existent Property
+                     * and catch that below.  */
+                    rpm_property->propertyIdentifier =
+                        PROP_PROTOCOL_CONFORMANCE_CLASS;
+                    break;
+                }
+                if (object_type == OBJECT_DATETIME_VALUE) {
+                    break; /* A special case - no braces for this pair */
+                }
+                /* Else, fall through to normal processing. */
+            default:
+                /* Normal array: open brace */
+                fprintf(stdout, "{ ");
+                if (WriteResultToJsonFile) {
+                    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+                }
+                print_brace = true; /* remember to close it */
+                break;
+        }
+    }
+
+    if (!Using_Walked_List) {
+        Walked_List_Index = Walked_List_Length = 0; /* In case we need this. */
+    }
+    /* value(s) loop until there is no "next" ... */
+    while (value != NULL) {
+        object_value.object_property = rpm_property->propertyIdentifier;
+        object_value.array_index = rpm_property->propertyArrayIndex;
+        object_value.value = value;
+        switch (rpm_property->propertyIdentifier) {
+                /* These are all arrays, so they open and close with braces */
+            case PROP_OBJECT_LIST:
+            case PROP_STATE_TEXT:
+            case PROP_STRUCTURED_OBJECT_LIST:
+            case PROP_SUBORDINATE_ANNOTATIONS:
+            case PROP_SUBORDINATE_LIST:
+                if (Using_Walked_List) {
+                    if ((rpm_property->propertyArrayIndex == 0) &&
+                        (value->tag == BACNET_APPLICATION_TAG_UNSIGNED_INT)) {
+                        /* Grab the value of the Object List length - don't
+                         * print it! */
+                        Walked_List_Length = value->type.Unsigned_Int;
+                        if (rpm_property->propertyIdentifier ==
+                            PROP_OBJECT_LIST) {
+                            Object_List_Length = value->type.Unsigned_Int;
+                        }
+                        break;
+                    } else {
+                        assert(Walked_List_Index ==
+                            (uint32_t)rpm_property->propertyArrayIndex);
+                    }
+                } else {
+                    Walked_List_Index++;
+                    /* If we got the whole Object List array in one RP call,
+                     * keep the Index and List_Length in sync as we cycle
+                     * through. */
+                    if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST) {
+                        Object_List_Length = ++Object_List_Index;
+                    }
+                }
+                if (Walked_List_Index == 1) {
+                    /* If the array is empty (nothing for this first entry),
+                     * Make it VTS3-friendly and don't show "Null" as a value.
+                     */
+                    if (value->tag == BACNET_APPLICATION_TAG_NULL) {
+                        fprintf(stdout, "?\n        ");
+                        break;
+                    }
+
+                    /* Open this Array of Objects for the first entry (unless
+                     * opening brace has already printed, since this is an array
+                     * of values[] ) */
+                    if (value->next == NULL) {
+                        fprintf(stdout, "{ \n        ");
+                        if (WriteResultToJsonFile) {
+                            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+                        }
+                    } else {
+                        fprintf(stdout, "\n        ");
+                    }
+                }
+
+                if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST) {
+                    if (value->tag != BACNET_APPLICATION_TAG_OBJECT_ID) {
+                        assert(value->tag ==
+                            BACNET_APPLICATION_TAG_OBJECT_ID); /* Something
+                                                                  not right
+                                                                  here */
+                        break;
+                    }
+                    /* Store the object list so we can interrogate
+                       each object. */
+                    object_list_element = KEY_ENCODE(value->type.Object_Id.type,
+                        value->type.Object_Id.instance);
+                    /* We don't have anything to put in the data pointer
+                     * yet, so just leave it null.  The key is Key here. */
+                    Keylist_Data_Add(Object_List, object_list_element, NULL);
+                } else if (rpm_property->propertyIdentifier ==
+                    PROP_STATE_TEXT) {
+                    /* Make sure it fits within 31 chars for original VTS3
+                     * limitation. If longer, take first 15 dash, and last 15
+                     * chars. */
+                    if (value->type.Character_String.length > 31) {
+                        int iLast15idx =
+                            value->type.Character_String.length - 15;
+                        value->type.Character_String.value[15] = '-';
+                        memcpy(&value->type.Character_String.value[16],
+                            &value->type.Character_String.value[iLast15idx],
+                            15);
+                        value->type.Character_String.value[31] = 0;
+                        value->type.Character_String.length = 31;
+                    }
+                } else if (rpm_property->propertyIdentifier ==
+                    PROP_SUBORDINATE_LIST) {
+                    if (value->tag != BACNET_APPLICATION_TAG_OBJECT_ID) {
+                        assert(value->tag ==
+                            BACNET_APPLICATION_TAG_OBJECT_ID); /* Something
+                                                                  not right
+                                                                  here */
+                        break;
+                    }
+                    /* TODO: handle Sequence of { Device ObjID, Object ID }, */
+                    isSequence = true;
+                }
+
+                /* If the object is a Sequence, it needs its own bracketing
+                 * braces */
+                if (isSequence) {
+                    fprintf(stdout, "{");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "[");
+                    }
+                }
+                bacapp_print_value(stdout, &object_value);
+                if (WriteResultToJsonFile) {
+                    bacapp_snprintf_value2(&buf[strlen(buf)], buf_len - strlen(buf), &object_value);
+                }
+                if (isSequence) {
+                    fprintf(stdout, "}");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+                    }
+                }
+
+                if ((Walked_List_Index < Walked_List_Length) ||
+                    (value->next != NULL)) {
+                    /* There are more. */
+                    fprintf(stdout, ", ");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ",");
+                    }
+                    if (!(Walked_List_Index % 3)) {
+                        fprintf(stdout, "\n        ");
+                    }
+                } else {
+                    fprintf(stdout, " } \n");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+                    }
+                }
+                break;
+
+            case PROP_PROTOCOL_OBJECT_TYPES_SUPPORTED:
+            case PROP_PROTOCOL_SERVICES_SUPPORTED:
+                PrettyPrintPropertyValue(stdout, &object_value, buf, buf_len);
+                break;
+
+                /* Our special non-existent case; do nothing further here. */
+            case PROP_PROTOCOL_CONFORMANCE_CLASS:
+                break;
+
+            default:
+                /* First, if this is a date type, it needs a different format
+                 * for VTS, so pretty print it. */
+                if (ShowValues &&
+                    (object_value.value->tag == BACNET_APPLICATION_TAG_DATE)) {
+                    /* This would be PROP_LOCAL_DATE, or OBJECT_DATETIME_VALUE,
+                     * or OBJECT_DATE_VALUE                     */
+                    PrettyPrintPropertyValue(stdout, &object_value, buf, buf_len);
+                } else {
+                    /* Some properties are presented just as '?' in an EPICS;
+                     * screen these out here, unless ShowValues is true.  */
+                    switch (rpm_property->propertyIdentifier) {
+                        case PROP_DEVICE_ADDRESS_BINDING:
+                            /* Make it VTS3-friendly and don't show "Null"
+                             * as a value. */
+                            if (value->tag == BACNET_APPLICATION_TAG_NULL) {
+                                fprintf(stdout, "?");
+                                if (WriteResultToJsonFile) {
+                                  snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "\"?\"");
+                                }
+                                break;
+                            }
+                            /* Else, fall through for normal processing. */
+                        case PROP_DAYLIGHT_SAVINGS_STATUS:
+                        case PROP_LOCAL_TIME:
+                        case PROP_LOCAL_DATE: /* Only if !ShowValues */
+                        case PROP_PRESENT_VALUE:
+                        case PROP_PRIORITY_ARRAY:
+                        case PROP_RELIABILITY:
+                        case PROP_UTC_OFFSET:
+                        case PROP_DATABASE_REVISION:
+                            if (!ShowValues) {
+                                fprintf(stdout, "?");
+                                if (WriteResultToJsonFile) {
+                                  snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "\"?\"");
+                                }
+                                break;
+                            }
+                            /* Else, fall through and print value: */
+                        default:
+                            bacapp_print_value(stdout, &object_value);
+                            if (WriteResultToJsonFile) {
+                                bacapp_snprintf_value2(&buf[strlen(buf)], buf_len - strlen(buf), &object_value);
+                            }
+                            break;
+                    }
+                }
+                if (value->next != NULL) {
+                    /* there's more! */
+                    fprintf(stdout, ",");
+                    if (WriteResultToJsonFile) {
+                        snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ",");
+                    }
+                } else {
+                    if (print_brace) {
+                        /* Closing brace for this multi-valued array */
+                        fprintf(stdout, " }");
+                        if (WriteResultToJsonFile) {
+                            snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+                        }
+                    }
+                    CheckIsWritableProperty(object_type, /* object_instance, */
+                        rpm_property, buf, buf_len);
+                    fprintf(stdout, "\n");
+                }
+                break;
+        }
+
+        old_value = value;
+        value = value->next; /* next or NULL */
+        free(old_value);
+    } /* End while loop */
+}
+
+
+/** Process the RPM list, either printing out on success or building a
+ *  properties list for later use.
+ *  Also need to free the data in the list.
+ *  If the present state is GET_HEADING_RESPONSE, store the results
+ *  in globals for later use.
+ * @param rpm_data [in] The list of RPM data received.
+ * @param myState [in] The current state.
+ * @return The next state of the EPICS state machine, normally NEXT_OBJECT
+ *         if the RPM got good data, or GET_PROPERTY_REQUEST if we have to
+ *         singly process the list of Properties.
+ */
+static EPICS_STATES ProcessRPMData(
+    BACNET_READ_ACCESS_DATA *rpm_data, EPICS_STATES myState)
+{
+    BACNET_READ_ACCESS_DATA *old_rpm_data;
+    BACNET_PROPERTY_REFERENCE *rpm_property;
+    BACNET_PROPERTY_REFERENCE *old_rpm_property;
+    BACNET_APPLICATION_DATA_VALUE *value;
+    BACNET_APPLICATION_DATA_VALUE *old_value;
+    bool bSuccess = true;
+    EPICS_STATES nextState = myState; /* assume no change */
+    /* Some flags to keep the output "pretty" -
+     * wait and put these object lists at the end */
+    bool bHasObjectList = false;
+    bool bHasStructuredViewList = false;
+    int i = 0;
+    char json_key_buf[128] = {0};
+    char json_value_buf[2048] = {0};
+
+    while (rpm_data) {
+        rpm_property = rpm_data->listOfProperties;
+        while (rpm_property) {
+            /* For the GET_LIST_OF_ALL_RESPONSE case,
+             * just keep what property this was */
+            if (myState == GET_LIST_OF_ALL_RESPONSE) {
+                switch (rpm_property->propertyIdentifier) {
+                    case PROP_OBJECT_LIST:
+                        bHasObjectList = true; /* Will append below */
+                        break;
+                    case PROP_STRUCTURED_OBJECT_LIST:
+                        bHasStructuredViewList = true;
+                        break;
+                    default:
+                        Property_List[Property_List_Index] =
+                            rpm_property->propertyIdentifier;
+                        Property_List_Index++;
+                        Property_List_Length++;
+                        break;
+                }       
+                /* Free up the value(s) */
+                value = rpm_property->value;
+                while (value) {
+                    old_value = value;
+                    value = value->next;
+                    free(old_value);
+                }   
+            } else if (myState == GET_HEADING_RESPONSE) {
+                Property_Value_List[i++].value = rpm_property->value;
+                /* copy this pointer.
+                 * On error, the pointer will be null
+                 * We won't free these values; they will free at exit */
+            } else {
+                fprintf(stdout, "    ");
+                Print_Property_Identifier(rpm_property->propertyIdentifier);
+                fprintf(stdout, ": ");
+                PrintReadPropertyData(rpm_data->object_type,
+                    rpm_data->object_instance, rpm_property, json_value_buf, sizeof(json_value_buf) - 1);
+                    
+                if (WriteResultToJsonFile) {
+                    get_property_identifier_name(rpm_property->propertyIdentifier, json_key_buf, sizeof(json_key_buf));
+                    StripDoubleQuotes(json_value_buf);
+                    WriteKeyValueToJsonFile(json_key_buf, json_value_buf, ((rpm_property->next) ? true : false));
+                    json_value_buf[0] = '\0';
+                    json_key_buf[0] = '\0';
+                }
+            }   
+            old_rpm_property = rpm_property;
+            rpm_property = rpm_property->next;
+            free(old_rpm_property);
+        }   
+        old_rpm_data = rpm_data;
+        rpm_data = rpm_data->next;
+        free(old_rpm_data);
+    }
+
+    /* Now determine the next state */
+    if (myState == GET_HEADING_RESPONSE) {
+        nextState = PRINT_HEADING;
+        /* press ahead with or without the data */
+    } else if (bSuccess && (myState == GET_ALL_RESPONSE)) {
+        nextState = NEXT_OBJECT;
+    } else if (bSuccess) { /* and GET_LIST_OF_ALL_RESPONSE */
+        /* Now append the properties we waited on. */
+        if (bHasStructuredViewList) {
+            Property_List[Property_List_Index] = PROP_STRUCTURED_OBJECT_LIST;
+            Property_List_Index++;
+            Property_List_Length++;
+        }
+        if (bHasObjectList) {
+            Property_List[Property_List_Index] = PROP_OBJECT_LIST;
+            Property_List_Index++;
+            Property_List_Length++;
+        }
+        /* Now insert the -1 list terminator, but don't count it. */
+        Property_List[Property_List_Index] = -1;
+        assert(Property_List_Length < MAX_PROPS);
+        Property_List_Index = 0; /* Will start at top of the list */
+        nextState = GET_PROPERTY_REQUEST;
+    }
+    return nextState;
+}
+
+
+/*
+ * Check if the last character in the JSON file is a comma.
+ */
+static int is_json_file_last_comma(void)
+{
+  int is_comma = false;
+  int n, l;
+  char ch;
+
+  n = lseek(JsonFileFd, 0, SEEK_END);
+  if (n) {
+    while (n--) {
+      lseek(JsonFileFd, n, SEEK_SET);
+      l = read(JsonFileFd, &ch, 1);
+      if (l != 1) {
+        break;
+      }
+
+      if (isspace(ch)) {
+        continue;
+      } else if (ch == ',') {
+        is_comma = true;
+        break;
+      } else {
+        break;
+      }
+    }
+  }
+
+  lseek(JsonFileFd, 0, SEEK_END);
+
+  return(is_comma);
 }
 
 
@@ -5534,13 +7139,40 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   time_t last_seconds = 0;
   time_t current_seconds = 0;
   time_t timeout_seconds = 0;
-  unsigned max_apdu = MAX_APDU;
+  unsigned max_apdu = 0;
   bool found = false;
   int ret;
+  int json_file_len;
+  KEY nextKey;
+  char json_key_buf[128] = {0};
+  char json_value_buf[2048] = {0};
+  char *json_file_buff;
+
+  address_init();
+
+  Object_List_Length = 0;
+  Object_List_Index = 0;
+  Object_List = Keylist_Create();
+
+  Walked_List_Length = 0;
+  Walked_List_Index = 0;
+  Using_Walked_List = false;
+  IsLongArray = false;
+
+  Property_List_Length = 0;
+  Property_List_Index = 0;
+  memset((char*)&Property_List[0], 0, sizeof(Property_List));
 
   memset(&pics_Target_Address, 0, sizeof(pics_Target_Address));
   pics_Target_Device_Object_Instance = BACNET_MAX_INSTANCE;
   pics_Provided_Targ_MAC = false;
+  memset(&src, 0, sizeof(BACNET_ADDRESS));
+
+  Error_Detected = false;
+  Last_Error_Class = 0;
+  Last_Error_Code = 0;
+  Error_Count = 0;
+  Has_RPM = true;
 
   ret = get_pics_target_address(opts);
   if (ret) {
@@ -5559,13 +7191,35 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
     return(1);
   }
 
-  // address_add_binding(
-  //   pics_Target_Device_Object_Instance, max_apdu, &pics_Target_Address);
+  current_seconds = time(NULL);
+  timeout_seconds = (apdu_timeout() / 1000) * apdu_retries();
+
   found = address_bind_request(
     pics_Target_Device_Object_Instance, &max_apdu, &pics_Target_Address);
   if (!found) {
-    address_add_binding(
-      pics_Target_Device_Object_Instance, max_apdu, &pics_Target_Address);
+    if (pics_Target_Address.net > 0) {
+      if (mqtt_debug) {
+        printf("Sending WHO_IS\n");
+      }
+      Send_WhoIs_Remote(&pics_Target_Address,
+        pics_Target_Device_Object_Instance,
+        pics_Target_Device_Object_Instance);
+
+        tsm_timer_milliseconds(2000);
+    } else {
+      if (max_apdu == 0) {
+        max_apdu = MAX_APDU;
+      }
+
+      address_add_binding(
+        pics_Target_Device_Object_Instance, max_apdu, &pics_Target_Address);
+    }
+  }
+
+  /* open json output file */
+  if (WriteResultToJsonFile && OpenJsonFile()) {
+    printf("Error opening JSON output file!\n");
+    return(1);
   }
 
   myObject.type = OBJECT_DEVICE;
@@ -5574,6 +7228,10 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   do {
     last_seconds = current_seconds;
     current_seconds = time(NULL);
+    if (current_seconds != last_seconds) {
+      tsm_timer_milliseconds(
+        (uint16_t)((current_seconds - last_seconds) * 1000));
+    }
 
     switch (myState) {
       case INITIAL_BINDING:
@@ -5614,7 +7272,6 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
         } else {
           printf("\r-- Failed to get Heading info \n");
         }
-printf("** GET_HEADING_INFO **\n");
         myState = GET_HEADING_RESPONSE;
         break;
 
@@ -5625,12 +7282,26 @@ printf("** GET_HEADING_INFO **\n");
 
       case GET_ALL_REQUEST:
       case GET_LIST_OF_ALL_REQUEST:
+        /* "list" differs in ArrayIndex only */
+        /* Update times; aids single-step debugging */
+        last_seconds = current_seconds;
+        StartNextObject(rpm_object, &myObject);
+
+        pics_Request_Invoke_ID = Send_Read_Property_Multiple_Request(
+          buffer, MAX_PDU, pics_Target_Device_Object_Instance, rpm_object);
+        if (pics_Request_Invoke_ID > 0) {
+          elapsed_seconds = 0;
+          if (myState == GET_LIST_OF_ALL_REQUEST) {
+            myState = GET_LIST_OF_ALL_RESPONSE;
+          } else {
+            myState = GET_ALL_RESPONSE;
+          }
+        }
         break;
 
       case GET_HEADING_RESPONSE:
       case GET_ALL_RESPONSE:
       case GET_LIST_OF_ALL_RESPONSE:
-printf("** GET_HEADING_RESPONSE|GET_ALL_RESPONSE|GET_LIST_OF_ALL_RESPONSE**\n");
         pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
 
         /* process */
@@ -5638,15 +7309,318 @@ printf("** GET_HEADING_RESPONSE|GET_ALL_RESPONSE|GET_LIST_OF_ALL_RESPONSE**\n");
           npdu_handler(&src, &Rx_Buf[0], pdu_len);
         }
 
-        /* force quit */
-        myObject.type = MAX_BACNET_OBJECT_TYPE;
+        if ((pics_Read_Property_Multiple_Data.new_data) &&
+          (pics_Request_Invoke_ID == pics_Read_Property_Multiple_Data.service_data.invoke_id)) {
+          pics_Read_Property_Multiple_Data.new_data = false;
+          myState = ProcessRPMData(pics_Read_Property_Multiple_Data.rpm_data, myState);
+          if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
+            pics_Request_Invoke_ID = 0;
+          } else {
+            assert(false); /* How can this be? */
+            pics_Request_Invoke_ID = 0;
+          }
+          elapsed_seconds = 0;
+        } else  if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
+          elapsed_seconds = 0;
+          pics_Request_Invoke_ID = 0;
+          if (myState == GET_HEADING_RESPONSE) {
+            myState = PRINT_HEADING;
+          /* just press ahead without the data */
+          } else if (Error_Detected) {
+            if (Last_Error_Code ==
+              ERROR_CODE_REJECT_UNRECOGNIZED_SERVICE) {
+              /* The normal case for Device Object */
+              /* Was it because the Device can't do RPM? */
+              Has_RPM = false;
+              myState = GET_PROPERTY_REQUEST;
+            } else if (Last_Error_Code ==
+                            ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED) {
+              myState = GET_PROPERTY_REQUEST;
+              StartNextObject(rpm_object, &myObject);
+            } else if (myState == GET_ALL_RESPONSE) {
+              /* Try again, just to get a list of properties. */
+              myState = GET_LIST_OF_ALL_REQUEST;
+            } else {
+              /* Else drop back to RP. */
+              myState = GET_PROPERTY_REQUEST;
+              StartNextObject(rpm_object, &myObject);
+            }
+          } else if (Has_RPM) {
+            myState = GET_ALL_REQUEST; /* Let's try again */
+          } else {
+            myState = GET_PROPERTY_REQUEST;
+          }
+        } else if (tsm_invoke_id_failed(pics_Request_Invoke_ID)) {
+          fprintf(stderr, "\rError: TSM Timeout!\n");
+          tsm_free_invoke_id(pics_Request_Invoke_ID);
+          pics_Request_Invoke_ID = 0;
+          elapsed_seconds = 0;
+          if (myState == GET_HEADING_RESPONSE) {
+            myState = PRINT_HEADING;
+            /* just press ahead without the data */
+          } else {
+            myState = GET_ALL_REQUEST; /* Let's try again */
+          }
+        } else if (Error_Detected) {
+          /* Don't think we'll ever actually reach this point. */
+          elapsed_seconds = 0;
+          pics_Request_Invoke_ID = 0;
+          if (myState == GET_HEADING_RESPONSE) {
+            myState = PRINT_HEADING;
+            /* just press ahead without the data */
+          } else {
+            myState = NEXT_OBJECT;
+          }/* Give up and move on to the
+                                                  next. */
+          Error_Count++;
+        }
+
+        break;
+
+      case GET_PROPERTY_REQUEST:
+        Error_Detected = false;
+        /* Update times; aids single-step debugging */
+        last_seconds = current_seconds;
+        elapsed_seconds = 0;
+        pics_Request_Invoke_ID =
+          Read_Properties(pics_Target_Device_Object_Instance, &myObject);
+        if (pics_Request_Invoke_ID == 0) {
+          /* Reached the end of the list. */
+          myState = NEXT_OBJECT; /* Move on to the next. */
+        } else {
+          myState = GET_PROPERTY_RESPONSE;
+        }
+        break;
+
+      case GET_PROPERTY_RESPONSE:
+        /* returns 0 bytes on timeout */
+        pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+
+        /* process */
+        if (pdu_len) {
+          npdu_handler(&src, &Rx_Buf[0], pdu_len);
+        }
+
+        if ((pics_Read_Property_Multiple_Data.new_data) &&
+          (pics_Request_Invoke_ID == pics_Read_Property_Multiple_Data.service_data.invoke_id)) {
+          pics_Read_Property_Multiple_Data.new_data = false;
+          json_value_buf[0] = '\0';
+          PrintReadPropertyData(
+            pics_Read_Property_Multiple_Data.rpm_data->object_type,
+            pics_Read_Property_Multiple_Data.rpm_data->object_instance,
+            pics_Read_Property_Multiple_Data.rpm_data->listOfProperties,
+            json_value_buf, sizeof(json_value_buf));
+
+          if (WriteResultToJsonFile) {
+            get_property_identifier_name(pics_Read_Property_Multiple_Data.rpm_data->listOfProperties->propertyIdentifier,
+              json_key_buf, sizeof(json_key_buf));
+            StripDoubleQuotes(json_value_buf);
+            if (FirstJsonItem) {
+              FirstJsonItem = false;
+            } else {
+              if (!is_json_file_last_comma()) {
+                WriteKeyValueNoNLToJsonFile(",\n", NULL, false);
+              }
+            }
+
+            if (!strcmp(json_key_buf, "object-list")) {
+              if (strlen(json_value_buf) > 0) {
+                if ((json_value_buf[0] == '[') && (json_value_buf[1] == '[')) {
+                  WriteKeyValueNoNLToJsonFile(json_key_buf, json_value_buf, false);
+                } else {
+                  WriteKeyValueNoNLToJsonFile(NULL, json_value_buf, false);
+                }
+              }
+            } else {
+              WriteKeyValueNoNLToJsonFile(json_key_buf, json_value_buf, false);
+            }
+          }
+          if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
+            pics_Request_Invoke_ID = 0;
+          } else {
+            assert(false); /* How can this be? */
+            pics_Request_Invoke_ID = 0;
+          }
+          elapsed_seconds = 0;
+          /* Advance the property (or Array List) index */
+          if (Using_Walked_List) {
+            Walked_List_Index++;
+            if (Walked_List_Index > Walked_List_Length) {
+              /* go on to next property */
+              Property_List_Index++;
+              Using_Walked_List = false;
+            }
+          } else {
+            Property_List_Index++;
+          }
+          myState = GET_PROPERTY_REQUEST; /* Go fetch next Property */
+        } else if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
+          pics_Request_Invoke_ID = 0;
+          elapsed_seconds = 0;
+          myState = GET_PROPERTY_REQUEST;
+          if (Error_Detected) {
+            if ((Last_Error_Class != ERROR_CLASS_PROPERTY) &&
+              (Last_Error_Code != ERROR_CODE_UNKNOWN_PROPERTY)) {
+              if (IsLongArray) {
+                /* Change to using a Walked List and retry this
+                 * property */
+                Using_Walked_List = true;
+                Walked_List_Index = Walked_List_Length = 0;
+              } else {
+                /* OK, skip this one and try the next property.
+                 */
+                fprintf(stdout, "    -- Failed to get ");
+                Print_Property_Identifier(
+                  Property_List[Property_List_Index]);
+                fprintf(stdout, " \n");
+                Error_Count++;
+                Property_List_Index++;
+                if (Property_List_Index >= Property_List_Length) {
+                  /* Give up and move on to the next. */
+                  myState = NEXT_OBJECT;
+                }
+              }
+            } else {
+              fprintf(stdout, "    -- unknown property\n");
+              Error_Count++;
+              Property_List_Index++;
+              if (Property_List_Index >= Property_List_Length) {
+                /* Give up and move on to the next. */
+                myState = NEXT_OBJECT;
+              }
+            }
+          }
+        } else if (tsm_invoke_id_failed(pics_Request_Invoke_ID)) {
+          fprintf(stderr, "\rError: TSM Timeout!\n");
+          tsm_free_invoke_id(pics_Request_Invoke_ID);
+          elapsed_seconds = 0;
+          pics_Request_Invoke_ID = 0;
+          myState = 3; /* Let's try again, same Property */
+        } else if (Error_Detected) {
+          /* Don't think we'll ever actually reach this point. */
+          elapsed_seconds = 0;
+          pics_Request_Invoke_ID = 0;
+          myState = NEXT_OBJECT; /* Give up and move on to the next. */
+          Error_Count++;
+        }
+        break;
+
+      case NEXT_OBJECT:
+        if (myObject.type == OBJECT_DEVICE) {
+          printf("  -- Found %d Objects \n", Keylist_Count(Object_List));
+          Object_List_Index = -1; /* start over (will be incr to 0) */
+          if (ShowDeviceObjectOnly) {
+            /* Closing brace for the Device Object */
+            printf("  }, \n");
+            if (WriteResultToJsonFile) {
+              WriteKeyValueToJsonFile("}", NULL, true);
+            }
+            /* done with all Objects, signal end of this while loop
+             */
+            myObject.type = MAX_BACNET_OBJECT_TYPE;
+            break;
+          }
+        }
+        /* Advance to the next object, as long as it's not the Device
+         * object */
+        do {
+          Object_List_Index++;
+          if (Object_List_Index < Keylist_Count(Object_List)) {
+            nextKey = Keylist_Key(Object_List, Object_List_Index);
+            myObject.type = KEY_DECODE_TYPE(nextKey);
+            myObject.instance = KEY_DECODE_ID(nextKey);
+            /* Don't re-list the Device Object among its objects */
+            if (myObject.type == OBJECT_DEVICE) {
+              continue;
+            }
+            /* Closing brace for the previous Object */
+            printf("  }, \n");
+            if (WriteResultToJsonFile) {
+              WriteKeyValueToJsonFile("}", NULL, true);
+            }
+            /* Opening brace for the new Object */
+            printf("  { \n");
+            if (WriteResultToJsonFile) {
+              WriteKeyValueToJsonFile("{", NULL, false);
+              FirstJsonItem = true;
+            }
+            /* Test code:
+              if ( myObject.type == OBJECT_STRUCTURED_VIEW )
+                printf( "    -- Structured View %d \n",
+                  myObject.instance );
+             */
+          } else {
+            /* Closing brace for the last Object */
+            printf("  } \n");
+            if (WriteResultToJsonFile) {
+              WriteKeyValueToJsonFile("}", NULL, false);
+            }
+            /* done with all Objects, signal end of this while loop
+             */
+            myObject.type = MAX_BACNET_OBJECT_TYPE;
+          }
+          if (Has_RPM) {
+            myState = GET_ALL_REQUEST;
+          } else {
+            myState = GET_PROPERTY_REQUEST;
+            StartNextObject(rpm_object, &myObject);
+          }
+        } while (myObject.type == OBJECT_DEVICE);
+        /* Else, don't re-do the Device Object; move to the next object.
+         */
         break;
 
       default:
         assert(false);
         break;
     }
+
+    if (!found || (pics_Request_Invoke_ID > 0)) {
+      /* increment timer - exit if timed out */
+      elapsed_seconds += (current_seconds - last_seconds);
+      if (elapsed_seconds > timeout_seconds) {
+        fprintf(stderr, "\rError: APDU Timeout! (%lds)\n",
+          (long int)elapsed_seconds);
+        break;
+      }
+    }
+
   } while (myObject.type < MAX_BACNET_OBJECT_TYPE);
+
+  /* Closing brace for all Objects, if we got any, and closing footer  */
+  if (myState != INITIAL_BINDING) {
+    printf("} \n");
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("]}", NULL, false);
+    }   
+    printf("End of BACnet Protocol Implementation Conformance Statement\n");
+    printf("\n");
+  } else {
+    if (WriteResultToJsonFile) {
+      WriteKeyValueToJsonFile("}", NULL, false);
+    }
+  }
+
+  /* read the contents of the result and publish */
+  if (WriteResultToJsonFile) {
+    json_file_len = lseek(JsonFileFd, 0, SEEK_END);
+    printf("json_file_len: %d\n", json_file_len);
+    json_file_buff = malloc(json_file_len + 1);
+    if (json_file_buff == NULL) {
+      fprintf(stderr, "Error: Failed to allocate memory for PICs reply!\n");
+      return(1);
+    }
+
+    lseek(JsonFileFd, 0, SEEK_SET);
+    ret = read(JsonFileFd, json_file_buff, json_file_len);
+
+    publish_bacnet_client_pics_result(opts, json_file_buff);
+  }
+
+  /* Close json output file */
+  if (WriteResultToJsonFile) {
+    CloseJsonFile();
+  }
 
   return(0);
 }

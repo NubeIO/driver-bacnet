@@ -124,6 +124,14 @@ typedef struct _llist_whois_cb {
   } data;
 } llist_whois_cb;
 
+typedef struct _llist_pics_cb {
+  struct _llist_pics_cb *next;
+  time_t timestamp;
+  struct _llist_pics_data {
+    uint8_t invoke_id;
+  } data;
+} llist_pics_cb;
+
 typedef struct _bacnet_client_cmd_opts {
   BACNET_OBJECT_TYPE object_type;
   uint32_t object_instance;

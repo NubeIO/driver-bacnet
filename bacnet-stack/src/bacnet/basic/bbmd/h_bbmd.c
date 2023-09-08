@@ -1053,7 +1053,8 @@ int bvlc_bbmd_enabled_handler(BACNET_IP_ADDRESS *addr,
             if (bbmd_address_match_self(addr)) {
                 /* ignore messages from my IPv4 address */
                 debug_print_string("Original-Unicast-NPDU is me!");
-                break;
+                debug_print_string("- Processing Original-Unicast-NPDU");
+                // break;
             }
             function_len =
                 bvlc_decode_original_unicast(pdu, pdu_len, NULL, 0, &npdu_len);
@@ -1072,7 +1073,8 @@ int bvlc_bbmd_enabled_handler(BACNET_IP_ADDRESS *addr,
             if (bbmd_address_match_self(addr)) {
                 /* ignore messages from my IPv4 address */
                 debug_print_string("Original-Broadcast-NPDU is me!");
-                break;
+                debug_print_string("- Processing Original-Broadcast-NPDU");
+                // break;
             }
             function_len = bvlc_decode_original_broadcast(
                 pdu, pdu_len, NULL, 0, &npdu_len);
