@@ -3280,10 +3280,10 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     address_add(opts->device_instance, MAX_APDU, &dest);
   }
 
-  if (is_command_for_us(opts)) {
+  /* if (is_command_for_us(opts)) {
     printf("*** Command for us\n");
     process_local_read_value_command(opts);
-  } else {
+  } else { */
     if (opts->tag_flags & CMD_TAG_FLAG_SLOW_TEST) {
       printf("** Slow test enabled!\n");
       usleep(1000000);
@@ -3327,7 +3327,7 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     if (pdu_len) {
       npdu_handler(&src, &Rx_Buf[0], pdu_len);
     }
-  }
+  // }
 
   return(0);
 }
@@ -3680,11 +3680,15 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
       switch (object_property) {
         case PROP_PRESENT_VALUE:
         case PROP_PRIORITY_ARRAY:
-          bacapp_parse_application_data(4, str, value);
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_REAL, str, value);
           break;
 
         case PROP_OBJECT_NAME:
-          bacapp_parse_application_data(7, str, value);
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_CHARACTER_STRING, str, value);
+          break;
+
+        case PROP_UNITS:
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_ENUMERATED, str, value);
           break;
 
         default:
@@ -3701,11 +3705,11 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
       switch (object_property) {
         case PROP_PRESENT_VALUE:
         case PROP_PRIORITY_ARRAY:
-          bacapp_parse_application_data(9, str, value);
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_ENUMERATED, str, value);
           break;
 
         case PROP_OBJECT_NAME:
-          bacapp_parse_application_data(7, str, value);
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_CHARACTER_STRING, str, value);
           break;
 
         default:
@@ -3721,11 +3725,11 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
     case OBJECT_MULTI_STATE_VALUE:
       switch (object_property) {
         case PROP_PRESENT_VALUE:
-          bacapp_parse_application_data(2, str, value);
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_UNSIGNED_INT, str, value);
           break;
 
         case PROP_OBJECT_NAME:
-          bacapp_parse_application_data(7, str, value);
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_CHARACTER_STRING, str, value);
           break;
 
         default:
@@ -3875,6 +3879,18 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
 
   switch (opts->object_type) {
     case OBJECT_ANALOG_INPUT:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE &&
+        opts->property != PROP_UNITS) {
+        sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
+        if (mqtt_debug) {
+          printf("%s\n", err_msg);
+        }
+
+        mqtt_publish_command_error(err_msg, opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+        return(1);
+      }
+      break;
+
     case OBJECT_BINARY_INPUT:
       if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE) {
         sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
@@ -3888,8 +3904,20 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       break;
 
     case OBJECT_ANALOG_OUTPUT:
-    case OBJECT_BINARY_OUTPUT:
     case OBJECT_ANALOG_VALUE:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE &&
+        opts->property != PROP_PRIORITY_ARRAY && opts->property != PROP_UNITS) {
+        sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
+        if (mqtt_debug) {
+          printf("%s\n", err_msg);
+        }
+
+        mqtt_publish_command_error(err_msg, opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+        return(1);
+      }
+      break;
+
+    case OBJECT_BINARY_OUTPUT:
     case OBJECT_BINARY_VALUE:
       if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE &&
         opts->property != PROP_PRIORITY_ARRAY) {
@@ -3927,10 +3955,10 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       return(1);
   }
 
-  if (is_command_for_us(opts)) {
+  /* if (is_command_for_us(opts)) {
     printf("command for us\n");
     process_local_write_value_command(opts);
-  } else {
+  } else { */
     if (opts->prio_array_len > 0) {
       ret = check_and_set_priority_array_set(opts);
       if (ret) {
@@ -4025,7 +4053,7 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       npdu_handler(&src, &Rx_Buf[0], pdu_len);
     }
   }
-  }
+  // }
 
   return(0);
 }
