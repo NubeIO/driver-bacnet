@@ -68,7 +68,8 @@ static BACNET_ADDRESS Target_Address;
 /* needed for return value of main application */
 static bool Error_Detected = false;
 /* Used for verbose */
-static bool Verbose = false;
+// static bool Verbose = false;
+static bool Verbose = true;
 
 static void MyErrorHandler(BACNET_ADDRESS *src,
     uint8_t invoke_id,
@@ -268,6 +269,7 @@ int main(int argc, char *argv[])
     int scan_count = 0;
     int argi = 0;
     char *filename = NULL;
+    char *pEnv;
 
     filename = filename_remove_path(argv[0]);
     for (argi = 1; argi < argc; argi++) {
@@ -290,6 +292,7 @@ int main(int argc, char *argv[])
         print_usage(filename);
         return 0;
     }
+
     /* decode the command line parameters */
     Target_Device_Object_Instance = strtol(argv[1], NULL, 0);
     if (Target_Device_Object_Instance >= BACNET_MAX_INSTANCE) {
@@ -297,6 +300,7 @@ int main(int argc, char *argv[])
             Target_Device_Object_Instance, BACNET_MAX_INSTANCE);
         return 1;
     }
+
     atexit(cleanup);
     Write_Access_Data = calloc(1, sizeof(BACNET_WRITE_ACCESS_DATA));
     wpm_object = Write_Access_Data;
@@ -304,6 +308,7 @@ int main(int argc, char *argv[])
     arg_sets = 0;
     while (wpm_object) {
         tag_value_arg = 2 + (arg_sets * 6);
+printf("tag_value_arg: %d\n", tag_value_arg);
         if (bactext_object_type_strtol(
                 argv[tag_value_arg], &wpm_object->object_type) == false) {
             fprintf(
@@ -445,6 +450,21 @@ int main(int argc, char *argv[])
     /* configure the timeout values */
     last_seconds = time(NULL);
     timeout_seconds = (apdu_timeout() / 1000) * apdu_retries();
+
+    /* get mac from env */
+    pEnv = getenv("MAC");
+    if (pEnv) {
+      BACNET_MAC_ADDRESS mac = {0};
+      if (address_mac_from_ascii(&mac, pEnv)) {
+        memcpy(&Target_Address.mac[0], &mac.adr[0], mac.len);
+        Target_Address.mac_len = mac.len;
+        Target_Address.len = 0;
+        Target_Address.net = 0;
+        printf("Using MAC: %s for %d\n", pEnv, Target_Device_Object_Instance);
+        address_add(Target_Device_Object_Instance, MAX_APDU, &Target_Address);
+      }
+    }
+
     /* try to bind with the device */
     found = address_bind_request(
         Target_Device_Object_Instance, &max_apdu, &Target_Address);
@@ -454,6 +474,9 @@ int main(int argc, char *argv[])
                 Target_Device_Object_Instance);
         }
     } else {
+        if (Verbose) {
+            printf("Sending WHO-IS for %u\n", Target_Device_Object_Instance);
+        }
         Send_WhoIs(
             Target_Device_Object_Instance, Target_Device_Object_Instance);
     }

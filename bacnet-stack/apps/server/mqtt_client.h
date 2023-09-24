@@ -65,6 +65,15 @@ typedef struct _request_token_cb {
   char value[MAX_JSON_VALUE_LENGTH];
 } request_token_cb;
 
+typedef struct _rpm_object_cb {
+  BACNET_OBJECT_TYPE object_type;
+  uint32_t object_instance;
+  BACNET_PROPERTY_ID property;
+  int32_t index;
+  int32_t priority;
+  char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+} rpm_object_cb;
+
 typedef struct _llist_obj_data {
   BACNET_OBJECT_TYPE object_type;
   uint32_t object_instance;
@@ -81,6 +90,8 @@ typedef struct _llist_obj_data {
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
   int topic_id;
+  int rpm_objects_len;
+  rpm_object_cb *rpm_objects;
 } llist_obj_data;
 
 typedef struct _llist_cb {
@@ -151,8 +162,10 @@ typedef struct _bacnet_client_cmd_opts {
   int32_t req_tokens_len;
   int32_t prio_array_len;
   int publish_per_device;
+  int rpm_objects_len;
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
+  rpm_object_cb *rpm_objects;
 } bacnet_client_cmd_opts;
 
 #ifdef __cplusplus
