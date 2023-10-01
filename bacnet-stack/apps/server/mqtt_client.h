@@ -14,7 +14,7 @@
 /* default values */
 #define DEFAULT_MQTT_BROKER_IP           "127.0.0.1"
 #define DEFAULT_MQTT_BROKER_PORT         1883
-#define DEFAULT_PUB_QOS                  0
+#define DEFAULT_PUB_QOS                  1
 #define DEFAULT_PUB_TIMEOUT              10000L
 
 /* topic types */
@@ -43,7 +43,7 @@
 #define MAX_JSON_KEY_LENGTH              100
 #define MAX_JSON_VALUE_LENGTH            100
 
-#define MAX_CMD_STR_OPT_VALUE_LENGTH     100
+#define MAX_CMD_STR_OPT_VALUE_LENGTH     256
 #define MAX_CMD_OPT_TAG_VALUE_PAIR       5
 
 #define CMD_TAG_FLAG_SLOW_TEST           0x01
@@ -60,6 +60,10 @@ typedef struct _json_key_value_pair {
   int index;
 } json_key_value_pair;
 
+typedef struct _single_token_cb {
+  char token[MAX_JSON_KEY_LENGTH];
+} single_token_cb;
+
 typedef struct _request_token_cb {
   char key[MAX_JSON_KEY_LENGTH];
   char value[MAX_JSON_VALUE_LENGTH];
@@ -72,6 +76,7 @@ typedef struct _rpm_object_cb {
   int32_t index;
   int32_t priority;
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
+  char *blob_value;
 } rpm_object_cb;
 
 typedef struct _llist_obj_data {
