@@ -177,9 +177,11 @@ int is_command_for_us(bacnet_client_cmd_opts *opts);
 char *get_object_type_str(int object_type);
 char *get_object_property_str(int object_property);
 int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data, char *buf, int buf_len);
+int encode_read_multiple_value_result(BACNET_READ_ACCESS_DATA *rpm_data, llist_obj_data *obj_data);
 int encode_write_value_result(llist_obj_data *data, char *buf, int buf_len);
 int publish_bacnet_client_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data);
 int publish_bacnet_client_write_value_result(llist_obj_data *data);
+int publish_bacnet_client_read_multiple_value_result(llist_obj_data *data);
 int publish_bacnet_client_write_multiple_value_result(llist_obj_data *data);
 int publish_bacnet_client_whois_result(llist_whois_cb *cb);
 int publish_topic_value(char *topic, char *topic_value);
@@ -189,6 +191,7 @@ int publish_bacnet_client_whois_result_per_device(llist_whois_cb *cb);
 void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outlen, bacnet_client_cmd_opts *opts);
 int process_local_read_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts);
+int process_bacnet_client_read_multiple_value_command(bacnet_client_cmd_opts *opts);
 void init_bacnet_client_service_handlers(void);
 int process_local_write_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *opts);
@@ -196,6 +199,8 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], int n_topic_tokens, bacnet_client_cmd_opts *opts);
 
 void encode_array_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data, char *buf, int buf_len);
+void encode_read_multiple_array_value_result(BACNET_READ_ACCESS_DATA *rpm_data, char *buf, int buf_len);
+void encode_read_multiple_list_value_result(BACNET_READ_ACCESS_DATA *rpm_data, char **buf);
 void encode_object_list_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data, char *buf, int buf_len);
 
 void init_bacnet_client_request_list(void);
@@ -1383,6 +1388,95 @@ void encode_array_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *
 }
 
 
+/*  
+ * Encode read multiple array value results.
+ */     
+void encode_read_multiple_array_value_result(BACNET_READ_ACCESS_DATA *rpm_data, char *buf, int buf_len)
+{
+  BACNET_OBJECT_PROPERTY_VALUE object_value;
+  BACNET_PROPERTY_REFERENCE *listOfProperties = NULL;
+  BACNET_APPLICATION_DATA_VALUE *value = NULL;
+  char array_val[32][50];
+  int array_val_len = 0;
+  int i;  
+
+  listOfProperties = rpm_data->listOfProperties;
+  value = listOfProperties->value;
+
+  object_value.object_type = rpm_data->object_type;
+  object_value.object_instance = rpm_data->object_instance;
+
+  while (value) {
+    object_value.object_property = listOfProperties->propertyIdentifier;
+    object_value.array_index = listOfProperties->propertyArrayIndex;
+    object_value.value = value;
+    bacapp_snprintf_value(array_val[array_val_len], 50, &object_value);
+    array_val_len++;
+    value = value->next;
+  }
+
+  if (listOfProperties->propertyArrayIndex == BACNET_ARRAY_ALL) {
+    sprintf(buf, "[");
+    for(i = 0; i < array_val_len; i++) {
+      snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "%s\"%s\"",
+        (i == 0) ? "" : ",", array_val[i]);
+    }
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+  } else if (listOfProperties->propertyArrayIndex >= 0) {
+    snprintf(buf, buf_len, "%s", array_val[0]);
+  }
+}
+
+
+/*  
+ * Encode read multiple list value results.
+ */
+void encode_read_multiple_list_value_result(BACNET_READ_ACCESS_DATA *rpm_data, char **out)
+{
+  BACNET_PROPERTY_REFERENCE *listOfProperties = NULL;
+  BACNET_APPLICATION_DATA_VALUE *value = NULL;
+  single_token_cb *array_val = NULL;
+  char *buf;
+  int buf_len;
+  int array_val_len;
+  int i;
+
+  listOfProperties = rpm_data->listOfProperties;
+  for (array_val_len = 0, value = listOfProperties->value; value != NULL; array_val_len++, value = value->next);
+
+  array_val = malloc(sizeof(single_token_cb) * array_val_len);
+  value = listOfProperties->value;
+
+  for (i = 0, value = listOfProperties->value; value != NULL && (i < array_val_len); i++, value = value->next) {
+    switch (value->tag) {
+      case BACNET_APPLICATION_TAG_UNSIGNED_INT:
+        snprintf(array_val[i].token, sizeof(array_val[i].token) - 1, "%lu", (unsigned long)value->type.Unsigned_Int);
+        break;
+
+      case BACNET_APPLICATION_TAG_OBJECT_ID:
+        snprintf(array_val[i].token, sizeof(array_val[i].token) - 1, "[\"%s\", \"%lu\"]",
+          bactext_object_type_name(value->type.Object_Id.type), (unsigned long)value->type.Object_Id.instance);
+        break;
+
+      default:
+        sprintf(array_val[i].token, "\"Unsupported Value Format\"");
+        break;
+    }
+  }
+
+  buf_len = sizeof(single_token_cb) * array_val_len;
+  buf = malloc(buf_len);
+  sprintf(buf, "[");
+  for(i = 0; i < array_val_len; i++) {
+    snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "%s%s",
+      (i == 0) ? "" : ",", array_val[i].token);
+  }
+  snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "]");
+  free(array_val);
+  *out = buf;
+}
+
+
 /*
  * Encode object list value results.
  */
@@ -1559,6 +1653,11 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
           object_value.array_index = data->array_index;
           object_value.value = &value;
           bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
+          if (!strcmp(tmp, "inactive")) {
+            strcpy(tmp, "0");
+          } else if (!strcmp(tmp, "active")) {
+            strcpy(tmp, "1");
+          }
           break;
       }
       break;
@@ -1649,6 +1748,130 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
   }
 
   snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "}");
+
+  return(0);
+}
+
+
+/*
+ * Encode value payload for bacnet client read command.
+ */
+int encode_read_multiple_value_result(BACNET_READ_ACCESS_DATA *rpm_data, llist_obj_data *obj_data)
+{
+  BACNET_OBJECT_PROPERTY_VALUE object_value = {0};
+  BACNET_APPLICATION_DATA_VALUE *value = NULL;
+  BACNET_PROPERTY_REFERENCE *listOfProperties = NULL;
+  char tmp_val[MAX_CMD_STR_OPT_VALUE_LENGTH] = {0};
+  char *blob_value = NULL;
+  int i;
+
+  listOfProperties = rpm_data->listOfProperties;
+  value = listOfProperties->value;
+
+  switch(rpm_data->object_type) {
+    case OBJECT_ANALOG_INPUT:
+    case OBJECT_ANALOG_OUTPUT:
+    case OBJECT_ANALOG_VALUE:
+      switch(listOfProperties->propertyIdentifier) {
+        case PROP_PRIORITY_ARRAY:
+          encode_read_multiple_array_value_result(rpm_data, tmp_val, sizeof(tmp_val) - 1);
+          break;
+
+        default:
+          object_value.object_type = rpm_data->object_type;
+          object_value.object_instance = rpm_data->object_instance;
+          object_value.object_property = listOfProperties->propertyIdentifier;
+          object_value.array_index = listOfProperties->propertyArrayIndex;
+          object_value.value = value;
+          bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+          break;
+      }
+      break;
+
+    case OBJECT_BINARY_INPUT:
+    case OBJECT_BINARY_OUTPUT:
+    case OBJECT_BINARY_VALUE:
+      switch(listOfProperties->propertyIdentifier) {
+        case PROP_PRIORITY_ARRAY:
+          encode_read_multiple_array_value_result(rpm_data, tmp_val, sizeof(tmp_val) - 1);
+          break;
+
+        default:
+          object_value.object_type = rpm_data->object_type;
+          object_value.object_instance = rpm_data->object_instance;
+          object_value.object_property = listOfProperties->propertyIdentifier;
+          object_value.array_index = listOfProperties->propertyArrayIndex;
+          object_value.value = value;
+          bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+          break;
+      }
+      break;
+
+    case OBJECT_DEVICE:
+      switch(listOfProperties->propertyIdentifier) {
+        case PROP_SYSTEM_STATUS:
+          device_status_to_str(value->type.Unsigned_Int, tmp_val, sizeof(tmp_val) - 1);
+          break;
+
+        case PROP_OBJECT_LIST:
+          encode_read_multiple_list_value_result(rpm_data, &blob_value);
+          break;
+
+        default:
+          object_value.object_type = rpm_data->object_type;
+          object_value.object_instance = rpm_data->object_instance;
+          object_value.object_property = listOfProperties->propertyIdentifier;
+          object_value.array_index = listOfProperties->propertyArrayIndex;
+          object_value.value = value;
+          bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+          break;
+      }
+
+      break;
+
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      object_value.object_type = rpm_data->object_type;
+      object_value.object_instance = rpm_data->object_instance;
+      object_value.object_property = listOfProperties->propertyIdentifier;
+      object_value.array_index = listOfProperties->propertyArrayIndex;
+      object_value.value = value;
+      bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+      break;
+
+    default:
+      object_value.object_type = rpm_data->object_type;
+      object_value.object_instance = rpm_data->object_instance;
+      object_value.object_property = listOfProperties->propertyIdentifier;
+      object_value.array_index = listOfProperties->propertyArrayIndex;
+      object_value.value = value;
+      bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+      break;
+  }
+
+  for (i = 0; i < obj_data->rpm_objects_len; i++) {
+    if ((obj_data->rpm_objects[i].object_type == rpm_data->object_type) &&
+      (obj_data->rpm_objects[i].object_instance == rpm_data->object_instance) &&
+      (obj_data->rpm_objects[i].property == listOfProperties->propertyIdentifier) &&
+      (obj_data->rpm_objects[i].index == listOfProperties->propertyArrayIndex)) {
+      switch (listOfProperties->propertyIdentifier) {
+        case PROP_OBJECT_LIST:
+          obj_data->rpm_objects[i].blob_value = NULL;
+          if (blob_value) {
+            obj_data->rpm_objects[i].blob_value = blob_value;
+          }
+          break;
+
+        default:
+          strcpy(obj_data->rpm_objects[i].value, tmp_val);
+          obj_data->rpm_objects[i].blob_value = NULL;
+          break;
+      }
+
+      break;
+    }
+  }
 
   return(0);
 }
@@ -2000,6 +2223,136 @@ int publish_bacnet_client_write_value_result(llist_obj_data *data)
 /*
  * Publish bacnet client write multiple value result.
  */
+int publish_bacnet_client_read_multiple_value_result(llist_obj_data *data)
+{
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+  char topic[512];
+  char *topic_value;
+  int topic_value_len;
+  int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
+  int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
+  int rc, i;
+
+  topic_value_len = (data->rpm_objects_len + 1)* WRITEM_PROP_PUB_LENGTH;
+  topic_value = malloc(topic_value_len);
+  if (topic_value == NULL) {
+    printf("Error allocating memory for write multiple publish.\n");
+    goto EXIT;
+  }
+
+  sprintf(topic, "bacnet/cmd_result/read_multiple_value");
+  sprintf(topic_value, "{ \"deviceInstance\" : \"%u\", \"objects\" : [",
+    data->device_instance);
+
+  for (i = 0; i < data->rpm_objects_len; i++) {
+    snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+      "%s{\"objectType\" : \"%d\", \"objectInstance\" : \"%u\", \"property\" : \"%d\"",
+      (i == 0) ? "" : ",",
+      data->rpm_objects[i].object_type, data->rpm_objects[i].object_instance,
+      data->rpm_objects[i].property);
+    if (data->rpm_objects[i].index >= 0 ) {
+      snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+        ", \"index\" : \"%d\"", data->rpm_objects[i].index);
+    }
+
+    if (data->rpm_objects[i].priority > 0 ) {
+      snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+        ", \"priority\" : \"%d\"", data->rpm_objects[i].priority);
+    }
+
+    if (data->rpm_objects[i].blob_value) {
+      snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+        ", \"value\" : %s}", data->rpm_objects[i].blob_value);
+      free(data->rpm_objects[i].blob_value);
+    } else {
+      if ((data->rpm_objects[i].value[0] == '"') ||
+        (data->rpm_objects[i].value[0] == '[') ||
+        (data->rpm_objects[i].value[0] == '{')) {
+        snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+          ", \"value\" : %s}", data->rpm_objects[i].value);
+      } else {
+        snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+          ", \"value\" : \"%s\"}", data->rpm_objects[i].value);
+      }
+    }
+  }
+
+  snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value), "]");
+
+  if (data->dnet >= 0) {
+    snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+      ", \"dnet\" : \"%d\" ", data->dnet);
+  }
+
+  if (strlen(data->dadr)) {
+    snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+      ", \"dadr\" : \"%s\" ", data->dadr);
+  }
+
+  if (strlen(data->mac)) {
+    snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+      ", \"mac\" : \"%s\" ", data->mac);
+  }
+
+  for (i = 0; i < data->req_tokens_len; i++) {
+    snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+      ", \"%s\" : \"%s\"", data->req_tokens[i].key, data->req_tokens[i].value);
+  }
+
+  snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value), " }");
+
+  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) { 
+    for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
+      }
+
+      mqtt_check_reconnect();
+      sleep(mqtt_retry_interval);
+    }
+
+    if (i >= mqtt_retry_limit) {
+      if (mqtt_debug) {
+        printf("MQTT reconnect limit reached: %d\n", i);
+      }
+
+      goto EXIT;
+    }
+  }
+
+  opts.onSuccess = mqtt_on_send_success;
+  opts.onFailure = mqtt_on_send_failure;
+  opts.context = mqtt_client;
+
+  pubmsg.payload = topic_value;
+  pubmsg.payloadlen = strlen(topic_value);
+  pubmsg.qos = DEFAULT_PUB_QOS;
+  pubmsg.retained = 0;
+  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
+  if (mqtt_debug) {
+    if (rc != MQTTASYNC_SUCCESS) {
+      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
+    } else {
+      printf("MQTT published topic: \"%s\"\n", topic);
+    }
+  }
+
+  free(topic_value);
+
+  EXIT:
+
+  if (data->rpm_objects) {
+    free(data->rpm_objects);
+  }
+
+  return(0);
+}
+
+
+/*
+ * Publish bacnet client write multiple value result.
+ */
 int publish_bacnet_client_write_multiple_value_result(llist_obj_data *data)
 {
   MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
@@ -2066,7 +2419,7 @@ int publish_bacnet_client_write_multiple_value_result(llist_obj_data *data)
 
   snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value), " }");
 
-    if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
+  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
       if (mqtt_debug) {
         printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
@@ -2425,6 +2778,8 @@ int publish_bacnet_client_pics_result(bacnet_client_cmd_opts *opts, char *epics_
   snprintf(&value[strlen(value)], value_len - strlen(value), " }");
   publish_topic_value(topic, value);
 
+  free(value);
+
   return(0);
 }
 
@@ -2463,7 +2818,6 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
     } else {
       if (len < 0) { /* Eg, failed due to no segmentation */
         Error_Detected = true;
-printf("*** Error_Detected in bacnet_client_read_value_handler()\n");
       }
 
       free(rp_data);
@@ -2570,8 +2924,17 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
   BACNET_ADDRESS *src,
   BACNET_CONFIRMED_SERVICE_ACK_DATA *service_data)
 {
-  int len = 0;
   BACNET_READ_ACCESS_DATA *rpm_data;
+  BACNET_READ_ACCESS_DATA *old_rpm_data;
+  BACNET_PROPERTY_REFERENCE *rpm_property;
+  BACNET_PROPERTY_REFERENCE *old_rpm_property;
+  BACNET_APPLICATION_DATA_VALUE *value;
+  BACNET_APPLICATION_DATA_VALUE *old_value;
+  llist_obj_data obj_data;
+  int len = 0;
+
+  printf("- bacnet_client_multiple_ack_handler()\n");
+  printf("-- invoke_id: %d\n", service_data->invoke_id);
 
   if (address_match(&pics_Target_Address, src) &&
     (service_data->invoke_id == pics_Request_Invoke_ID)) {
@@ -2580,6 +2943,7 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
       len = rpm_ack_decode_service_request(
         service_request, service_len, rpm_data);
     }
+
     if (len > 0) {
       memmove(&pics_Read_Property_Multiple_Data.service_data, service_data,
         sizeof(BACNET_CONFIRMED_SERVICE_ACK_DATA));
@@ -2594,6 +2958,51 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
       rpm_data = rpm_data_free(rpm_data);
       free(rpm_data);
     }
+  } else if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
+    printf("-- Read multiple Request with pending reply found!\n");
+    del_bacnet_client_request(service_data->invoke_id);
+    rpm_data = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
+    if (rpm_data) {
+      len = rpm_ack_decode_service_request(
+        service_request, service_len, rpm_data);
+    }
+
+    if (len > 0) {
+      while (rpm_data) {
+        if (mqtt_debug) {
+          rpm_ack_print_data(rpm_data);
+        }
+
+        encode_read_multiple_value_result(rpm_data, &obj_data);
+
+        rpm_data = rpm_data_free(rpm_data);
+      }
+    } else {
+      fprintf(stderr, "RPM Ack Malformed! Freeing memory...\n");
+      while (rpm_data) {
+        rpm_property = rpm_data->listOfProperties;
+        while (rpm_property) {
+          value = rpm_property->value;
+          while (value) {
+            old_value = value;
+            value = value->next;
+            free(old_value);
+          }
+
+          old_rpm_property = rpm_property;
+          rpm_property = rpm_property->next;
+          free(old_rpm_property);
+        }
+
+        old_rpm_data = rpm_data;
+        rpm_data = rpm_data->next;
+        free(old_rpm_data);
+      }
+    }
+    publish_bacnet_client_read_multiple_value_result(&obj_data);
+  } else {
+    printf("-- read multiple request with pending reply NOT found! Discarding reply!\n");
+    return;
   }
 }
 
@@ -2638,6 +3047,10 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
       bactext_error_class_name((int)error_class),
       bactext_error_code_name((int)error_code), invoke_id);
   }
+
+  Error_Detected = true;
+  Last_Error_Class = error_class;
+  Last_Error_Code = error_code;
 
   if (is_request_list_locked()) {
     return;
@@ -2744,8 +3157,9 @@ void init_bacnet_client_service_handlers(void)
     SERVICE_CONFIRMED_WRITE_PROPERTY, bacnet_client_write_value_handler);
   apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_WHO_IS, handler_who_is);
   apdu_set_unconfirmed_handler(SERVICE_UNCONFIRMED_I_AM, bacnet_client_whois_handler);
-  apdu_set_confirmed_ack_handler(
-    SERVICE_CONFIRMED_READ_PROP_MULTIPLE, bacnet_client_multiple_ack_handler);
+
+  apdu_set_confirmed_ack_handler(SERVICE_CONFIRMED_READ_PROP_MULTIPLE,
+    bacnet_client_multiple_ack_handler);
   apdu_set_confirmed_simple_ack_handler(SERVICE_CONFIRMED_WRITE_PROP_MULTIPLE,
     bacnet_client_write_multiple_ack_handler);
 
@@ -3362,6 +3776,11 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
   char err_msg[1024];
   int request_invoke_id;
 
+  if (opts->rpm_objects_len > 0) {
+    process_bacnet_client_read_multiple_value_command(opts);
+    return(0);
+  }
+
   if (opts->device_instance < 0 || opts->object_type < 0 || opts->object_instance < 0 ||
     opts->property < 0) {
     sprintf(err_msg, "Empty read value device_instance/object_type/object_instance/property: [%d/%d/%d/%d]",
@@ -3475,6 +3894,155 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
       npdu_handler(&src, &Rx_Buf[0], pdu_len);
     }
   // }
+
+  return(0);
+}
+
+
+/*
+ * Process Bacnet client read multiple value command.
+ */
+int process_bacnet_client_read_multiple_value_command (bacnet_client_cmd_opts *opts)
+{
+  BACNET_READ_ACCESS_DATA *rad;
+  BACNET_READ_ACCESS_DATA *rpm_object;
+  BACNET_READ_ACCESS_DATA *old_rpm_object;
+  BACNET_PROPERTY_REFERENCE *rpm_property;
+  BACNET_PROPERTY_REFERENCE *old_rpm_property;
+  uint8_t buffer[MAX_MPDU] = { 0 };
+  uint8_t Rx_Buf[MAX_MPDU] = { 0 };
+  BACNET_ADDRESS src = { 0 };
+  BACNET_MAC_ADDRESS mac = { 0 };
+  BACNET_MAC_ADDRESS dadr = { 0 };
+  BACNET_ADDRESS dest = { 0 };
+  int dnet = -1;
+  llist_obj_data obj_data = { 0 };
+  bool specific_address = false;
+  unsigned timeout = 100;
+  uint16_t pdu_len = 0;
+  char err_msg[1024];
+  int i, request_invoke_id;
+
+  if (opts->device_instance < 0) {
+    sprintf(err_msg, "Empty read multiple value device_instance: [%d]",
+      opts->device_instance);
+    if (mqtt_debug) {
+      printf("%s\n", err_msg);
+    }
+
+    mqtt_publish_command_error(err_msg, opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+    return(1);
+  }
+
+  if (strlen(opts->mac)) {
+    if (address_mac_from_ascii(&mac, opts->mac)) {
+      specific_address = true;
+    }
+  }
+
+  if (strlen(opts->dadr)) {
+    if (address_mac_from_ascii(&dadr, opts->dadr)) {
+      specific_address = true;
+    }
+  }
+
+  if (opts->dnet >= 0) {
+    dnet = opts->dnet;
+    if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+      specific_address = true;
+    }
+  }
+
+  if (specific_address) {
+    if (dadr.len && mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      memcpy(&dest.adr[0], &dadr.adr[0], dadr.len);
+      dest.len = dadr.len;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+    } else if (mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      dest.len = 0;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = 0;
+      }
+    } else {
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+      dest.mac_len = 0;
+      dest.len = 0;
+    }
+
+    address_add(opts->device_instance, MAX_APDU, &dest);
+  }
+
+  obj_data.device_instance = opts->device_instance;
+  obj_data.dnet = opts->dnet;
+  if (strlen(opts->dadr) > 0) {
+    strncpy(obj_data.dadr, opts->dadr, sizeof(obj_data.dadr) - 1);
+  }
+  strncpy(obj_data.mac, opts->mac, sizeof(obj_data.mac) - 1);
+  obj_data.rpm_objects_len = opts->rpm_objects_len;
+  obj_data.rpm_objects = malloc(opts->rpm_objects_len * sizeof(rpm_object_cb));
+  memcpy(obj_data.rpm_objects, opts->rpm_objects, (opts->rpm_objects_len * sizeof(rpm_object_cb)));
+
+  rad = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
+  rpm_object = rad;
+  for (i = 0; i < opts->rpm_objects_len; i++) {
+    rpm_object->object_type = opts->rpm_objects[i].object_type;
+    rpm_object->object_instance = opts->rpm_objects[i].object_instance;
+    rpm_property = calloc(1, sizeof(BACNET_PROPERTY_REFERENCE));
+    rpm_object->listOfProperties = rpm_property;
+    rpm_property->propertyIdentifier = opts->rpm_objects[i].property;
+    if (opts->rpm_objects[i].index > 0) {
+      rpm_property->propertyArrayIndex = opts->rpm_objects[i].index;
+    } else {
+      rpm_property->propertyArrayIndex = BACNET_ARRAY_ALL;
+    }
+
+    rpm_property->next = NULL;
+
+    if ((i+1) < opts->rpm_objects_len) {
+      rpm_object->next = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
+      rpm_object = rpm_object->next;
+    }
+  }
+
+  request_invoke_id = Send_Read_Property_Multiple_Request(
+    &buffer[0], sizeof(buffer), opts->device_instance, rad);
+
+  printf("read multiple request_invoke_id: %d\n", request_invoke_id);
+
+  add_bacnet_client_request(request_invoke_id, &obj_data);
+
+  pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+  if (pdu_len) {
+    npdu_handler(&src, &Rx_Buf[0], pdu_len);
+  }
+
+  rpm_object = rad;
+  old_rpm_object = rpm_object;
+  while (rpm_object) {
+    rpm_property = rpm_object->listOfProperties;
+    while (rpm_property) {
+      old_rpm_property = rpm_property;
+      rpm_property = rpm_property->next;
+      free(old_rpm_property);
+    }
+    old_rpm_object = rpm_object;
+    rpm_object = rpm_object->next;
+    free(old_rpm_object);
+  }
 
   return(0);
 }
@@ -4760,7 +5328,7 @@ int mqtt_connect_to_broker(void)
   MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
   int rc;
 
-  conn_opts.keepAliveInterval = 30;
+  conn_opts.keepAliveInterval = 180;
   conn_opts.cleansession = 1;
   conn_opts.context = mqtt_client;
   conn_opts.onSuccess = mqtt_on_connect;
@@ -5447,14 +6015,14 @@ int mqtt_client_init(void)
     return(1);
   }
 
-  if (mqtt_connect_to_broker()) {
-    return(1);
-  }
-
   init_bacnet_client_request_list();
   init_bacnet_client_whois_list();
   init_request_tokens();
   init_bacnet_client_pics_list();
+
+  if (mqtt_connect_to_broker()) {
+    return(1);
+  }
 
   return(0);
 }
@@ -7627,6 +8195,7 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
         (uint16_t)((current_seconds - last_seconds) * 1000));
     }
 
+printf("- main myState: %d\n", myState);
     switch (myState) {
       case INITIAL_BINDING:
         pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
@@ -7919,6 +8488,7 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
          * object */
         do {
           Object_List_Index++;
+printf("- Object_List_Index: %d\n", Object_List_Index);
           if (Object_List_Index < Keylist_Count(Object_List)) {
             nextKey = Keylist_Key(Object_List, Object_List_Index);
             myObject.type = KEY_DECODE_TYPE(nextKey);
@@ -7981,6 +8551,10 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
 
   } while (myObject.type < MAX_BACNET_OBJECT_TYPE);
 
+  if (Error_Count > 0) {
+    fprintf(stdout, "\r-- Found %d Errors\n", Error_Count);
+  }
+
   /* Closing brace for all Objects, if we got any, and closing footer  */
   if (myState != INITIAL_BINDING) {
     printf("} \n");
@@ -8009,6 +8583,7 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
     ret = read(JsonFileFd, json_file_buff, json_file_len);
 
     publish_bacnet_client_pics_result(opts, json_file_buff);
+    free(json_file_buff);
   }
 
   /* Close json output file */

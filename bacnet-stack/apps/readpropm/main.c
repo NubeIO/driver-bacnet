@@ -300,6 +300,7 @@ int main(int argc, char *argv[])
     int scan_count = 0;
     int argi = 0;
     char *filename = NULL;
+    char *pEnv;
 
     filename = filename_remove_path(argv[0]);
     for (argi = 1; argi < argc; argi++) {
@@ -428,6 +429,21 @@ int main(int argc, char *argv[])
     /* configure the timeout values */
     last_seconds = time(NULL);
     timeout_seconds = (apdu_timeout() / 1000) * apdu_retries();
+
+    /* get mac from env */
+    pEnv = getenv("MAC");
+    if (pEnv) {
+      BACNET_MAC_ADDRESS mac = {0};
+      if (address_mac_from_ascii(&mac, pEnv)) {
+        memcpy(&Target_Address.mac[0], &mac.adr[0], mac.len);
+        Target_Address.mac_len = mac.len;
+        Target_Address.len = 0;
+        Target_Address.net = 0;
+        printf("Using MAC: %s for %d\n", pEnv, Target_Device_Object_Instance);
+        address_add(Target_Device_Object_Instance, MAX_APDU, &Target_Address);
+      }
+    }
+
     /* try to bind with the device */
     found = address_bind_request(
         Target_Device_Object_Instance, &max_apdu, &Target_Address);
