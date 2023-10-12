@@ -29,6 +29,7 @@
 #include <signal.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include "bacnet/config.h"
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
@@ -352,6 +353,8 @@ int main(int argc, char *argv[])
 
     /* loop forever */
     for (; running ;) {
+        // printf("- mqtt msg queue length: %d\n", mqtt_msg_length());
+        // sleep(1);
         /* mqtt broker */
         if (yaml_config_mqtt_connect_retry()) {
           mqtt_check_reconnect();
@@ -414,6 +417,8 @@ int main(int argc, char *argv[])
                 sweep_bacnet_client_whois_requests();
             }
         }
+
+        mqtt_msg_pop_and_process();
     }
 
     clean_up();

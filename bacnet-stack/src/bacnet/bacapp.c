@@ -1115,7 +1115,7 @@ int bacapp_snprintf_value(
                 if (!append_str(&p_str, &rem_str_len, "\"")) {
                     break;
                 }
-                #ifdef __STDC_ISO_10646__
+                #ifdef __STDC_ISO_10646__DISABLED_FOR_NOW
                 if (characterstring_encoding(&value->type.Character_String) ==
                     CHARACTER_UTF8) {
                     while (len > 0) {
@@ -1144,6 +1144,8 @@ int bacapp_snprintf_value(
                             len = 0;
                         }
                     }
+
+                    i = len;
                 } else
                 #endif
                 {
@@ -1540,7 +1542,7 @@ int bacapp_snprintf_value2(
                 if (!append_str(&p_str, &rem_str_len, "\"")) {
                     break;
                 }
-                #ifdef __STDC_ISO_10646__
+                #ifdef __STDC_ISO_10646__DISABLED_FOR_NOW
                 if (characterstring_encoding(&value->type.Character_String) ==
                     CHARACTER_UTF8) {
                     while (len > 0) {
@@ -1890,7 +1892,7 @@ bool bacapp_print_value(
 {
     char *str;
     bool retval = false;
-    size_t str_len = 32;
+    size_t str_len = 128;
     int status;
 
     while (true) {

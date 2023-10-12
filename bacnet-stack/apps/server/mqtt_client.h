@@ -187,6 +187,16 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
 void sweep_bacnet_client_aged_requests(void);
 void sweep_bacnet_client_whois_requests(void);
 
+int mqtt_lock(void);
+int mqtt_unlock(void);
+
+extern int pics_request_locked;
+
+void mqtt_msg_queue_init(void);
+void mqtt_msg_queue_shutdown(void);
+int mqtt_msg_length(void);
+int mqtt_msg_pop_and_process(void);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
