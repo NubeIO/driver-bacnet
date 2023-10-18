@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <assert.h>
 
+#include <pthread.h>
+
 #include "bacnet/indtext.h"
 #include "bacnet/bacenum.h"
 #include "bacnet/basic/object/device.h"
@@ -341,8 +343,136 @@ int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end);
 void StripDoubleQuotes(char *str);
 void StripLastDoubleQuote(char *str);
 
+/* MQTT sub-system lock */
+static pthread_mutex_t mqtt_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mqtt_msg_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /* crude request list locking mechanism */
 static int request_list_locked = false;
+int pics_request_locked = false;
+
+
+#define MQTT_MSG_CMD            1
+#define MQTT_MSG_UNKNOWN        10
+
+typedef struct _mqtt_msg_cb {
+  int type;
+  char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH];
+  int topic_tokens_length;
+  char topic_value[MAX_TOPIC_VALUE_LENGTH];
+  bacnet_client_cmd_opts cmd_opts;
+} mqtt_msg_cb;
+
+typedef struct _mqtt_msg_queue_cb {
+  mqtt_msg_cb *mqtt_msg;
+  struct _mqtt_msg_queue_cb *next;
+} mqtt_msg_queue_cb;
+
+int mqtt_msg_queue_lock(void);
+int mqtt_msg_queue_unlock(void);
+int mqtt_msg_push(mqtt_msg_cb *msg);
+mqtt_msg_cb *mqtt_msg_pop(void);
+
+static mqtt_msg_queue_cb *mqtt_msg_head = NULL;
+static mqtt_msg_queue_cb *mqtt_msg_tail = NULL;
+
+
+/*
+ * Initialize mqtt message queue.
+ */
+void mqtt_msg_queue_init(void)
+{
+  mqtt_msg_head = mqtt_msg_tail = NULL;
+}
+
+
+/*
+ * Shutdown mqtt message queue.
+ */
+void mqtt_msg_queue_shutdown(void)
+{
+  mqtt_msg_queue_cb *tmp, *ptr = mqtt_msg_head;
+
+  while (ptr != NULL) {
+    tmp = ptr;
+    ptr = ptr->next;
+    free(tmp);
+  }
+}
+
+
+/*
+ * Push mqtt message.
+ */
+int mqtt_msg_push(mqtt_msg_cb *msg)
+{
+  mqtt_msg_queue_cb *entry;
+
+  entry = malloc(sizeof(mqtt_msg_queue_cb));
+  if (!entry) {
+    fprintf(stderr, "Failed to allocate memory for mqtt_msg_queue_cb.");
+    return(1);
+  }
+
+  mqtt_msg_queue_lock();
+
+  entry->mqtt_msg = msg;
+  entry->next = NULL;
+
+  if (!mqtt_msg_head) {
+    mqtt_msg_head = mqtt_msg_tail = entry;
+  } else {
+    mqtt_msg_tail->next = entry;
+    mqtt_msg_tail = entry;
+  }
+
+  mqtt_msg_queue_unlock();
+
+  return(0);
+}
+
+
+/*
+ * Pop mqtt message.
+ */
+mqtt_msg_cb *mqtt_msg_pop(void)
+{
+  mqtt_msg_queue_cb *entry;
+  mqtt_msg_cb *msg = NULL;
+
+  mqtt_msg_queue_lock();
+
+  entry = mqtt_msg_head;
+
+  if (entry) {
+    msg = entry->mqtt_msg;
+    mqtt_msg_head = entry->next;
+    free(entry);
+    if (!mqtt_msg_head) {
+      mqtt_msg_tail = mqtt_msg_head;
+    }
+  }
+
+  mqtt_msg_queue_unlock();
+
+  return(msg);
+}
+
+
+/*
+ * Count length of mqtt message queue.
+ */
+int mqtt_msg_length(void)
+{
+  mqtt_msg_queue_cb *ptr;
+  int i = 0;
+
+  mqtt_msg_queue_lock();
+  for (i = 0, ptr = mqtt_msg_head; ptr != NULL; i++, ptr = ptr->next);
+  mqtt_msg_queue_unlock();
+
+  return(i);
+}
 
 
 /*
@@ -1444,7 +1574,7 @@ void encode_read_multiple_list_value_result(BACNET_READ_ACCESS_DATA *rpm_data, c
   listOfProperties = rpm_data->listOfProperties;
   for (array_val_len = 0, value = listOfProperties->value; value != NULL; array_val_len++, value = value->next);
 
-  array_val = malloc(sizeof(single_token_cb) * array_val_len);
+  array_val = calloc(1, sizeof(single_token_cb) * array_val_len);
   value = listOfProperties->value;
 
   for (i = 0, value = listOfProperties->value; value != NULL && (i < array_val_len); i++, value = value->next) {
@@ -1465,7 +1595,7 @@ void encode_read_multiple_list_value_result(BACNET_READ_ACCESS_DATA *rpm_data, c
   }
 
   buf_len = sizeof(single_token_cb) * array_val_len;
-  buf = malloc(buf_len);
+  buf = calloc(1, buf_len);
   sprintf(buf, "[");
   for(i = 0; i < array_val_len; i++) {
     snprintf(&buf[strlen(buf)], buf_len - strlen(buf), "%s%s",
@@ -2365,7 +2495,7 @@ int publish_bacnet_client_write_multiple_value_result(llist_obj_data *data)
   int rc, i;
 
   topic_value_len = (data->rpm_objects_len + 1)* WRITEM_PROP_PUB_LENGTH;
-  topic_value = malloc(topic_value_len);
+  topic_value = calloc(1, topic_value_len);
   if (topic_value == NULL) {
     printf("Error allocating memory for write multiple publish.\n");
     goto EXIT;
@@ -2745,7 +2875,7 @@ int publish_bacnet_client_pics_result(bacnet_client_cmd_opts *opts, char *epics_
   int value_len = strlen(epics_json) + 1000;
   int i;
 
-  value = malloc(value_len);
+  value = calloc(1, value_len);
   if (value == NULL) {
     fprintf(stderr, "Error: Failed to allocate memory for PICs publish message!\n");
     return(0);
@@ -2776,6 +2906,7 @@ int publish_bacnet_client_pics_result(bacnet_client_cmd_opts *opts, char *epics_
   }
 
   snprintf(&value[strlen(value)], value_len - strlen(value), " }");
+
   publish_topic_value(topic, value);
 
   free(value);
@@ -2798,7 +2929,7 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
   int len = 0;
 
   printf("- bacnet_client_read_value_handler() => %d\n", getpid());
-  printf("-- service_data->invoke_id: %d\n", service_data->invoke_id);
+  printf("-- service_data->invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
 
   if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
     printf("-- Request with pending reply found!\n");
@@ -2934,10 +3065,11 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
   int len = 0;
 
   printf("- bacnet_client_multiple_ack_handler()\n");
-  printf("-- invoke_id: %d\n", service_data->invoke_id);
+  printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
 
   if (address_match(&pics_Target_Address, src) &&
     (service_data->invoke_id == pics_Request_Invoke_ID)) {
+    printf("-- Read PICS request start!\n");
     rpm_data = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
     if (rpm_data) {
       len = rpm_ack_decode_service_request(
@@ -2958,6 +3090,7 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
       rpm_data = rpm_data_free(rpm_data);
       free(rpm_data);
     }
+    printf("-- Read PICS request end!\n");
   } else if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
     printf("-- Read multiple Request with pending reply found!\n");
     del_bacnet_client_request(service_data->invoke_id);
@@ -3100,6 +3233,8 @@ static void bacnet_client_abort_handler(
   BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t abort_reason, bool server)
 {
   (void)server;
+printf("- bacnet_client_abort_handler()\n");
+printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", invoke_id, pics_Request_Invoke_ID);
   if (address_match(&pics_Target_Address, src) &&
     (invoke_id == pics_Request_Invoke_ID)) {
 #if PRINT_ERRORS
@@ -3124,6 +3259,8 @@ static void bacnet_client_abort_handler(
 static void bacnet_client_reject_handler(
   BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t reject_reason)
 {
+printf("- bacnet_client_reject_handler()\n");
+printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", invoke_id, pics_Request_Invoke_ID);
   if (address_match(&pics_Target_Address, src) &&
     (invoke_id == pics_Request_Invoke_ID)) {
 #if PRINT_ERRORS
@@ -5070,7 +5207,6 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     } else if (!strcmp(key, "objects")) {
       rpm_object_cb *rpm_cb;
       array_len = json_object_array_length(json_field);
-printf("- array_len: %d\n", array_len);
       cmd_opts->rpm_objects = malloc((sizeof(rpm_object_cb)) * array_len);
       cmd_opts->rpm_objects_len = array_len;
       for (ii = 0; ii < array_len; ii++) {
@@ -5130,11 +5266,112 @@ printf("- array_len: %d\n", array_len);
   return(0);
 }
 
- 
+
 /*
  * MQTT message arrived callback.
  */
 int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_message *message)
+{
+  mqtt_msg_cb *mqtt_msg = NULL;
+  bacnet_client_cmd_opts *cmd_opts = NULL;
+  json_object *json_root = NULL;
+  json_object *json_field;
+  char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH];
+  char prop_value[MAX_JSON_VALUE_LENGTH] = {0};
+  char uuid_value[MAX_JSON_VALUE_LENGTH] = {0};
+  char *ptr;
+  int n_topic_tokens;
+  int address;
+  int rc = 1;
+
+  mqtt_msg = malloc(sizeof(mqtt_msg_cb));
+  if (!mqtt_msg) {
+    printf("Failed to allocation memory for mqtt_msg_cb!\n");
+    goto EXIT;
+  }
+
+  cmd_opts = &mqtt_msg->cmd_opts;
+  memcpy(cmd_opts, &init_bacnet_client_cmd_opts, sizeof(*cmd_opts));
+
+  memset(&cmd_opts->prio_array[0], 0, sizeof(cmd_opts->prio_array));
+  cmd_opts->rpm_objects_len = 0;
+  cmd_opts->rpm_objects = NULL;
+  memset(mqtt_msg->topic_value, 0, sizeof(mqtt_msg->topic_value));
+  strncpy(mqtt_msg->topic_value, (char*)message->payload,
+    (message->payloadlen > sizeof(mqtt_msg->topic_value)) ? sizeof(mqtt_msg->topic_value) -1 : message->payloadlen);
+
+  if (mqtt_debug) {
+     printf("MQTT message arrived: => %d\n", getpid());
+     printf("- version: [%d]\n", message->struct_version);
+     printf("- payloadLen: [%d]\n", message->payloadlen);
+     printf("- topic  : [%s]\n", topic);
+     printf("- value  : [%s]\n", mqtt_msg->topic_value);
+  }
+
+  memset(topic_tokens, 0, sizeof(topic_tokens));
+  n_topic_tokens = tokenize_topic(topic, topic_tokens);
+  if (n_topic_tokens == 0) {
+    goto EXIT;
+  }
+
+  if (mqtt_debug) {
+    dump_topic_tokens(n_topic_tokens, topic_tokens);
+  }
+
+  json_root = json_tokener_parse(mqtt_msg->topic_value);
+  if (json_root == NULL) {
+    if (mqtt_debug) {
+      printf("Failed to parse topic value. Must be a JSON formatted string!\n");
+    }
+
+    goto EXIT;
+  }
+
+  if (mqtt_debug) {
+    printf("The json string:\n\n%s\n\n", json_object_to_json_string(json_root));
+  }
+
+  if (extract_json_fields_to_cmd_opts(json_root,
+    cmd_opts)) {
+    if (mqtt_debug) {
+      printf("Error extracting command options!\n");
+    }
+
+    goto EXIT;
+  }
+
+  memcpy(mqtt_msg->topic_tokens, topic_tokens, sizeof(mqtt_msg->topic_tokens));
+  mqtt_msg->topic_tokens_length = n_topic_tokens;
+
+  rc = mqtt_msg_push(mqtt_msg);
+
+  EXIT:
+
+  if (rc) {
+    if (mqtt_msg) {
+      if (cmd_opts && cmd_opts->rpm_objects) {
+        free(cmd_opts->rpm_objects);
+      }
+
+      free(mqtt_msg);
+    }
+  }
+      
+  if (json_root) {
+    json_object_put(json_root);
+  } 
+
+  MQTTAsync_freeMessage(&message);
+  MQTTAsync_free(topic);
+
+  return(1);
+}
+
+ 
+/*
+ * MQTT message arrived callback.
+ */
+int mqtt_msg_arrived2(void *context, char *topic, int topic_len, MQTTAsync_message *message)
 {
   bacnet_client_cmd_opts cmd_opts = init_bacnet_client_cmd_opts;
   json_object *json_root = NULL;
@@ -5328,7 +5565,7 @@ int mqtt_connect_to_broker(void)
   MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
   int rc;
 
-  conn_opts.keepAliveInterval = 180;
+  conn_opts.keepAliveInterval = 600;
   conn_opts.cleansession = 1;
   conn_opts.context = mqtt_client;
   conn_opts.onSuccess = mqtt_on_connect;
@@ -5942,6 +6179,7 @@ int del_bacnet_client_pics(uint8_t invoke_id)
  */
 int mqtt_client_init(void)
 {
+  pthread_mutexattr_t mutex_attr;
   MQTTAsync_createOptions createOpts = MQTTAsync_createOptions_initializer;
   char mqtt_broker_endpoint[100];
   char buf[100];
@@ -6019,6 +6257,22 @@ int mqtt_client_init(void)
   init_bacnet_client_whois_list();
   init_request_tokens();
   init_bacnet_client_pics_list();
+
+  pthread_mutexattr_init(&mutex_attr);
+  rc = pthread_mutex_init(&mqtt_mutex, &mutex_attr);
+  if (rc != 0) {
+    printf("Error creating MQTT mutex!\n");
+    return(1);
+  }
+
+  pthread_mutexattr_init(&mutex_attr);
+  rc = pthread_mutex_init(&mqtt_msg_queue_mutex, &mutex_attr);
+  if (rc != 0) {
+    printf("Error creating MQTT Message Queue mutex!\n");
+    return(1);
+  }
+
+  mqtt_msg_queue_init();
 
   if (mqtt_connect_to_broker()) {
     return(1);
@@ -6225,6 +6479,8 @@ void mqtt_client_shutdown(void)
   shutdown_bacnet_client_request_list();
   shutdown_bacnet_client_whois_list();
   shutdown_bacnet_client_pics_list();
+
+  mqtt_msg_queue_shutdown();
 }
 
 
@@ -6974,7 +7230,7 @@ static void BuildPropRequest(BACNET_READ_ACCESS_DATA *rpm_object)
  *  handling the proprietary property numbers.
  * @param propertyIdentifier [in] The property identifier number.
  */
-static void Print_Property_Identifier(unsigned propertyIdentifier)
+static void PPrint_Property_Identifier(unsigned propertyIdentifier)
 {
     if (propertyIdentifier < 512) {
         fprintf(stdout, "%s", bactext_property_name(propertyIdentifier));
@@ -7042,7 +7298,7 @@ static uint8_t Read_Properties(
       }
     } else {
       fprintf(stdout, "    ");
-      Print_Property_Identifier(prop);
+      PPrint_Property_Identifier(prop);
       fprintf(stdout, ": ");
       array_index = BACNET_ARRAY_ALL;
 
@@ -7963,12 +8219,18 @@ static EPICS_STATES ProcessRPMData(
     bool bHasObjectList = false;
     bool bHasStructuredViewList = false;
     int i = 0;
-    char json_key_buf[128] = {0};
-    char json_value_buf[2048] = {0};
+    int ii = 0;
+    int iii = 0;
+    char json_key_buf[128];
+    char json_value_buf[2048];
+
+    memset(json_key_buf, 0, sizeof(json_key_buf));
+    memset(json_value_buf, 0, sizeof(json_value_buf));
 
     while (rpm_data) {
         rpm_property = rpm_data->listOfProperties;
         while (rpm_property) {
+            ii++;
             /* For the GET_LIST_OF_ALL_RESPONSE case,
              * just keep what property this was */
             if (myState == GET_LIST_OF_ALL_RESPONSE) {
@@ -7989,34 +8251,33 @@ static EPICS_STATES ProcessRPMData(
                 /* Free up the value(s) */
                 value = rpm_property->value;
                 while (value) {
+                    iii++;
                     old_value = value;
                     value = value->next;
                     free(old_value);
-                }   
+                }
             } else if (myState == GET_HEADING_RESPONSE) {
                 Property_Value_List[i++].value = rpm_property->value;
                 /* copy this pointer.
                  * On error, the pointer will be null
                  * We won't free these values; they will free at exit */
             } else {
-                fprintf(stdout, "    ");
-                Print_Property_Identifier(rpm_property->propertyIdentifier);
-                fprintf(stdout, ": ");
+                PPrint_Property_Identifier(rpm_property->propertyIdentifier);
                 PrintReadPropertyData(rpm_data->object_type,
                     rpm_data->object_instance, rpm_property, json_value_buf, sizeof(json_value_buf) - 1);
-                    
+
                 if (WriteResultToJsonFile) {
                     get_property_identifier_name(rpm_property->propertyIdentifier, json_key_buf, sizeof(json_key_buf));
                     StripDoubleQuotes(json_value_buf);
                     WriteKeyValueToJsonFile(json_key_buf, json_value_buf, ((rpm_property->next) ? true : false));
-                    json_value_buf[0] = '\0';
-                    json_key_buf[0] = '\0';
+                    memset(json_value_buf, 0, sizeof(json_value_buf));
+                    memset(json_key_buf, 0, sizeof(json_key_buf));
                 }
-            }   
+            }
             old_rpm_property = rpm_property;
             rpm_property = rpm_property->next;
             free(old_rpm_property);
-        }   
+        }
         old_rpm_data = rpm_data;
         rpm_data = rpm_data->next;
         free(old_rpm_data);
@@ -8110,6 +8371,8 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   char json_value_buf[2048] = {0};
   char *json_file_buff;
 
+  int pics_ctr = 0;
+
   address_init();
 
   Object_List_Length = 0;
@@ -8195,7 +8458,6 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
         (uint16_t)((current_seconds - last_seconds) * 1000));
     }
 
-printf("- main myState: %d\n", myState);
     switch (myState) {
       case INITIAL_BINDING:
         pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
@@ -8433,7 +8695,7 @@ printf("- main myState: %d\n", myState);
                 /* OK, skip this one and try the next property.
                  */
                 fprintf(stdout, "    -- Failed to get ");
-                Print_Property_Identifier(
+                PPrint_Property_Identifier(
                   Property_List[Property_List_Index]);
                 fprintf(stdout, " \n");
                 Error_Count++;
@@ -8488,7 +8750,6 @@ printf("- main myState: %d\n", myState);
          * object */
         do {
           Object_List_Index++;
-printf("- Object_List_Index: %d\n", Object_List_Index);
           if (Object_List_Index < Keylist_Count(Object_List)) {
             nextKey = Keylist_Key(Object_List, Object_List_Index);
             myObject.type = KEY_DECODE_TYPE(nextKey);
@@ -8549,6 +8810,7 @@ printf("- Object_List_Index: %d\n", Object_List_Index);
       }
     }
 
+    pics_ctr++;
   } while (myObject.type < MAX_BACNET_OBJECT_TYPE);
 
   if (Error_Count > 0) {
@@ -8573,9 +8835,10 @@ printf("- Object_List_Index: %d\n", Object_List_Index);
   if (WriteResultToJsonFile) {
     json_file_len = lseek(JsonFileFd, 0, SEEK_END);
     printf("json_file_len: %d\n", json_file_len);
-    json_file_buff = malloc(json_file_len + 1);
+    json_file_buff = calloc(1, json_file_len + 1);
     if (json_file_buff == NULL) {
       fprintf(stderr, "Error: Failed to allocate memory for PICs reply!\n");
+      pics_request_locked = false;
       return(1);
     }
 
@@ -8589,6 +8852,162 @@ printf("- Object_List_Index: %d\n", Object_List_Index);
   /* Close json output file */
   if (WriteResultToJsonFile) {
     CloseJsonFile();
+  }
+
+  pics_request_locked = false;
+
+  return(0);
+}
+
+
+/* Lock MQTT mutex */
+int mqtt_lock(void)
+{
+  int rc;
+
+  rc = pthread_mutex_lock(&mqtt_mutex);
+
+  return(rc);
+}
+
+
+/* Unlock MQTT mutex */
+int mqtt_unlock(void)
+{
+  int rc;
+
+  rc = pthread_mutex_unlock(&mqtt_mutex);
+
+  return(rc);
+}
+
+
+/* Lock MQTT message queue mutex */
+int mqtt_msg_queue_lock(void)
+{
+  int rc;
+
+  rc = pthread_mutex_lock(&mqtt_msg_queue_mutex);
+
+  return(rc);
+}
+
+
+/* Unlock MQTT message queue mutex */
+int mqtt_msg_queue_unlock(void)
+{
+  int rc;
+
+  rc = pthread_mutex_unlock(&mqtt_msg_queue_mutex);
+
+  return(rc);
+}
+
+
+/*
+ * Pop and process MQTT message.
+ */
+int mqtt_msg_pop_and_process(void)
+{
+  mqtt_msg_cb *mqtt_msg = NULL;
+  json_object *json_root = NULL;
+  json_object *json_field;
+  char prop_value[MAX_JSON_VALUE_LENGTH] = {0};
+  char uuid_value[MAX_JSON_VALUE_LENGTH] = {0};
+  char *ptr;
+  int address;
+
+  mqtt_msg = mqtt_msg_pop();
+  if (!mqtt_msg) {
+    goto EXIT;
+  }
+
+  printf("\n** Processing MQTT Message\n");
+  if (mqtt_debug) {
+    dump_topic_tokens(mqtt_msg->topic_tokens_length, mqtt_msg->topic_tokens);
+  }
+
+  if (!strcmp(mqtt_msg->topic_tokens[1], "cmd")) {
+    process_bacnet_client_command(mqtt_msg->topic_tokens, mqtt_msg->topic_tokens_length, &mqtt_msg->cmd_opts);
+  } else {
+    address = strtol(mqtt_msg->topic_tokens[2], &ptr, 10);
+    if (*ptr != '\0' || address < 0) {
+      if (mqtt_debug) {
+        printf("MQTT Invalid Topic Address: [%s]\n", mqtt_msg->topic_tokens[2]);
+      }
+
+      goto EXIT;
+    }
+
+    if (strcasecmp(mqtt_msg->topic_tokens[3], "write")) {
+      if (mqtt_debug) {
+        printf("MQTT Invalid Topic Command: [%s]\n", mqtt_msg->topic_tokens[3]);
+      }
+
+      goto EXIT;
+    }
+
+    json_root = json_tokener_parse(mqtt_msg->topic_value);
+    if (json_root == NULL) {
+      if (mqtt_debug) {
+        printf("Failed to parse topic value. Must be a JSON formatted string!\n");
+      }
+
+      goto EXIT;
+    }
+
+    json_field = json_object_object_get(json_root, "value");
+    if (json_field == NULL) {
+      if (mqtt_debug) {
+        printf("Value not found in JSON string!\n");
+      }
+
+      goto EXIT;
+    }
+
+    strncpy(prop_value, json_object_get_string(json_field), sizeof(prop_value) - 1);
+
+    json_field = json_object_object_get(json_root, "uuid");
+    if (json_field == NULL) {
+      if (mqtt_debug) {
+        printf("UUID not found in JSON string!\n");
+      }
+
+      goto EXIT;
+    }
+
+    strncpy(uuid_value, json_object_get_string(json_field), sizeof(uuid_value) - 1);
+    if (mqtt_debug) {
+      printf("Topic Value/Properties:\n");
+      printf("- value: [%s]\n", prop_value);
+      printf("- uuid : [%s]\n", uuid_value);
+    }
+
+    if (!strcasecmp(mqtt_msg->topic_tokens[1], "ai")) {
+      process_ai_write(address, mqtt_msg->topic_tokens, prop_value, uuid_value);
+    } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "ao")) {
+      process_ao_write(address, mqtt_msg->topic_tokens, prop_value, uuid_value);
+    } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "av")) {
+      process_av_write(address, mqtt_msg->topic_tokens, prop_value, uuid_value);
+    } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "bi")) {
+      process_bi_write(address, mqtt_msg->topic_tokens, prop_value, uuid_value);
+    } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "bo")) {
+      process_bo_write(address, mqtt_msg->topic_tokens, prop_value, uuid_value);
+    } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "bv")) {
+      process_bv_write(address, mqtt_msg->topic_tokens, prop_value, uuid_value);
+    } else {
+      if (mqtt_debug) {
+        printf("MQTT Unknown Topic Object: [%s]\n", mqtt_msg->topic_tokens[1]);
+      }
+
+      goto EXIT;
+    }
+  }
+
+  EXIT:
+
+  if (mqtt_msg) {
+    free(mqtt_msg);
   }
 
   return(0);
