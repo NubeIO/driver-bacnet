@@ -46,7 +46,7 @@ TARGET_BIN = ${TARGET}$(TARGET_EXT)
 
 OBJS += ${SRC:.c=.o} ${MQTT_SRC:.c=.o} ${YAML_CONFIG_SRC:.c=.o}
 
-MQTT_CFLAGS = -g -DMQTT -DMQTT_PUBLISH -I/usr/local/include -I${BACNET_SRC_DIR}/../apps/server
+MQTT_CFLAGS = -DMQTT -DMQTT_PUBLISH -I/usr/local/include -I${BACNET_SRC_DIR}/../apps/server
 # MQTT_LFLAGS = /usr/local/lib/libpaho-mqtt3c.a
 MQTT_LFLAGS = /usr/local/lib/libpaho-mqtt3a.a
 
