@@ -1520,6 +1520,9 @@ int bacapp_snprintf_value2(
 #endif
 #if defined(BACAPP_OCTET_STRING)
             case BACNET_APPLICATION_TAG_OCTET_STRING:
+                if (!append_str(&p_str, &rem_str_len, "\"")) {
+                    break;
+                }
                 len = octetstring_length(&value->type.Octet_String);
                 octet_str = octetstring_value(&value->type.Octet_String);
                 for (i = 0; i < len; i++) {
@@ -1529,7 +1532,7 @@ int bacapp_snprintf_value2(
 }
                     octet_str++;
                 }
-                if (i == len) {
+                if ((i == len) && append_str(&p_str, &rem_str_len, "\"")) {
                     /* Everything went fine */
                     ret_val = str_len - rem_str_len;
                 }
