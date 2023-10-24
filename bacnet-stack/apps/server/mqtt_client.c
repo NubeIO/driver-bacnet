@@ -54,6 +54,10 @@
 #define WRITEM_PROP_PUB_LENGTH    1024
 #endif
 
+#ifndef EPICS_PAGE_SIZE_DEFAULT
+#define EPICS_PAGE_SIZE_DEFAULT   100
+#endif
+
 typedef enum {
         /** Initial state to establish a binding with the target device. */
     INITIAL_BINDING,
@@ -338,6 +342,10 @@ static bool WriteResultToJsonFile = true;
 static char JsonFilePath[251] = {0};
 static int JsonFileFd = -1;
 static bool FirstJsonItem = true;
+static bool epics_pagination = true;
+static bool epics_page_number = 0;
+static bool epics_page_size = EPICS_PAGE_SIZE_DEFAULT;
+static uint32_t total_device_objects;
 int WriteKeyValueToJsonFile(char *key, char *value, int comma_end);
 int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end);
 void StripDoubleQuotes(char *str);
@@ -5132,6 +5140,8 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     "priorityArray",
     "device_per_publish",
     "objects",
+    "page_number",
+    "page_size",
     NULL
   };
 
@@ -5240,6 +5250,12 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
           json_object_iter_next(&it);
         }
       }
+    } else if (!strcmp(key, "page_number")) {
+      strncpy(value, json_object_get_string(json_field), sizeof(value) - 1);
+      cmd_opts->page_number = atoi(value);
+    } else if (!strcmp(key, "page_size")) {
+      strncpy(value, json_object_get_string(json_field), sizeof(value) - 1);
+      cmd_opts->page_size = atoi(value);
     }
   }
 
@@ -8246,6 +8262,10 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   Error_Count = 0;
   Has_RPM = true;
 
+  epics_page_number = opts->page_number;
+  epics_page_size = (opts->page_size > 0) ? opts->page_size : EPICS_PAGE_SIZE_DEFAULT;
+  total_device_objects = 0;
+
   ret = get_pics_target_address(opts);
   if (ret) {
     if (mqtt_debug) {
@@ -8579,6 +8599,7 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
 
       case NEXT_OBJECT:
         if (myObject.type == OBJECT_DEVICE) {
+          total_device_objects = Keylist_Count(Object_List);
           printf("  -- Found %d Objects \n", Keylist_Count(Object_List));
           Object_List_Index = -1; /* start over (will be incr to 0) */
           if (ShowDeviceObjectOnly) {
@@ -8676,6 +8697,10 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
     if (WriteResultToJsonFile) {
       WriteKeyValueToJsonFile("}", NULL, false);
     }
+  }
+
+  if (epics_pagination) {
+    printf("- Total Device Objects: %d\n", total_device_objects);
   }
 
   /* read the contents of the result and publish */

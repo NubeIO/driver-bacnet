@@ -171,6 +171,8 @@ typedef struct _bacnet_client_cmd_opts {
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
   rpm_object_cb *rpm_objects;
+  int page_number;
+  int page_size;
 } bacnet_client_cmd_opts;
 
 #ifdef __cplusplus
