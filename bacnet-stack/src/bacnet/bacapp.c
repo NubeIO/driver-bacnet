@@ -1044,7 +1044,7 @@ int bacapp_snprintf_value(
 #if defined(BACAPP_OCTET_STRING)
     uint8_t *octet_str;
 #endif
-#ifdef __STDC_ISO_10646__
+#ifdef __STDC_ISO_10646__DISABLED_FOR_NOW
     /* Wide character (decoded from multi-byte character). */
     wchar_t wc;
     /* Wide character length in bytes. */
@@ -1471,7 +1471,7 @@ int bacapp_snprintf_value2(
 #if defined(BACAPP_OCTET_STRING)
     uint8_t *octet_str;
 #endif
-#ifdef __STDC_ISO_10646__
+#ifdef __STDC_ISO_10646__DISABLED_FOR_NOW
     /* Wide character (decoded from multi-byte character). */
     wchar_t wc;
     /* Wide character length in bytes. */
