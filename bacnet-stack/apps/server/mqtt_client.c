@@ -344,7 +344,7 @@ static int JsonFileFd = -1;
 static bool FirstJsonItem = true;
 static bool epics_pagination = true;
 static bool epics_page_number = 0;
-static bool epics_page_size = EPICS_PAGE_SIZE_DEFAULT;
+static int epics_page_size = EPICS_PAGE_SIZE_DEFAULT;
 static uint32_t total_device_objects;
 int WriteKeyValueToJsonFile(char *key, char *value, int comma_end);
 int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end);
@@ -989,7 +989,6 @@ int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
   /* process */
   if (pdu_len) {
     npdu_handler(&src, &Rx_Buf[0], pdu_len);
-        
   }
   return(0);
 }
@@ -5718,6 +5717,10 @@ void sweep_bacnet_client_aged_requests(void)
         ptr = ptr->next;
       }
 
+      if (tmp->data.obj_data.rpm_objects) {
+        free(tmp->data.obj_data.rpm_objects);
+      }
+
       free(tmp);
       continue;
     }
@@ -5894,6 +5897,7 @@ void sweep_bacnet_client_whois_requests(void)
 {
   llist_whois_cb *tmp, *prev = NULL;
   llist_whois_cb *ptr = bc_whois_head;
+  address_entry_cb *ae_ptr, *ae_tmp;
   time_t cur_tt = time(NULL);
 
   while (ptr != NULL) {
@@ -5917,6 +5921,13 @@ void sweep_bacnet_client_whois_requests(void)
         publish_bacnet_client_whois_result_per_device(tmp);
       } else {
         publish_bacnet_client_whois_result(tmp);
+      }
+
+      ae_ptr = tmp->data.address_table.first;
+      while (ae_ptr) {
+        ae_tmp = ae_ptr;
+        ae_ptr = ae_ptr->next;
+        free(ae_tmp);
       }
 
       free(tmp);
@@ -8879,6 +8890,10 @@ int mqtt_msg_pop_and_process(void)
   EXIT:
 
   if (mqtt_msg) {
+    if (mqtt_msg->cmd_opts.rpm_objects) {
+      free(mqtt_msg->cmd_opts.rpm_objects);
+    }
+
     free(mqtt_msg);
   }
 
