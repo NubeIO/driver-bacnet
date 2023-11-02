@@ -1631,9 +1631,9 @@ int bacapp_snprintf_value2(
                         char_str = (char *)bactext_property_name_default(
                             value->type.Enumerated, NULL);
                         if (char_str) {
-                            ret_val = snprintf(str, str_len, "%s", char_str);
+                            ret_val = snprintf(str, str_len, "\"%s\"", char_str);
                         } else {
-                            ret_val = snprintf(str, str_len, "%lu",
+                            ret_val = snprintf(str, str_len, "\"%lu\"",
                                 (unsigned long)value->type.Enumerated);
                         }
                         break;
@@ -1877,7 +1877,8 @@ int bacapp_snprintf_value2(
                 break;
 #endif
             default:
-                ret_val = 0;
+                ret_val = snprintf(str, str_len, "\"\"");
+                // ret_val = 0;
                 break;
         }
     }
