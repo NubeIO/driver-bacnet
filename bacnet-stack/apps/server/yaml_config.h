@@ -53,6 +53,8 @@ extern "C" {
 
   char **yaml_config_objects(int *length);
 
+  int is_object_supported(char *obj);
+
   char **yaml_config_properties(int *length);
 
   int yaml_config_bacnet_client_debug(void);
@@ -68,6 +70,8 @@ extern "C" {
   char *yaml_config_bacnet_client_read_program(void);
 
   char *yaml_config_bacnet_client_write_program(void);
+
+  int yaml_config_bacnet_client_filter_objects(void);
 
   int yaml_config_cleanup(void);
 

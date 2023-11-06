@@ -54,6 +54,8 @@
 #define MAX_JSON_KEY_VALUE_PAIR          25
 #define MAX_PRIORITY_ARRAY_LENGTH        16
 
+#define PICS_RETRY_MAX                   3
+
 typedef struct _json_key_value_pair {
   char key[MAX_JSON_KEY_LENGTH];
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
