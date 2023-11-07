@@ -8451,8 +8451,6 @@ static EPICS_STATES ProcessRPMData(
     bool bHasObjectList = false;
     bool bHasStructuredViewList = false;
     int i = 0;
-    int ii = 0;
-    int iii = 0;
     int num_prop_data;
     int json_value_buf_len;
     char json_key_buf[128];
@@ -8470,7 +8468,6 @@ static EPICS_STATES ProcessRPMData(
               return(myState);
             }
 
-            ii++;
             /* For the GET_LIST_OF_ALL_RESPONSE case,
              * just keep what property this was */
             if (myState == GET_LIST_OF_ALL_RESPONSE) {
@@ -8491,7 +8488,6 @@ static EPICS_STATES ProcessRPMData(
                 /* Free up the value(s) */
                 value = rpm_property->value;
                 while (value) {
-                    iii++;
                     old_value = value;
                     value = value->next;
                     free(old_value);
