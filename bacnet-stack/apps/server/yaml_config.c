@@ -37,6 +37,7 @@ struct _bacnet_client {
   char *write_program;
   char **tokens;
   unsigned int n_tokens;
+  char *filter_objects;
 };
 
 /* top level struct for storing the configuration */
@@ -130,6 +131,10 @@ static const cyaml_schema_field_t bacnet_client_fields_schema[] = {
     "tokens", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_client, tokens, n_tokens,
     &string_ptr_schema, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "filter_objects", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_client, filter_objects, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -314,8 +319,8 @@ void load_default_settings(void)
     }
 
     if (!bacnet_config->objects) {
-      char *obj_names[6] = { "ai", "ao", "av", "bi", "bo", "bV" };
-      bacnet_config->n_objects = 6;
+      char *obj_names[10] = { "device", "ai", "ao", "av", "bi", "bo", "bv", "msi", "mso", "msv" };
+      bacnet_config->n_objects = 10;
       bacnet_config->objects = malloc(sizeof(char*) * bacnet_config->n_objects);
       for (int i = 0; i < bacnet_config->n_objects; i++) {
         bacnet_config->objects[i] = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
@@ -356,6 +361,11 @@ void load_default_settings(void)
         bacnet_config->bacnet_client->commands[i] = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
         strcpy(bacnet_config->bacnet_client->commands[i], cmd_names[i]);
       }
+    }
+
+    if (!bacnet_config->bacnet_client->filter_objects) {
+      bacnet_config->bacnet_client->filter_objects = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->bacnet_client->filter_objects, "true");
     }
   }
 }
@@ -504,6 +514,9 @@ void yaml_config_dump(void)
         printf("[%d]: %s\n", i, bacnet_config->bacnet_client->tokens[i]);
       }
     }
+
+    printf("YAML Config: bacnet_client->filter_objects: %s\n", (bacnet_config->bacnet_client->filter_objects) ?
+      bacnet_config->bacnet_client->filter_objects: "null");
   }
 }
 
@@ -716,6 +729,21 @@ char **yaml_config_objects(int *length)
 
 
 /*
+ * Check if object is supported.
+ */
+int is_object_supported(char *obj)
+{
+  for (int i = 0; i < bacnet_config->n_objects; i++) {
+    if (!strcmp(obj, bacnet_config->objects[i])) {
+      return(true);
+    }
+  }
+
+  return(false);
+}
+
+
+/*
  * Get properties.
  */
 char **yaml_config_properties(int *length)
@@ -814,6 +842,16 @@ char *yaml_config_bacnet_client_write_program(void)
   }
   
   return ((bacnet_config->bacnet_client) ? bacnet_config->bacnet_client->write_program : NULL);
+}
+
+
+/*
+ * Get bacnet client filter objects flag.
+ */
+int yaml_config_bacnet_client_filter_objects(void)
+{
+  return ((bacnet_config->bacnet_client && bacnet_config->bacnet_client->filter_objects &&
+    !strcmp(bacnet_config->bacnet_client->filter_objects, "true")) ? true : false);
 }
 
 
