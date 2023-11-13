@@ -8858,6 +8858,16 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
           } else {
             myState = GET_ALL_REQUEST; /* Let's try again */
             pics_retry_ctr++;
+            if (pics_retry_ctr > pics_retry_max) {
+              myObject.type = MAX_BACNET_OBJECT_TYPE;
+              if (FirstJsonItem) {
+                printf("  } \n");
+                if (WriteResultToJsonFile) {
+                  WriteKeyValueToJsonFile("}", NULL, false);
+                }
+              }
+              break;
+            }
           }
         } else if (Error_Detected) {
           /* Don't think we'll ever actually reach this point. */
