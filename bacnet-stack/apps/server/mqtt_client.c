@@ -388,6 +388,11 @@ mqtt_msg_cb *mqtt_msg_pop(void);
 static mqtt_msg_queue_cb *mqtt_msg_head = NULL;
 static mqtt_msg_queue_cb *mqtt_msg_tail = NULL;
 
+static int enable_pics_filter_objects = true;
+
+static int pics_retry_max = PICS_RETRY_MAX;
+static int pics_retry_ctr = 0;
+
 
 /*
  * Initialize mqtt message queue.
@@ -6064,6 +6069,8 @@ int mqtt_client_init(void)
   char *pEnv;
   int rc;
 
+  enable_pics_filter_objects = yaml_config_bacnet_client_filter_objects();
+
 #if defined(YAML_CONFIG)
   mqtt_debug = yaml_config_mqtt_debug();
   if (!mqtt_debug) {
@@ -7862,7 +7869,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
     }
 
     num_prop_data = count_prop_data(rpm_property);
-printf("** num_prop_data: %d\n", num_prop_data);
+// printf("** num_prop_data: %d\n", num_prop_data);
 
     object_value.object_type = object_type;
     object_value.object_instance = object_instance;
@@ -7907,6 +7914,7 @@ printf("** num_prop_data: %d\n", num_prop_data);
         object_value.object_property = rpm_property->propertyIdentifier;
         object_value.array_index = rpm_property->propertyArrayIndex;
         object_value.value = value;
+// printf("** object_value.object_type: %d\n", object_value.object_type);
         switch (rpm_property->propertyIdentifier) {
                 /* These are all arrays, so they open and close with braces */
             case PROP_OBJECT_LIST:
@@ -8642,6 +8650,8 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   epics_page_size = (opts->page_size > 0) ? opts->page_size : EPICS_PAGE_SIZE_DEFAULT;
   total_device_objects = 0;
 
+  pics_retry_ctr = 0;
+
   ret = get_pics_target_address(opts);
   if (ret) {
     if (mqtt_debug) {
@@ -8793,6 +8803,7 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
             pics_Request_Invoke_ID = 0;
           }
           elapsed_seconds = 0;
+          pics_retry_ctr = 0;
         } else  if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
           elapsed_seconds = 0;
           pics_Request_Invoke_ID = 0;
@@ -8820,8 +8831,20 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
             }
           } else if (Has_RPM) {
             myState = GET_ALL_REQUEST; /* Let's try again */
+            pics_retry_ctr++;
+            if (pics_retry_ctr > pics_retry_max) {
+              myObject.type = MAX_BACNET_OBJECT_TYPE;
+              if (FirstJsonItem) {
+                printf("  } \n");
+                if (WriteResultToJsonFile) {
+                  WriteKeyValueToJsonFile("}", NULL, false);
+                }
+              }
+              break;
+            }
           } else {
             myState = GET_PROPERTY_REQUEST;
+            pics_retry_ctr = 0;
           }
         } else if (tsm_invoke_id_failed(pics_Request_Invoke_ID)) {
           fprintf(stderr, "\rError: TSM Timeout!\n");
@@ -8830,9 +8853,21 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
           elapsed_seconds = 0;
           if (myState == GET_HEADING_RESPONSE) {
             myState = PRINT_HEADING;
+            pics_retry_ctr = 0;
             /* just press ahead without the data */
           } else {
             myState = GET_ALL_REQUEST; /* Let's try again */
+            pics_retry_ctr++;
+            if (pics_retry_ctr > pics_retry_max) {
+              myObject.type = MAX_BACNET_OBJECT_TYPE;
+              if (FirstJsonItem) {
+                printf("  } \n");
+                if (WriteResultToJsonFile) {
+                  WriteKeyValueToJsonFile("}", NULL, false);
+                }
+              }
+              break;
+            }
           }
         } else if (Error_Detected) {
           /* Don't think we'll ever actually reach this point. */
@@ -8846,6 +8881,8 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
           }/* Give up and move on to the
                                                   next. */
           Error_Count++;
+        } else {
+          printf(">>> NOT SUPPOSED TO BE HERE!\n");
         }
 
         break;
