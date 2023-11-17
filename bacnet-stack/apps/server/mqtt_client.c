@@ -9301,6 +9301,10 @@ int mqtt_msg_pop_and_process(void)
 
   EXIT:
 
+  if (json_root) {
+    json_object_put(json_root);
+  }
+
   if (mqtt_msg) {
     if (mqtt_msg->cmd_opts.rpm_objects) {
       free(mqtt_msg->cmd_opts.rpm_objects);
