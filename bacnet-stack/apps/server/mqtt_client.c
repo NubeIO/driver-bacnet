@@ -349,11 +349,16 @@ static bool FirstJsonItem = true;
 static bool epics_pagination = true;
 static bool epics_page_number = 0;
 static int epics_page_size = EPICS_PAGE_SIZE_DEFAULT;
+static int current_pics_object_type = -1;
+static int pics_object_json_start = false;
 static uint32_t total_device_objects;
 int WriteKeyValueToJsonFile(char *key, char *value, int comma_end);
 int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end);
+int WriteCommaNLToJsonFile(void);
 void StripDoubleQuotes(char *str);
 void StripLastDoubleQuote(char *str);
+bool is_object_type_supported(int object_type);
+bool is_object_property_supported(int object_type, int property_id);
 
 /* MQTT sub-system lock */
 static pthread_mutex_t mqtt_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -7030,6 +7035,21 @@ int WriteKeyValueNoNLToJsonFile(char *key, char *value, int comma_end)
 }
 
 
+/*
+ * Write command and NL to JSON file.
+ */
+int WriteCommaNLToJsonFile(void)
+{
+  char *str = ",\n";
+
+  if (write(JsonFileFd, str, strlen(str)) < 0) {
+    return(1);
+  }
+
+  return(0);
+}
+
+
 /* Strip double quotes in string */
 void StripDoubleQuotes(char *str)
 {
@@ -7609,10 +7629,11 @@ static void Print_Device_Heading(void)
   if (WriteResultToJsonFile) {
     WriteKeyValueToJsonFile("List of Objects in Test Device", "[", false);
   }           
-  printf("  {\n"); /* And opening brace for the first object */
+  printf("  { <<<\n"); /* And opening brace for the first object */
   if (WriteResultToJsonFile) {
     WriteKeyValueToJsonFile("{", NULL, false);
     FirstJsonItem = true;
+    pics_object_json_start = true;
   }
 }
 
@@ -7853,6 +7874,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
     bool print_brace = false;
     KEY object_list_element;
     bool isSequence = false; /* Ie, will need bracketing braces {} */
+    bool in_json_list = false;
     int num_prop_data;
                     
     if (rpm_property == NULL) {
@@ -8020,8 +8042,16 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                     }
                 }
                 bacapp_print_value(stdout, &object_value);
+                in_json_list = true;
                 if (WriteResultToJsonFile) {
-                    bacapp_snprintf_value2(&buf[strlen(buf)], buf_len - strlen(buf), &object_value);
+                    if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST &&
+                      value->tag == BACNET_APPLICATION_TAG_OBJECT_ID &&
+                      !is_object_type_supported(value->type.Object_Id.type)) {
+                      printf("+++ Object not supported: %d\n", value->type.Object_Id.type);
+                      in_json_list = false;
+                    } else {
+                      bacapp_snprintf_value2(&buf[strlen(buf)], buf_len - strlen(buf), &object_value);
+                    }
                 }
                 if (isSequence) {
                     fprintf(stdout, "}");
@@ -8034,7 +8064,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                     (value->next != NULL)) {
                     /* There are more. */
                     fprintf(stdout, ", ");
-                    if (WriteResultToJsonFile) {
+                    if (WriteResultToJsonFile && in_json_list) {
                         snprintf(&buf[strlen(buf)], buf_len - strlen(buf), ",");
                     }
                     if (!(Walked_List_Index % 3)) {
@@ -8458,6 +8488,7 @@ static EPICS_STATES ProcessRPMData(
      * wait and put these object lists at the end */
     bool bHasObjectList = false;
     bool bHasStructuredViewList = false;
+    bool first_prop;
     int i = 0;
     int num_prop_data;
     int json_value_buf_len;
@@ -8467,9 +8498,25 @@ static EPICS_STATES ProcessRPMData(
     memset(json_key_buf, 0, sizeof(json_key_buf));
 
     while (rpm_data) {
+printf(">>> 11 object_type: %d , object_instance: %d\n", rpm_data->object_type,
+  rpm_data->object_instance);
         rpm_property = rpm_data->listOfProperties;
+        first_prop = true;
         while (rpm_property) {
+            if (!is_object_type_supported(rpm_data->object_type) ||
+              !is_object_property_supported(rpm_data->object_type, rpm_property->propertyIdentifier)) {
+printf(">>> Object / Property not supported, Skipping.\n");
+              old_rpm_property = rpm_property;
+              rpm_property = rpm_property->next;
+              free(old_rpm_property);
+              continue;
+            }
+
             num_prop_data = count_prop_data(rpm_property);
+printf("1 num_prop_data: %d\n", num_prop_data);
+            if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST) {
+              printf("++ PROP_OBJECT_LIST , myState: %d\n", myState);
+            }
             json_value_buf_len = PROP_VALUE_MAX_LEN + (PROP_VALUE_MAX_LEN * num_prop_data);
             json_value_buf = calloc(1, json_value_buf_len);
             if (json_value_buf == NULL) {
@@ -8513,7 +8560,13 @@ static EPICS_STATES ProcessRPMData(
                 if (WriteResultToJsonFile) {
                     get_property_identifier_name(rpm_property->propertyIdentifier, json_key_buf, sizeof(json_key_buf));
                     StripDoubleQuotes(json_value_buf);
-                    WriteKeyValueToJsonFile(json_key_buf, json_value_buf, ((rpm_property->next) ? true : false));
+                    // WriteKeyValueToJsonFile(json_key_buf, json_value_buf, false);
+                    if (first_prop) {
+                      first_prop = false;
+                    } else {
+                      WriteCommaNLToJsonFile();
+                    }
+                    WriteKeyValueNoNLToJsonFile(json_key_buf, json_value_buf, false);
                     memset(json_value_buf, 0, json_value_buf_len);
                     memset(json_key_buf, 0, sizeof(json_key_buf));
                 }
@@ -8593,6 +8646,64 @@ static int is_json_file_last_comma(void)
 
 
 /*
+ * Return true if object type is supported for PICS request.
+ */
+bool is_object_type_supported(int object_type)
+{
+  switch(object_type) {
+    case OBJECT_DEVICE:
+    case OBJECT_ANALOG_INPUT:
+    case OBJECT_ANALOG_OUTPUT:
+    case OBJECT_ANALOG_VALUE:
+    case OBJECT_BINARY_INPUT:
+    case OBJECT_BINARY_OUTPUT:
+    case OBJECT_BINARY_VALUE:
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      return(true);
+  }
+
+  return(false);
+}
+
+
+/*
+ * Return true if object property is supports for PICS request.
+ */
+bool is_object_property_supported(int object_type, int property_id)
+{
+  switch(object_type) {
+    case OBJECT_DEVICE:
+      return(true);
+
+    case OBJECT_ANALOG_INPUT:
+    case OBJECT_ANALOG_OUTPUT:
+    case OBJECT_ANALOG_VALUE:
+    case OBJECT_BINARY_INPUT:
+    case OBJECT_BINARY_OUTPUT:
+    case OBJECT_BINARY_VALUE:
+    case OBJECT_MULTI_STATE_INPUT:
+    case OBJECT_MULTI_STATE_OUTPUT:
+    case OBJECT_MULTI_STATE_VALUE:
+      switch(property_id) {
+        case PROP_OBJECT_IDENTIFIER:
+        case PROP_OBJECT_LIST:
+        case PROP_OBJECT_NAME:
+        case PROP_OBJECT_TYPE:
+        case PROP_DESCRIPTION:
+        case PROP_UNITS:
+          return(true);
+      }
+
+      break;
+  }
+
+  return(false);
+}
+
+
+/*
  * Process Bacnet client PICS command.
  */
 int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
@@ -8651,6 +8762,9 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
   total_device_objects = 0;
 
   pics_retry_ctr = 0;
+
+  current_pics_object_type = -1;
+  pics_object_json_start = false;
 
   ret = get_pics_target_address(opts);
   if (ret) {
@@ -8795,6 +8909,8 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
         if ((pics_Read_Property_Multiple_Data.new_data) &&
           (pics_Request_Invoke_ID == pics_Read_Property_Multiple_Data.service_data.invoke_id)) {
           pics_Read_Property_Multiple_Data.new_data = false;
+printf(">>> 1 object_type: %d , object_instance: %d\n", pics_Read_Property_Multiple_Data.rpm_data->object_type,
+  pics_Read_Property_Multiple_Data.rpm_data->object_instance);
           myState = ProcessRPMData(pics_Read_Property_Multiple_Data.rpm_data, myState);
           if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
             pics_Request_Invoke_ID = 0;
@@ -8916,6 +9032,22 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
           pics_Read_Property_Multiple_Data.new_data = false;
           prop_value_buf = NULL;
           prop_value_buf_len = 0;
+printf(">>> 2 object_type: %d , object_instance: %d\n", pics_Read_Property_Multiple_Data.rpm_data->object_type,
+  pics_Read_Property_Multiple_Data.rpm_data->object_instance);
+
+          if (!is_object_type_supported(pics_Read_Property_Multiple_Data.rpm_data->object_type) ||
+            !is_object_property_supported(pics_Read_Property_Multiple_Data.rpm_data->object_type,
+            pics_Read_Property_Multiple_Data.rpm_data->listOfProperties->propertyIdentifier)) {
+printf(">>> Object /Property not supported. Skipping.\n");
+            BACNET_APPLICATION_DATA_VALUE *x_value, *x_old_value;
+            x_value = pics_Read_Property_Multiple_Data.rpm_data->listOfProperties->value;
+            while (x_value != NULL) {
+              x_old_value = x_value;
+              x_value = x_value->next;
+              free(x_old_value);
+            }
+          } else {
+
           PrintReadPropertyData2(
             pics_Read_Property_Multiple_Data.rpm_data->object_type,
             pics_Read_Property_Multiple_Data.rpm_data->object_instance,
@@ -8944,8 +9076,13 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
               }
             } else {
               WriteKeyValueNoNLToJsonFile(json_key_buf, prop_value_buf, false);
+              if (!strcmp(json_key_buf, "object-identifier")) {
+                printf("++ OBJECT-IDENTIFIER\n");
+              }
             }
           }
+          }
+
           if (tsm_invoke_id_free(pics_Request_Invoke_ID)) {
             pics_Request_Invoke_ID = 0;
           } else {
@@ -9049,12 +9186,12 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
               continue;
             }
             /* Closing brace for the previous Object */
-            printf("  }, \n");
+            printf("  }, <<<\n");
             if (WriteResultToJsonFile) {
               WriteKeyValueToJsonFile("}", NULL, true);
             }
             /* Opening brace for the new Object */
-            printf("  { \n");
+            printf("  { <<<\n");
             if (WriteResultToJsonFile) {
               WriteKeyValueToJsonFile("{", NULL, false);
               FirstJsonItem = true;
@@ -9066,7 +9203,7 @@ int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts)
              */
           } else {
             /* Closing brace for the last Object */
-            printf("  } \n");
+            printf("  } <<<\n");
             if (WriteResultToJsonFile) {
               WriteKeyValueToJsonFile("}", NULL, false);
             }
