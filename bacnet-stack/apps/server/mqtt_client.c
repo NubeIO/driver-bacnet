@@ -8505,7 +8505,15 @@ printf(">>> 11 object_type: %d , object_instance: %d\n", rpm_data->object_type,
         while (rpm_property) {
             if (!is_object_type_supported(rpm_data->object_type) ||
               !is_object_property_supported(rpm_data->object_type, rpm_property->propertyIdentifier)) {
-printf(">>> Object / Property not supported, Skipping.\n");
+printf(">>> Object (%d) / Property (%d) not supported, Skipping.\n", rpm_data->object_type,
+  rpm_property->propertyIdentifier);
+              value = rpm_property->value;
+              while (value) {
+                old_value = value;
+                value = value->next;
+                free(old_value);
+              }
+
               old_rpm_property = rpm_property;
               rpm_property = rpm_property->next;
               free(old_rpm_property);
@@ -9038,7 +9046,8 @@ printf(">>> 2 object_type: %d , object_instance: %d\n", pics_Read_Property_Multi
           if (!is_object_type_supported(pics_Read_Property_Multiple_Data.rpm_data->object_type) ||
             !is_object_property_supported(pics_Read_Property_Multiple_Data.rpm_data->object_type,
             pics_Read_Property_Multiple_Data.rpm_data->listOfProperties->propertyIdentifier)) {
-printf(">>> Object /Property not supported. Skipping.\n");
+printf(">>> Object (%d) / Property (%d) not supported. Skipping.\n", pics_Read_Property_Multiple_Data.rpm_data->object_type,
+  pics_Read_Property_Multiple_Data.rpm_data->listOfProperties->propertyIdentifier);
             BACNET_APPLICATION_DATA_VALUE *x_value, *x_old_value;
             x_value = pics_Read_Property_Multiple_Data.rpm_data->listOfProperties->value;
             while (x_value != NULL) {
