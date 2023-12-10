@@ -3011,7 +3011,9 @@ static void bacnet_client_write_value_handler(
     return;
   }
 
-  publish_bacnet_client_write_value_result(&obj_data);
+  if (!obj_data.dont_publish_on_success) {
+    publish_bacnet_client_write_value_result(&obj_data);
+  }
 }
 
 
@@ -4643,7 +4645,10 @@ static int send_write_request(llist_obj_data *obj_data, BACNET_APPLICATION_DATA_
     obj_data->priority,
     obj_data->index);
 
-  if (send_reply) {
+  if (!send_reply) {
+    obj_data->dont_publish_on_success = true;
+  }
+
     printf("- queuing request_invoke_id %d for reply\n", request_invoke_id);
     add_bacnet_client_request(request_invoke_id, obj_data);
 
@@ -4655,8 +4660,6 @@ static int send_write_request(llist_obj_data *obj_data, BACNET_APPLICATION_DATA_
     if (pdu_len) {
       npdu_handler(&src, &Rx_Buf[0], pdu_len);
     }
-
-  }
 
   return(0);
 }
@@ -5018,6 +5021,9 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
         obj_data.index = opts->prio_array[i].index;
 
         if ((i + 1) == opts->prio_array_len) {
+          send_reply = true;
+        }
+
           obj_data.dnet = opts->dnet;
           if (strlen(opts->dadr) > 0) {
             strncpy(obj_data.dadr, opts->dadr, sizeof(obj_data.dadr) - 1);
@@ -5032,9 +5038,6 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
             memcpy((char *)&obj_data.req_tokens[0], (char *)&opts->req_tokens[0],
               sizeof(request_token_cb) * opts->req_tokens_len);
           }
-
-          send_reply = true;
-        }
 
         send_write_request(&obj_data, &value, opts, send_reply);
       }
@@ -6501,7 +6504,10 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
  */
 char *mqtt_create_error_topic(int object_type, int object_instance, int property_id, char *buf, int buf_len, int topic_type)
 {
+  char object_type_buf[128];
+  char property_id_buf[128];
   char *object_type_str;
+  char *property_id_str;
 
   switch(object_type) {
     case OBJECT_ANALOG_INPUT:
@@ -6537,19 +6543,67 @@ char *mqtt_create_error_topic(int object_type, int object_instance, int property
       break;
 
     default:
-      object_type_str = "unknown";
+      snprintf(object_type_buf, sizeof(object_type_buf) - 1, "%d", object_type);
+      object_type_str = &object_type_buf[0];
+      break;
+  }
+
+  switch(property_id) {
+    case PROP_OBJECT_NAME:
+      property_id_str = "name";
+      break;
+
+    case PROP_PRESENT_VALUE:
+      property_id_str = "pv";
+      break;
+
+    case PROP_PRIORITY_ARRAY:
+      property_id_str = "pri";
+      break;
+
+    case PROP_RELINQUISH_DEFAULT:
+      property_id_str = "rel";
+      break;
+
+    case PROP_PROGRAM_STATE:
+      property_id_str = "state";
+      break;
+
+    case PROP_OBJECT_IDENTIFIER:
+      property_id_str = "id";
+      break;
+
+    case PROP_SYSTEM_STATUS:
+      property_id_str = "system_status";
+      break;
+
+    case PROP_VENDOR_NAME:
+      property_id_str = "vendor_name";
+      break;
+
+    case PROP_VENDOR_IDENTIFIER:
+      property_id_str = "vendor_id";
+      break;
+
+    case PROP_OBJECT_LIST:
+      property_id_str = "object_list";
+      break;
+
+    default:
+      snprintf(property_id_buf, sizeof(property_id_buf) - 1, "%d", property_id);
+      property_id_str = &property_id_buf[0];
       break;
   }
 
   switch(topic_type) {
     case MQTT_READ_VALUE_CMD_RESULT_TOPIC:
-      snprintf(buf, buf_len - 1, "bacnet/cmd_result/read_value/%s/%d", object_type_str,
-        object_instance);
+      snprintf(buf, buf_len - 1, "bacnet/cmd_result/read_value/%s/%d/%s", object_type_str,
+        object_instance, property_id_str);
       break;
 
     case MQTT_WRITE_VALUE_CMD_RESULT_TOPIC:
-      snprintf(buf, buf_len - 1, "bacnet/cmd_result/write_value/%s/%d", object_type_str,
-        object_instance);
+      snprintf(buf, buf_len - 1, "bacnet/cmd_result/write_value/%s/%d/%s", object_type_str,
+        object_instance, property_id_str);
       break;
 
     default:
@@ -7875,7 +7929,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
     KEY object_list_element;
     bool isSequence = false; /* Ie, will need bracketing braces {} */
     bool in_json_list = false;
-    int num_prop_data;
+    // int num_prop_data;
                     
     if (rpm_property == NULL) {
         fprintf(stdout, "    -- Null Property data \n");
@@ -7890,8 +7944,8 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
         return;
     }
 
-    num_prop_data = count_prop_data(rpm_property);
-// printf("** num_prop_data: %d\n", num_prop_data);
+    // num_prop_data = count_prop_data(rpm_property);
+    // printf("** num_prop_data: %d\n", num_prop_data);
 
     object_value.object_type = object_type;
     object_value.object_instance = object_instance;

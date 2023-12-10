@@ -288,7 +288,7 @@ bool Analog_Value_Present_Value_Set(
             AV_Descr[index - 1].Present_Value_Level[priority - 1] = value;
             status = true;
 #if defined(MQTT)
-            if (yaml_config_mqtt_enable() && !bacnet_client) {
+            /* if (yaml_config_mqtt_enable() && !bacnet_client) {
                 if (value == AV_LEVEL_NULL) {
                     mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRESENT_VALUE,
                         MQTT_TOPIC_VALUE_STRING, "null", uuid);
@@ -297,7 +297,7 @@ bool Analog_Value_Present_Value_Set(
                         MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
                 }
                 publish_av_priority_array(object_instance, uuid);
-            }
+            } */
 #endif /* defined(MQTT) */
         }
     }
@@ -317,9 +317,9 @@ bool Analog_Value_Priority_Array_Set(
             AV_Descr[index - 1].Present_Value_Level[priority - 1] = value;
             status = true;
 #if defined(MQTT)
-            if (yaml_config_mqtt_enable()) {
+            /* if (yaml_config_mqtt_enable()) {
                 publish_av_priority_array(object_instance, uuid);
-            }
+            } */
 #endif /* defined(MQTT) */
         }
     }
@@ -407,10 +407,10 @@ bool Analog_Value_Set_Object_Name(
             status = characterstring_copy(&Analog_Value_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable() && !bacnet_client) {
+        /* if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
-        }
+        } */
 #endif /* defined(MQTT) */
     }
 
@@ -1176,10 +1176,10 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     wp_data->object_instance);
                 AV_Descr[object_index - 1].Relinquish_Default = f_value;
 #if defined(MQTT)
-                if (yaml_config_mqtt_enable()) {
+                /* if (yaml_config_mqtt_enable()) {
                     mqtt_publish_topic(OBJECT_ANALOG_VALUE, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
                         MQTT_TOPIC_VALUE_FLOAT, &f_value, NULL);
-                }
+                } */
 #endif /* defined(MQTT) */
             }
             break;

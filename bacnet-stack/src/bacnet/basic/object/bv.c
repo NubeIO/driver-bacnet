@@ -278,10 +278,10 @@ bool Binary_Value_Set_Object_Name(
             status = characterstring_copy(&Binary_Value_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable() && !bacnet_client) {
+        /* if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
-        }
+        } */
 #endif /* defined(MQTT) */
     }
 
@@ -544,7 +544,7 @@ bool Binary_Value_Present_Value_Set(
         Binary_Value_Level[index - 1][priority - 1] = value;
         status = true;
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable() && !bacnet_client) {
+        /* if (yaml_config_mqtt_enable() && !bacnet_client) {
             if (value == BINARY_NULL) {
                 mqtt_publish_topic(OBJECT_BINARY_VALUE, object_instance, PROP_PRESENT_VALUE,
                     MQTT_TOPIC_VALUE_STRING, "null", uuid);
@@ -553,7 +553,7 @@ bool Binary_Value_Present_Value_Set(
                     MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
             }
             publish_bv_priority_array(object_instance, uuid);
-        }
+        } */
 #endif /* defined(MQTT) */
     }
 
@@ -572,9 +572,9 @@ bool Binary_Value_Priority_Array_Set(
         Binary_Value_Level[index - 1][priority - 1] = value;
         status = true;
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable()) {
+        /* if (yaml_config_mqtt_enable()) {
             publish_bv_priority_array(object_instance, uuid);
-        }
+        } */
 #endif /* defined(MQTT) */
     }
 
@@ -764,10 +764,10 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                         wp_data->object_instance);
                     Binary_Value_Relinquish_Defaults[object_index - 1] = level;
 #if defined(MQTT)
-                    if (yaml_config_mqtt_enable()) {
+                    /* if (yaml_config_mqtt_enable()) {
                         mqtt_publish_topic(OBJECT_BINARY_VALUE, wp_data->object_instance, PROP_RELINQUISH_DEFAULT,
                             MQTT_TOPIC_VALUE_INTEGER, &level, NULL);
-                    }
+                    } */
 #endif /* defined(MQTT) */
                 } else {
                     status = false;

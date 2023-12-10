@@ -99,6 +99,7 @@ typedef struct _llist_obj_data {
   int topic_id;
   int rpm_objects_len;
   rpm_object_cb *rpm_objects;
+  bool dont_publish_on_success;
 } llist_obj_data;
 
 typedef struct _llist_cb {
