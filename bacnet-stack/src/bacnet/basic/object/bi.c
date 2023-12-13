@@ -309,10 +309,10 @@ bool Binary_Input_Present_Value_Set(
         Present_Value[index - 1] = value;
         status = true;
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable() && !bacnet_client) {
+        /* if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_BINARY_INPUT, object_instance, PROP_PRESENT_VALUE,
                 MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
-        }
+        } */
 #endif /* defined(MQTT) */
     }
 
@@ -360,10 +360,10 @@ bool Binary_Input_Set_Object_Name(
             status = characterstring_copy(&Binary_Input_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable() && !bacnet_client) {
+        /* if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_BINARY_INPUT, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
-        }
+        } */
 #endif /* defined(MQTT) */
     }
 
