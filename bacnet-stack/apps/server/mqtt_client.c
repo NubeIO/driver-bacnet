@@ -3255,9 +3255,14 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
 static void bacnet_client_abort_handler(
   BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t abort_reason, bool server)
 {
+  llist_cb *ptr, *tmp = NULL, *prev = NULL;
+  char err_msg[1024];
+  bacnet_client_cmd_opts opts;
+
   (void)server;
 printf("- bacnet_client_abort_handler()\n");
-printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", invoke_id, pics_Request_Invoke_ID);
+printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
+  invoke_id, pics_Request_Invoke_ID, abort_reason);
   if (address_match(&pics_Target_Address, src) &&
     (invoke_id == pics_Request_Invoke_ID)) {
 #if PRINT_ERRORS
@@ -3275,6 +3280,50 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", invoke_id, pics_Reques
     } else {
       Last_Error_Code = ERROR_CODE_ABORT_OTHER;
     }
+
+    return;
+  }
+
+  if (is_request_list_locked()) {
+    return;
+  } else {
+    lock_request_list();
+  }
+
+  ptr = bc_request_list_head;
+  while (ptr != NULL) {
+    if (ptr->data.invoke_id == invoke_id) {
+      if (mqtt_debug) {
+        printf("- Pending Request found: %d\n", ptr->data.invoke_id);
+      }
+
+      tmp = ptr;
+      if (ptr == bc_request_list_head) {
+        bc_request_list_head = ptr->next;
+        ptr = bc_request_list_head;
+      } else {
+        prev->next = ptr->next;
+        if (ptr == bc_request_list_tail) {
+          bc_request_list_tail = prev;
+        }
+
+        ptr = ptr->next;
+      }
+
+      break;
+    }
+
+    prev = ptr;
+    ptr = ptr->next;
+  }
+
+  unlock_request_list();
+
+  if (tmp) {
+    init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
+    snprintf(err_msg, sizeof(err_msg) - 1, "%s", bactext_abort_reason_name(abort_reason));
+    mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    free(tmp);
   }
 }
 
@@ -3282,8 +3331,13 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", invoke_id, pics_Reques
 static void bacnet_client_reject_handler(
   BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t reject_reason)
 {
+  llist_cb *ptr, *tmp = NULL, *prev = NULL;
+  char err_msg[1024];
+  bacnet_client_cmd_opts opts;
+
 printf("- bacnet_client_reject_handler()\n");
-printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", invoke_id, pics_Request_Invoke_ID);
+printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , reject_reason: %d\n",
+  invoke_id, pics_Request_Invoke_ID, reject_reason);
   if (address_match(&pics_Target_Address, src) &&
     (invoke_id == pics_Request_Invoke_ID)) {
 #if PRINT_ERRORS
@@ -3300,6 +3354,50 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", invoke_id, pics_Reques
     } else {
       Last_Error_Code = ERROR_CODE_REJECT_OTHER;
     }
+
+    return;
+  }
+
+  if (is_request_list_locked()) {
+    return;
+  } else {
+    lock_request_list();
+  }
+
+  ptr = bc_request_list_head;
+  while (ptr != NULL) {
+    if (ptr->data.invoke_id == invoke_id) {
+      if (mqtt_debug) {
+        printf("- Pending Request found: %d\n", ptr->data.invoke_id);
+      }
+
+      tmp = ptr;
+      if (ptr == bc_request_list_head) {
+        bc_request_list_head = ptr->next;
+        ptr = bc_request_list_head;
+      } else {
+        prev->next = ptr->next;
+        if (ptr == bc_request_list_tail) {
+          bc_request_list_tail = prev;
+        }
+
+        ptr = ptr->next;
+      }
+
+      break;
+    }
+
+    prev = ptr;
+    ptr = ptr->next;
+  }
+
+  unlock_request_list();
+
+  if (tmp) {
+    init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
+    snprintf(err_msg, sizeof(err_msg) - 1, "%s", bactext_reject_reason_name(reject_reason));
+    mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    free(tmp);
   }
 }
 
