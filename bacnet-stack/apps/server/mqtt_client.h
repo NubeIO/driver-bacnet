@@ -79,6 +79,7 @@ typedef struct _rpm_object_cb {
   int32_t priority;
   char value[MAX_CMD_STR_OPT_VALUE_LENGTH];
   char *blob_value;
+  char error[MAX_CMD_STR_OPT_VALUE_LENGTH];
 } rpm_object_cb;
 
 typedef struct _llist_obj_data {
@@ -100,6 +101,7 @@ typedef struct _llist_obj_data {
   int rpm_objects_len;
   rpm_object_cb *rpm_objects;
   bool dont_publish_on_success;
+  char err_msg[MAX_CMD_STR_OPT_VALUE_LENGTH];
 } llist_obj_data;
 
 typedef struct _llist_cb {

@@ -1919,86 +1919,92 @@ int encode_read_multiple_value_result(BACNET_READ_ACCESS_DATA *rpm_data, llist_o
   listOfProperties = rpm_data->listOfProperties;
   value = listOfProperties->value;
 
-  switch(rpm_data->object_type) {
-    case OBJECT_ANALOG_INPUT:
-    case OBJECT_ANALOG_OUTPUT:
-    case OBJECT_ANALOG_VALUE:
-      switch(listOfProperties->propertyIdentifier) {
-        case PROP_PRIORITY_ARRAY:
-          encode_read_multiple_array_value_result(rpm_data, tmp_val, sizeof(tmp_val) - 1);
-          break;
+  if (value) {
+    switch(rpm_data->object_type) {
+      case OBJECT_ANALOG_INPUT:
+      case OBJECT_ANALOG_OUTPUT:
+      case OBJECT_ANALOG_VALUE:
+        switch(listOfProperties->propertyIdentifier) {
+          case PROP_PRIORITY_ARRAY:
+            encode_read_multiple_array_value_result(rpm_data, tmp_val, sizeof(tmp_val) - 1);
+            break;
 
-        default:
-          object_value.object_type = rpm_data->object_type;
-          object_value.object_instance = rpm_data->object_instance;
-          object_value.object_property = listOfProperties->propertyIdentifier;
-          object_value.array_index = listOfProperties->propertyArrayIndex;
-          object_value.value = value;
-          bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
-          break;
-      }
-      break;
+          default:
+            object_value.object_type = rpm_data->object_type;
+            object_value.object_instance = rpm_data->object_instance;
+            object_value.object_property = listOfProperties->propertyIdentifier;
+            object_value.array_index = listOfProperties->propertyArrayIndex;
+            object_value.value = value;
+            bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+            break;
+        }
+        break;
 
-    case OBJECT_BINARY_INPUT:
-    case OBJECT_BINARY_OUTPUT:
-    case OBJECT_BINARY_VALUE:
-      switch(listOfProperties->propertyIdentifier) {
-        case PROP_PRIORITY_ARRAY:
-          encode_read_multiple_array_value_result(rpm_data, tmp_val, sizeof(tmp_val) - 1);
-          break;
+      case OBJECT_BINARY_INPUT:
+      case OBJECT_BINARY_OUTPUT:
+      case OBJECT_BINARY_VALUE:
+        switch(listOfProperties->propertyIdentifier) {
+          case PROP_PRIORITY_ARRAY:
+            encode_read_multiple_array_value_result(rpm_data, tmp_val, sizeof(tmp_val) - 1);
+            break;
 
-        default:
-          object_value.object_type = rpm_data->object_type;
-          object_value.object_instance = rpm_data->object_instance;
-          object_value.object_property = listOfProperties->propertyIdentifier;
-          object_value.array_index = listOfProperties->propertyArrayIndex;
-          object_value.value = value;
-          bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
-          break;
-      }
-      break;
+          default:
+            object_value.object_type = rpm_data->object_type;
+            object_value.object_instance = rpm_data->object_instance;
+            object_value.object_property = listOfProperties->propertyIdentifier;
+            object_value.array_index = listOfProperties->propertyArrayIndex;
+            object_value.value = value;
+            bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+            break;
+        }
+        break;
 
-    case OBJECT_DEVICE:
-      switch(listOfProperties->propertyIdentifier) {
-        case PROP_SYSTEM_STATUS:
-          device_status_to_str(value->type.Unsigned_Int, tmp_val, sizeof(tmp_val) - 1);
-          break;
+      case OBJECT_DEVICE:
+        switch(listOfProperties->propertyIdentifier) {
+          case PROP_SYSTEM_STATUS:
+            device_status_to_str(value->type.Unsigned_Int, tmp_val, sizeof(tmp_val) - 1);
+            break;
 
-        case PROP_OBJECT_LIST:
-          encode_read_multiple_list_value_result(rpm_data, &blob_value);
-          break;
+          case PROP_OBJECT_LIST:
+            encode_read_multiple_list_value_result(rpm_data, &blob_value);
+            break;
 
-        default:
-          object_value.object_type = rpm_data->object_type;
-          object_value.object_instance = rpm_data->object_instance;
-          object_value.object_property = listOfProperties->propertyIdentifier;
-          object_value.array_index = listOfProperties->propertyArrayIndex;
-          object_value.value = value;
-          bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
-          break;
-      }
+          default:
+            object_value.object_type = rpm_data->object_type;
+            object_value.object_instance = rpm_data->object_instance;
+            object_value.object_property = listOfProperties->propertyIdentifier;
+            object_value.array_index = listOfProperties->propertyArrayIndex;
+            object_value.value = value;
+            bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+            break;
+        }
 
-      break;
+        break;
 
-    case OBJECT_MULTI_STATE_INPUT:
-    case OBJECT_MULTI_STATE_OUTPUT:
-    case OBJECT_MULTI_STATE_VALUE:
-      object_value.object_type = rpm_data->object_type;
-      object_value.object_instance = rpm_data->object_instance;
-      object_value.object_property = listOfProperties->propertyIdentifier;
-      object_value.array_index = listOfProperties->propertyArrayIndex;
-      object_value.value = value;
-      bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
-      break;
+      case OBJECT_MULTI_STATE_INPUT:
+      case OBJECT_MULTI_STATE_OUTPUT:
+      case OBJECT_MULTI_STATE_VALUE:
+        object_value.object_type = rpm_data->object_type;
+        object_value.object_instance = rpm_data->object_instance;
+        object_value.object_property = listOfProperties->propertyIdentifier;
+        object_value.array_index = listOfProperties->propertyArrayIndex;
+        object_value.value = value;
+        bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+        break;
 
-    default:
-      object_value.object_type = rpm_data->object_type;
-      object_value.object_instance = rpm_data->object_instance;
-      object_value.object_property = listOfProperties->propertyIdentifier;
-      object_value.array_index = listOfProperties->propertyArrayIndex;
-      object_value.value = value;
-      bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
-      break;
+      default:
+        object_value.object_type = rpm_data->object_type;
+        object_value.object_instance = rpm_data->object_instance;
+        object_value.object_property = listOfProperties->propertyIdentifier;
+        object_value.array_index = listOfProperties->propertyArrayIndex;
+        object_value.value = value;
+        bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+        break;
+    }
+  } else {
+    snprintf(tmp_val, sizeof(tmp_val) - 1, "BACnet Error: %s: %s",
+      bactext_error_class_name((int)listOfProperties->error.error_class),
+      bactext_error_code_name((int)listOfProperties->error.error_code));
   }
 
   for (i = 0; i < obj_data->rpm_objects_len; i++) {
@@ -2015,7 +2021,12 @@ int encode_read_multiple_value_result(BACNET_READ_ACCESS_DATA *rpm_data, llist_o
           break;
 
         default:
-          strcpy(obj_data->rpm_objects[i].value, tmp_val);
+          if (value) {
+            strcpy(obj_data->rpm_objects[i].value, tmp_val);
+          } else {
+            strcpy(obj_data->rpm_objects[i].error, tmp_val);
+          }
+
           obj_data->rpm_objects[i].blob_value = NULL;
           break;
       }
@@ -2384,6 +2395,7 @@ int publish_bacnet_client_read_multiple_value_result(llist_obj_data *data)
   int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
   int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
   int rc, i;
+  bool is_error = false;
 
   topic_value_len = (data->rpm_objects_len + 1)* WRITEM_PROP_PUB_LENGTH;
   topic_value = malloc(topic_value_len);
@@ -2417,15 +2429,24 @@ int publish_bacnet_client_read_multiple_value_result(llist_obj_data *data)
         ", \"value\" : %s}", data->rpm_objects[i].blob_value);
       free(data->rpm_objects[i].blob_value);
     } else {
-      if ((data->rpm_objects[i].value[0] == '"') ||
-        (data->rpm_objects[i].value[0] == '[') ||
-        (data->rpm_objects[i].value[0] == '{')) {
-        snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
-          ", \"value\" : %s}", data->rpm_objects[i].value);
+      if (strlen(data->rpm_objects[i].value) > 0) {
+        if ((data->rpm_objects[i].value[0] == '"') ||
+          (data->rpm_objects[i].value[0] == '[') ||
+          (data->rpm_objects[i].value[0] == '{')) {
+          snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+            ", \"value\" : %s}", data->rpm_objects[i].value);
+        } else {
+          snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+            ", \"value\" : \"%s\"}", data->rpm_objects[i].value);
+        }
       } else {
         snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
-          ", \"value\" : \"%s\"}", data->rpm_objects[i].value);
+          ", \"error\" : \"%s\"}", data->rpm_objects[i].error);
       }
+    }
+
+    if (strlen(data->rpm_objects[i].error) > 0) {
+      is_error = true;
     }
   }
 
@@ -2444,6 +2465,11 @@ int publish_bacnet_client_read_multiple_value_result(llist_obj_data *data)
   if (strlen(data->mac)) {
     snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
       ", \"mac\" : \"%s\" ", data->mac);
+  }
+
+  if (is_error) {
+    snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+      ", \"error\" : \"Error in reading object / propery value\" ");
   }
 
   for (i = 0; i < data->req_tokens_len; i++) {
@@ -2561,6 +2587,11 @@ int publish_bacnet_client_write_multiple_value_result(llist_obj_data *data)
   if (strlen(data->mac)) {
     snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
       ", \"mac\" : \"%s\" ", data->mac);
+  }
+
+  if (strlen(data->err_msg)) {
+    snprintf(&topic_value[strlen(topic_value)], topic_value_len - strlen(topic_value),
+      ", \"error\" : \"%s\" ", data->err_msg);
   }
 
   for (i = 0; i < data->req_tokens_len; i++) {
@@ -3155,6 +3186,7 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
         free(old_rpm_data);
       }
     }
+
     publish_bacnet_client_read_multiple_value_result(&obj_data);
   } else {
     printf("-- read multiple request with pending reply NOT found! Discarding reply!\n");
@@ -4782,6 +4814,7 @@ int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *o
   int dnet = -1;
   llist_obj_data obj_data = { 0 };
   bool specific_address = false;
+  bool is_error = false;
   unsigned timeout = 100;
   uint16_t pdu_len = 0;
   char err_msg[1024];
@@ -4875,6 +4908,12 @@ int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *o
       &wpm_property->value);
     if (ret) {
       printf("- Error parsing RPM value: [%s]", opts->rpm_objects[i].value);
+      snprintf(err_msg, sizeof(err_msg) - 1,
+        "Error parsing RPM value: %s for object: %d , property: %d",
+        opts->rpm_objects[i].value,
+        opts->rpm_objects[i].object_type,
+        opts->rpm_objects[i].property);
+      is_error = true;
       goto EXIT;
     }
     wpm_property->value.next = NULL;
@@ -4885,15 +4924,17 @@ int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *o
     }
   }
 
-  request_invoke_id = Send_Write_Property_Multiple_Request(
-    &buffer[0], sizeof(buffer), opts->device_instance, wad);
-  printf("write multiple request_invoke_id: %d\n", request_invoke_id);
+  if (!is_error) {
+    request_invoke_id = Send_Write_Property_Multiple_Request(
+      &buffer[0], sizeof(buffer), opts->device_instance, wad);
+    printf("write multiple request_invoke_id: %d\n", request_invoke_id);
 
-  add_bacnet_client_request(request_invoke_id, &obj_data);
+    add_bacnet_client_request(request_invoke_id, &obj_data);
 
-  pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
-  if (pdu_len) {
-    npdu_handler(&src, &Rx_Buf[0], pdu_len);
+    pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+    if (pdu_len) {
+      npdu_handler(&src, &Rx_Buf[0], pdu_len);
+    }
   }
 
   EXIT:
@@ -4910,6 +4951,11 @@ int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *o
     old_wpm_object = wpm_object;
     wpm_object = wpm_object->next;
     free(old_wpm_object);
+  }
+
+  if (is_error) {
+    strncpy(obj_data.err_msg, err_msg, sizeof(obj_data.err_msg) - 1);
+    publish_bacnet_client_write_multiple_value_result(&obj_data);
   }
 
   return(0);
