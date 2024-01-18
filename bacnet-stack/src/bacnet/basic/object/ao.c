@@ -248,7 +248,7 @@ bool Analog_Output_Present_Value_Set(
                main loop (i.e. check out of service before changing output) */
             status = true;
 #if defined(MQTT)
-            /* if (yaml_config_mqtt_enable() && !bacnet_client) {
+            if (yaml_config_mqtt_enable() && !bacnet_client) {
                 if (value == AO_LEVEL_NULL) {
                   mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRESENT_VALUE,
                       MQTT_TOPIC_VALUE_STRING, "null", uuid);
@@ -258,7 +258,7 @@ bool Analog_Output_Present_Value_Set(
                 }
 
                 publish_ao_priority_array(object_instance, uuid);
-            } */
+            }
 #endif /* defined(MQTT) */
         }
     }
@@ -280,9 +280,9 @@ bool Analog_Output_Priority_Array_Set(
             Analog_Output_Level[index - 1][priority - 1] = value;
             status = true;
 #if defined(MQTT)
-            /* if (yaml_config_mqtt_enable()) {
+            if (yaml_config_mqtt_enable()) {
                 publish_ao_priority_array(object_instance, uuid);
-            } */
+            }
 #endif /* defined(MQTT) */
         }
     }
@@ -369,10 +369,10 @@ bool Analog_Output_Set_Object_Name(
             status = characterstring_copy(&Analog_Output_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        /* if (yaml_config_mqtt_enable() && !!bacnet_client) {
+        if (yaml_config_mqtt_enable() && !!bacnet_client) {
             mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
-        } */
+        }
 #endif /* defined(MQTT) */
     }
 

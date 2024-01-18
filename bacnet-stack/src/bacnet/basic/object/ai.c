@@ -246,10 +246,10 @@ void Analog_Input_Present_Value_Set(uint32_t object_instance, float value, char 
         AI_Descr[index - 1].Present_Value = value;
 
 #if defined(MQTT)
-        /* if (yaml_config_mqtt_enable() && !bacnet_client) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_ANALOG_INPUT, object_instance, PROP_PRESENT_VALUE,
             MQTT_TOPIC_VALUE_FLOAT, &value, uuid);
-        } */
+        }
 #endif /* defined(MQTT) */
     }
 }
@@ -280,10 +280,10 @@ bool Analog_Input_Set_Object_Name(
             status = characterstring_copy(&Analog_Input_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        /* if (yaml_config_mqtt_enable() && !bacnet_client) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_ANALOG_INPUT, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
-        } */
+        }
 #endif /* defined(MQTT) */
     }
 
