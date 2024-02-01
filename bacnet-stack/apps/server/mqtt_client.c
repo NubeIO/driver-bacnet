@@ -4294,7 +4294,7 @@ int process_bacnet_client_read_multiple_value_command (bacnet_client_cmd_opts *o
     rpm_property = calloc(1, sizeof(BACNET_PROPERTY_REFERENCE));
     rpm_object->listOfProperties = rpm_property;
     rpm_property->propertyIdentifier = opts->rpm_objects[i].property;
-    if (opts->rpm_objects[i].index > 0) {
+    if (opts->rpm_objects[i].index >= 0) {
       rpm_property->propertyArrayIndex = opts->rpm_objects[i].index;
     } else {
       rpm_property->propertyArrayIndex = BACNET_ARRAY_ALL;
