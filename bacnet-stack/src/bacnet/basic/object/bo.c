@@ -429,11 +429,11 @@ void publish_priority_array(uint32_t object_instance, char *uuid)
 
     index = Binary_Output_Instance_To_Index(object_instance);
     if (index > 0 && index <= Binary_Output_Instances) {
-        strcpy(buf, "{");
+        strcpy(buf, "[");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             value = Binary_Output_Level[index - 1][i];
             if (value == BINARY_NULL) {
-                sprintf(&buf[strlen(buf)], "%sNull", first);
+                sprintf(&buf[strlen(buf)], "%s\"Null\"", first);
             } else {
                 sprintf(&buf[strlen(buf)], "%s%d", first, value);
             }
@@ -441,7 +441,7 @@ void publish_priority_array(uint32_t object_instance, char *uuid)
             first = ",";
         }
 
-        sprintf(&buf[strlen(buf)], "}");
+        sprintf(&buf[strlen(buf)], "]");
         if (yaml_config_mqtt_enable()) {
             mqtt_publish_topic(OBJECT_BINARY_OUTPUT, object_instance, PROP_PRIORITY_ARRAY,
                 MQTT_TOPIC_VALUE_STRING, buf, uuid);
@@ -579,7 +579,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                        main loop (i.e. check out of service before changing
                        output) */
                     Binary_Output_Present_Value_Set(wp_data->object_instance,
-                        (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL, true);
+                        (BACNET_BINARY_PV)value.type.Enumerated, wp_data->priority, NULL, false);
                     status = true;
                 } else if (priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
@@ -612,7 +612,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                            main loop (i.e. check out of service before changing
                            output) */
                         Binary_Output_Present_Value_Set(wp_data->object_instance,
-                            level, wp_data->priority, NULL, true);
+                            level, wp_data->priority, NULL, false);
                         status = true;
                     } else {
                         status = false;
@@ -637,7 +637,7 @@ bool Binary_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Binary_Output_Instance_Names[0]));
             if (status) {
                 Binary_Output_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL, true);
+                    &value.type.Character_String, NULL, false);
             }
             break;
 

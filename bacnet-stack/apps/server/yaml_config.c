@@ -24,6 +24,7 @@ struct _mqtt {
   char *retry_enable;
   unsigned int retry_limit;
   unsigned int retry_interval;
+  char *disable_persistence;
 };
 
 /* bacnet-client */
@@ -109,6 +110,10 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_UINT(
     "retry_interval", CYAML_FLAG_OPTIONAL,
     struct _mqtt, retry_interval),
+
+  CYAML_FIELD_STRING_PTR(
+    "disable_persistence", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _mqtt, disable_persistence, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -318,6 +323,11 @@ void load_default_settings(void)
       strcpy(bacnet_config->mqtt->retry_enable, "true");
     }
 
+    if (!bacnet_config->mqtt->disable_persistence) {
+      bacnet_config->mqtt->disable_persistence = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mqtt->disable_persistence, "false");
+    }
+
     if (!bacnet_config->objects) {
       char *obj_names[10] = { "device", "ai", "ao", "av", "bi", "bo", "bv", "msi", "mso", "msv" };
       bacnet_config->n_objects = 10;
@@ -466,15 +476,17 @@ void yaml_config_dump(void)
       bacnet_config->mqtt->broker_ip : "null");
     printf("YAML Config: mqtt->broker_port: %d\n", bacnet_config->mqtt->broker_port);
     printf("YAML Config: mqtt->debug: %s\n", (bacnet_config->mqtt->debug) ?
-      bacnet_config->mqtt->debug: "null");
+      bacnet_config->mqtt->debug : "null");
     printf("YAML Config: mqtt->enable: %s\n", (bacnet_config->mqtt->enable) ?
-      bacnet_config->mqtt->enable: "null");
+      bacnet_config->mqtt->enable : "null");
     printf("YAML Config: mqtt->write_via_subscribe: %s\n", (bacnet_config->mqtt->write_via_subscribe) ?
-      bacnet_config->mqtt->write_via_subscribe: "null");
+      bacnet_config->mqtt->write_via_subscribe : "null");
     printf("YAML Config: mqtt->retry_enable: %s\n", (bacnet_config->mqtt->retry_enable) ?
-      bacnet_config->mqtt->retry_enable: "null");
+      bacnet_config->mqtt->retry_enable : "null");
     printf("YAML Config: mqtt->retry_limit: %d\n", bacnet_config->mqtt->retry_limit);
     printf("YAML Config: mqtt->retry_interval: %d\n", bacnet_config->mqtt->retry_interval);
+    printf("YAML Config: mqtt->disable_persistence: %s\n", (bacnet_config->mqtt->disable_persistence) ?
+      bacnet_config->mqtt->disable_persistence : "null");
   }
 
   if (bacnet_config->n_objects > 0) {
@@ -715,6 +727,16 @@ int yaml_config_mqtt_connect_retry_limit(void)
 int yaml_config_mqtt_connect_retry_interval(void)
 {
   return(bacnet_config->mqtt->retry_interval);
+}
+
+
+/*
+ * Get MQTT disable persistence flag.
+ */
+int yaml_config_mqtt_disable_persistence(void)
+{
+  return ((bacnet_config->mqtt && bacnet_config->mqtt->disable_persistence &&
+    !strcmp(bacnet_config->mqtt->disable_persistence, "true")) ? true : false);
 }
 
 

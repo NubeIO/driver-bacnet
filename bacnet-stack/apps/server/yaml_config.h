@@ -51,6 +51,8 @@ extern "C" {
 
   int yaml_config_mqtt_connect_retry_interval(void);
 
+  int yaml_config_mqtt_disable_persistence(void);
+
   char **yaml_config_objects(int *length);
 
   int is_object_supported(char *obj);

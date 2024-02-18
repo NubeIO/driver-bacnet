@@ -902,19 +902,19 @@ void publish_av_priority_array(uint32_t object_instance, char *uuid)
 
     index = Analog_Value_Instance_To_Index(object_instance);
     if (index > 0 && index <= Analog_Value_Instances) {
-        strcpy(buf, "{");
+        strcpy(buf, "[");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             value = AV_Descr[index - 1].Present_Value_Level[i];
             if (value == AV_LEVEL_NULL) {
-                sprintf(&buf[strlen(buf)], "%sNull", first);
+                sprintf(&buf[strlen(buf)], "%s\"Null\"", first);
             } else {
-                sprintf(&buf[strlen(buf)], "%s%.6f", first, value);
+                sprintf(&buf[strlen(buf)], "%s\"%.6f\"", first, value);
             }
 
             first = ",";
         }
 
-        sprintf(&buf[strlen(buf)], "}");
+        sprintf(&buf[strlen(buf)], "]");
         if (yaml_config_mqtt_enable()) {
             mqtt_publish_topic(OBJECT_ANALOG_VALUE, object_instance, PROP_PRIORITY_ARRAY,
                 MQTT_TOPIC_VALUE_STRING, buf, uuid);
@@ -1000,7 +1000,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                    algorithm and may not be used for other purposes in any
                    object. */
                 status = Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority, NULL, true);
+                        value.type.Real, wp_data->priority, NULL, false);
                 if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -1018,7 +1018,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     BACNET_APPLICATION_TAG_NULL);
                 if (status) {
                     status = Analog_Value_Present_Value_Set(wp_data->object_instance,
-                        AV_LEVEL_NULL, wp_data->priority, NULL, true);
+                        AV_LEVEL_NULL, wp_data->priority, NULL, false);
                     if (!status) {
                         wp_data->error_class = ERROR_CLASS_PROPERTY;
                         wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
@@ -1154,7 +1154,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Value_Instance_Names[0]));
             if (status) {
                 Analog_Value_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL, true);
+                    &value.type.Character_String, NULL, false);
             }
             break;
         case PROP_OBJECT_TYPE:
