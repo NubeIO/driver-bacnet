@@ -331,7 +331,7 @@ int main(int argc, char *argv[])
     BACNET_CHARACTER_STRING DeviceName;
     if (Device_Object_Name(Device_Object_Instance_Number(),&DeviceName)) {
         printf("BACnet Device Name: %s\n", DeviceName.value);
-}
+    }
 
 #if defined(YAML_CONFIG)
     dl_params.iface = (char *)yaml_config_iface();
@@ -415,6 +415,7 @@ int main(int argc, char *argv[])
                 last_sweep_seconds = current_seconds;
                 sweep_bacnet_client_aged_requests();
                 sweep_bacnet_client_whois_requests();
+                sweep_bacnet_client_point_disc_requests();
             }
         }
 

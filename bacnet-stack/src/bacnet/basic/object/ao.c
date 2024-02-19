@@ -369,7 +369,7 @@ bool Analog_Output_Set_Object_Name(
             status = characterstring_copy(&Analog_Output_Instance_Names[index - 1], object_name);
         }
 #if defined(MQTT)
-        if (yaml_config_mqtt_enable() && !!bacnet_client) {
+        if (yaml_config_mqtt_enable() && !bacnet_client) {
             mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_OBJECT_NAME,
                 MQTT_TOPIC_VALUE_BACNET_STRING, object_name, uuid);
         }
@@ -557,19 +557,19 @@ void publish_ao_priority_array(uint32_t object_instance, char *uuid)
 
     index = Analog_Output_Instance_To_Index(object_instance);
     if (index > 0 && index <= Analog_Output_Instances) {
-        strcpy(buf, "{");
+        strcpy(buf, "[");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             value = Analog_Output_Level[index - 1][i];
             if (value == AO_LEVEL_NULL) {
-                sprintf(&buf[strlen(buf)], "%sNull", first);
+                sprintf(&buf[strlen(buf)], "%s\"Null\"", first);
             } else {
-                sprintf(&buf[strlen(buf)], "%s%.6f", first, value);
+                sprintf(&buf[strlen(buf)], "%s\"%.6f\"", first, value);
             }
 
             first = ",";
         }
 
-        sprintf(&buf[strlen(buf)], "}");
+        sprintf(&buf[strlen(buf)], "]");
         if (yaml_config_mqtt_enable()) {
             mqtt_publish_topic(OBJECT_ANALOG_OUTPUT, object_instance, PROP_PRIORITY_ARRAY,
                 MQTT_TOPIC_VALUE_STRING, buf, uuid);
@@ -628,7 +628,7 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                    object. */
                 status =
                     Analog_Output_Present_Value_Set(wp_data->object_instance,
-                        value.type.Real, wp_data->priority, NULL, true);
+                        value.type.Real, wp_data->priority, NULL, false);
                 if (wp_data->priority == 6) {
                     /* Command priority 6 is reserved for use by Minimum On/Off
                        algorithm and may not be used for other purposes in any
@@ -668,7 +668,7 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Output_Instance_Names[0]));
             if (status) {
                 Analog_Output_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL, true);
+                    &value.type.Character_String, NULL, false);
             }
             break;
         case PROP_OBJECT_TYPE:

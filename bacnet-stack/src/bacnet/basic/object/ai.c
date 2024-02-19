@@ -698,7 +698,7 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 BACNET_APPLICATION_TAG_REAL);
             if (status) {
                 Analog_Input_Present_Value_Set(
-                    wp_data->object_instance, value.type.Real, NULL, true);
+                    wp_data->object_instance, value.type.Real, NULL, false);
             }
             break;
 
@@ -830,7 +830,7 @@ bool Analog_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 characterstring_capacity(&Analog_Input_Instance_Names[0]));
             if (status) {
                 Analog_Input_Set_Object_Name(wp_data->object_instance,
-                    &value.type.Character_String, NULL, true);
+                    &value.type.Character_String, NULL, false);
             }
             break;
         case PROP_OBJECT_TYPE:
