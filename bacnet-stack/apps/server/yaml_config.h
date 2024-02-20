@@ -53,6 +53,8 @@ extern "C" {
 
   int yaml_config_mqtt_disable_persistence(void);
 
+  int yaml_config_mqtt_old_pri_array_format(void);
+
   char **yaml_config_objects(int *length);
 
   int is_object_supported(char *obj);
