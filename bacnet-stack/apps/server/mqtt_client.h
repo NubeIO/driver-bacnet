@@ -162,8 +162,15 @@ typedef struct _llist_pics_cb {
 } llist_pics_cb;
 
 typedef struct _point_entry_cb {
-  int object_type;
+  uint32_t object_type;
   uint32_t instance;
+  uint32_t request_id;
+  char obj_name[MAX_JSON_VALUE_LENGTH];
+  char point_name[MAX_JSON_VALUE_LENGTH];
+  bool sent;
+  bool reply_okay;
+  bool error;
+  char err_msg[MAX_JSON_VALUE_LENGTH];
   struct _point_entry_cb *next;
 } point_entry_cb;
 
@@ -185,13 +192,32 @@ typedef struct _llist_point_disc_cb {
     char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
     char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
     uint32_t device_instance;
-    uint32_t points_count;
+    uint32_t total_points;
+    uint32_t filtered_points;
     point_list_cb point_list;
     uint32_t timeout;
     int32_t req_tokens_len;
     request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   } data;
 } llist_point_disc_cb;
+
+typedef struct _llist_points_info_cb {
+  struct _llist_points_info_cb *next;
+  uint32_t request_object_id;
+  time_t timestamp;
+  struct _llist_points_info_cb_data {
+    BACNET_ADDRESS dest;
+    int dnet;
+    char mac[MAX_CMD_STR_OPT_VALUE_LENGTH];
+    char dadr[MAX_CMD_STR_OPT_VALUE_LENGTH];
+    uint32_t device_instance;
+    uint32_t timeout;
+    int32_t req_tokens_len;
+    request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
+    int points_len;
+    point_entry_cb *points;
+  } data;
+} llist_points_info_cb;
 
 typedef struct _bacnet_client_cmd_opts {
   BACNET_OBJECT_TYPE object_type;
@@ -213,9 +239,11 @@ typedef struct _bacnet_client_cmd_opts {
   int32_t prio_array_len;
   int publish_per_device;
   int rpm_objects_len;
+  int points_len;
   request_token_cb req_tokens[MAX_JSON_KEY_VALUE_PAIR];
   json_key_value_pair prio_array[MAX_PRIORITY_ARRAY_LENGTH];
   rpm_object_cb *rpm_objects;
+  point_entry_cb *points;
   int page_number;
   int page_size;
 } bacnet_client_cmd_opts;
@@ -234,6 +262,7 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
 void sweep_bacnet_client_aged_requests(void);
 void sweep_bacnet_client_whois_requests(void);
 void sweep_bacnet_client_point_disc_requests(void);
+void sweep_bacnet_client_points_info_requests(void);
 
 int mqtt_lock(void);
 int mqtt_unlock(void);

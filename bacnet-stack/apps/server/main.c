@@ -416,6 +416,7 @@ int main(int argc, char *argv[])
                 sweep_bacnet_client_aged_requests();
                 sweep_bacnet_client_whois_requests();
                 sweep_bacnet_client_point_disc_requests();
+                sweep_bacnet_client_points_info_requests();
             }
         }
 
