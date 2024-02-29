@@ -435,7 +435,7 @@ void publish_priority_array(uint32_t object_instance, char *uuid)
             if (value == BINARY_NULL) {
                 sprintf(&buf[strlen(buf)], "%s\"Null\"", first);
             } else {
-                sprintf(&buf[strlen(buf)], "%s%d", first, value);
+                sprintf(&buf[strlen(buf)], "%s\"%d\"", first, value);
             }
 
             first = ",";
