@@ -190,23 +190,27 @@ MQTT_BROKER_IP=10.20.30.123 MQTT_BROKER_PORT=11883 ./bin/bacserv
 
 Compiling The Bacnet Server
 ---
-Download or clone the repo.
+Compile and build the bacnet server on your local development machine. Tested on Ubuntu 18.04.5 LTS.
 ```
-git clone git@github.com:NubeIO/bacnet-server-c.git
-cd bacnet-server-c/bacnet-stack
-make clean all
+sudo apt install build-essential net-tools git libssl-dev cmake -y
+mkdir bacnet && cd bacnet
+git clone https://github.com/eclipse/paho.mqtt.c paho.mqtt.c
+cd paho.mqtt.c && cmake -DPAHO_BUILD_STATIC=TRUE && sudo make install
+cd .. && git clone https://github.com/json-c/json-c json-c
+cd json-c && mkdir -p json-c-build && cmake ../json-c && make && sudo make install
+sudo apt-get install libyaml-dev -y
+cd .. && git clone https://github.com/tlsa/libcyaml.git
+cd libcyaml && sudo make install VARIANT=release
+find / -name libyaml.a -print -exec cp -fR {} /usr/lib \;
+cd .. && git clone git@github.com:NubeIO/bacnet-server-c.git
+cd bacnet-server-c/bacnet-stack && make clean all
 ```
 
-Running The Bacnet Server
+Running The Bacnet Server (bacserv)
 ---
-On the bacnet-stack directory, run bin/bacserv without any option. The server will connect to the local MQTT broker with the IP address and port number 127.0.0.1 and 1883.
+The bacnet server binary file is at bacnet-stack/bin/bacserv. You need to specify the configuration file and folder to run the server using the "g" and "s" ENV variables like below.
 ```
-./bin/bacserv
-```
-
-To use an external MQTT broker, set the environment variable MQTT_BROKER_IP for the IP address and MQTT_BROKER_PORT for the port number.
-```
-MQTT_BROKER_IP=104.219.42.42 MQTT_BROKER_PORT=11883 ./bin/bacserv 1234
+g=/data/bacnet-server-driver s=config.yml ./bin/bacserv
 ```
 
 Sample Get/Set Commands

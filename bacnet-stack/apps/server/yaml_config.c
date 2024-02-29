@@ -25,6 +25,7 @@ struct _mqtt {
   unsigned int retry_limit;
   unsigned int retry_interval;
   char *disable_persistence;
+  char *old_pri_array_format;
 };
 
 /* bacnet-client */
@@ -114,6 +115,10 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
     "disable_persistence", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _mqtt, disable_persistence, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "old_pri_array_format", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _mqtt, old_pri_array_format, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -328,6 +333,11 @@ void load_default_settings(void)
       strcpy(bacnet_config->mqtt->disable_persistence, "false");
     }
 
+    if (!bacnet_config->mqtt->old_pri_array_format) {
+      bacnet_config->mqtt->old_pri_array_format = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mqtt->old_pri_array_format , "true");
+    }
+
     if (!bacnet_config->objects) {
       char *obj_names[10] = { "device", "ai", "ao", "av", "bi", "bo", "bv", "msi", "mso", "msv" };
       bacnet_config->n_objects = 10;
@@ -487,6 +497,8 @@ void yaml_config_dump(void)
     printf("YAML Config: mqtt->retry_interval: %d\n", bacnet_config->mqtt->retry_interval);
     printf("YAML Config: mqtt->disable_persistence: %s\n", (bacnet_config->mqtt->disable_persistence) ?
       bacnet_config->mqtt->disable_persistence : "null");
+    printf("YAML Config: mqtt->old_pri_array_format: %s\n", (bacnet_config->mqtt->old_pri_array_format) ?
+      bacnet_config->mqtt->old_pri_array_format: "null");
   }
 
   if (bacnet_config->n_objects > 0) {
@@ -737,6 +749,16 @@ int yaml_config_mqtt_disable_persistence(void)
 {
   return ((bacnet_config->mqtt && bacnet_config->mqtt->disable_persistence &&
     !strcmp(bacnet_config->mqtt->disable_persistence, "true")) ? true : false);
+}
+
+
+/*
+ * Get MQTT disable persistence flag.
+ */
+int yaml_config_mqtt_old_pri_array_format(void)
+{
+  return ((bacnet_config->mqtt && bacnet_config->mqtt->old_pri_array_format &&
+    !strcmp(bacnet_config->mqtt->old_pri_array_format, "true")) ? true : false);
 }
 
 
