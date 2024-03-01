@@ -1,6 +1,9 @@
 # CHANGELOG
 
-## v0.0.65-rc2
+## v1.0.0-rc.1
+- initial release
+
+## v0.0.65-rc.2
 - Support for persistent MQTT published message. Enabled by default. To disable, set disable_persistence to true in the config under mqtt segment.
 - Initialize object property values (name, present value value and priority array) from last published message (persistent) when bacnet-server starts up.
 - Fixed the format of the priority array value in the payload of published message into a valid JSON format from
