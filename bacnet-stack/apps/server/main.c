@@ -411,11 +411,12 @@ int main(int argc, char *argv[])
 
         if (yaml_config_bacnet_client_enable()) {
             elapsed_seconds = (uint32_t)(current_seconds - last_sweep_seconds);
-            if (elapsed_seconds > 3) {
+            if (elapsed_seconds > 1) {
                 last_sweep_seconds = current_seconds;
                 sweep_bacnet_client_aged_requests();
                 sweep_bacnet_client_whois_requests();
                 sweep_bacnet_client_point_disc_requests();
+                sweep_bacnet_client_points_info_requests();
             }
         }
 

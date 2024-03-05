@@ -3,6 +3,11 @@
 ## v1.0.0-rc.1
 - initial release
 
+## v0.0.65-rc.3
+- Support for point discovery APIs (#92).
+- Discovery all points (bacnet/cmd/point_discovery)
+- Get points information (bacnet/cmd/points_info)
+
 ## v0.0.65-rc.2
 - Support for persistent MQTT published message. Enabled by default. To disable, set disable_persistence to true in the config under mqtt segment.
 - Initialize object property values (name, present value value and priority array) from last published message (persistent) when bacnet-server starts up.

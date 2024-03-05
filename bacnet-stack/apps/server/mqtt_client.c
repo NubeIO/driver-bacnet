@@ -188,12 +188,13 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
 int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_pics_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_point_discovery_command(bacnet_client_cmd_opts *opts);
-int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int priority,
-  int vtype, void *vptr, int topic_id, json_key_value_pair *kv_pairs, int kvps_length);
+int process_bacnet_client_points_info_command(bacnet_client_cmd_opts *opts);
+int get_bacnet_client_points_info_points_all(llist_points_info_cb *lpi_ptr);
 bool bbmd_address_match_self(BACNET_IP_ADDRESS *addr);
 int is_address_us(bacnet_client_cmd_opts *opts);
 int is_command_for_us(bacnet_client_cmd_opts *opts);
 char *get_object_type_str(int object_type);
+bool get_object_type_id(char *name, uint32_t *id);
 char *get_object_property_str(int object_property);
 int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *obj_data, char *buf, int buf_len);
 int encode_read_multiple_value_result(BACNET_READ_ACCESS_DATA *rpm_data, llist_obj_data *obj_data);
@@ -208,11 +209,9 @@ int publish_bacnet_client_pics_result(bacnet_client_cmd_opts *opts, char *epics_
 int publish_whois_device(char *topic, char *topic_value);
 int publish_bacnet_client_whois_result_per_device(llist_whois_cb *cb);
 void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outlen, bacnet_client_cmd_opts *opts);
-int process_local_read_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_read_multiple_value_command(bacnet_client_cmd_opts *opts);
 void init_bacnet_client_service_handlers(void);
-int process_local_write_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts);
 int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], int n_topic_tokens, bacnet_client_cmd_opts *opts);
@@ -254,11 +253,21 @@ int del_bacnet_client_pics(uint8_t invoke_id);
 void init_bacnet_client_point_disc_list(void);
 void shutdown_bacnet_client_point_disc_list(void);
 int add_bacnet_client_point_disc(uint32_t request_id, BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts);
+llist_point_disc_cb *get_bacnet_client_point_disc_request(uint32_t request_id, BACNET_ADDRESS *src);
 llist_point_disc_cb *get_bacnet_client_point_disc_req(uint32_t request_id, BACNET_ADDRESS *src);
-void process_point_disc_resp(uint8_t *service_request,
+void process_point_disc_resp(uint32_t request_id, uint8_t *service_request,
   uint16_t service_len, BACNET_ADDRESS *src, llist_point_disc_cb *pd_data);
 int get_bacnet_client_point_disc_points(llist_point_disc_cb *pd_ptr);
+int get_bacnet_client_point_disc_points_all(llist_point_disc_cb *pd_ptr);
 int publish_bacnet_client_point_disc_result(llist_point_disc_cb *pd_cb);
+
+void init_bacnet_client_points_info_list(void);
+void shutdown_bacnet_client_points_info_list(void);
+llist_points_info_cb *get_bacnet_client_points_info_req(uint32_t request_id, BACNET_ADDRESS *src);
+llist_points_info_cb *add_bacnet_client_points_info(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts);
+void process_points_info_resp(uint32_t request_id, uint8_t *service_request,
+  uint16_t service_len, BACNET_ADDRESS *src, llist_points_info_cb *pi_data);
+int publish_bacnet_client_points_info_result(llist_points_info_cb *pi_cb);
 
 void mqtt_on_send_success(void* context, MQTTAsync_successData* response);
 void mqtt_on_send_failure(void* context, MQTTAsync_failureData* response);
@@ -310,6 +319,10 @@ static llist_pics_cb *bc_pics_tail = NULL;
 static uint32_t bc_point_disc_request_ctr = 0;
 static llist_point_disc_cb *bc_point_disc_head = NULL;
 static llist_point_disc_cb *bc_point_disc_tail = NULL;
+
+static uint32_t bc_points_info_request_ctr = 0;
+static llist_points_info_cb *bc_points_info_head = NULL;
+static llist_points_info_cb *bc_points_info_tail = NULL;
 
 static int req_tokens_len = 0;
 static char req_tokens[MAX_JSON_KEY_VALUE_PAIR][MAX_JSON_KEY_LENGTH] = {0};
@@ -404,7 +417,8 @@ typedef struct _mqtt_msg_cb {
   int type;
   char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH];
   int topic_tokens_length;
-  char topic_value[MAX_TOPIC_VALUE_LENGTH];
+  char *topic_value;
+  int topic_value_length;
   bacnet_client_cmd_opts cmd_opts;
 } mqtt_msg_cb;
 
@@ -1333,165 +1347,6 @@ void mqtt_on_send_failure(void* context, MQTTAsync_failureData* response)
 }
 
 
-/*
- * Publish Bacnet client topic.
- */
-int mqtt_publish_command_result(int object_type, int object_instance, int property_id, int priority,
-  int vtype, void *vptr, int topic_id, json_key_value_pair *kvps, int kvps_length)
-{
-  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
-  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
-  BACNET_BINARY_PV b_val;
-  json_key_value_pair *kvp;
-  char topic[512];
-  char topic_value[30000];
-  char buf[2048];
-  char *first = "";
-  float f_val;
-  int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
-  int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
-  int rc, i;
-
-  if (!mqtt_create_topic(object_type, object_instance, property_id, topic, sizeof(topic), topic_id)) {
-    printf("Failed to create MQTT topic: %d/%d\n", object_type, property_id);
-    return(1);
-  }
-
-  if (mqtt_debug) {
-    printf("MQTT publish topic: %s\n", topic);
-  }
-
-  opts.onSuccess = mqtt_on_send_success;
-  opts.onFailure = mqtt_on_send_failure;
-  opts.context = mqtt_client;
-
-  switch(vtype) {
-    case MQTT_TOPIC_VALUE_STRING:
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : \"%s\" ", (char*)vptr);
-      break;
-
-    case MQTT_TOPIC_VALUE_BACNET_STRING:
-      characterstring_ansi_copy(buf, sizeof(buf), vptr);
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : \"%s\" ", buf);
-      break;
-
-    case MQTT_TOPIC_VALUE_INTEGER:
-      sprintf(buf, "%d", *((int*)vptr));
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : \"%s\" ", buf);
-      break;
-
-    case MQTT_TOPIC_VALUE_FLOAT:
-      sprintf(buf, "%.6f", *((float*)vptr));
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : \"%s\" ", buf);
-      break;
-
-    case MQTT_TOPIC_VALUE_FLOAT_MAX_PRIO:
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : [");
-      for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
-        f_val = ((float*)vptr)[i];
-        if (f_val == AO_LEVEL_NULL) {
-          sprintf(&topic_value[strlen(topic_value)], "%s\"Null\"", first);
-        } else {
-          sprintf(&topic_value[strlen(topic_value)], "%s\"%.6f\"", first, f_val);
-        }
-
-        first = ",";
-      }
-      snprintf(&topic_value[strlen(topic_value)],  sizeof(topic_value) - strlen(topic_value) , "]");
-      break;
-
-    case MQTT_TOPIC_VALUE_BINARY_MAX_PRIO:
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : [");
-      for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
-        b_val = ((BACNET_BINARY_PV *)vptr)[i];
-        if (b_val == BINARY_NULL) {
-          sprintf(&topic_value[strlen(topic_value)], "%s\"Null\"", first);
-        } else {
-          sprintf(&topic_value[strlen(topic_value)], "%s\"%d\"", first, b_val);
-        }
-
-        first = ",";
-      }
-      snprintf(&topic_value[strlen(topic_value)],  sizeof(topic_value) - strlen(topic_value) , "]");
-      break;
-
-    case MQTT_TOPIC_VALUE_OBJECT_LIST:
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : %s ", (char*)vptr);
-      break;
-
-    case MQTT_TOPIC_VALUE_FLOAT_PRIO_ARRAY:
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : {");
-      for (i = 0, kvp = (json_key_value_pair *)vptr; kvp->index > 0; kvp++, i++) {
-        snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value),
-          "%s\"%s\" : \"%s\"", (i == 0) ? "" : " , ", kvp->key,
-          (strcmp(kvp->value, "255")) ? kvp->value : "Null");
-      }
-      snprintf(&topic_value[strlen(topic_value)],  sizeof(topic_value) - strlen(topic_value) , "}");
-      break;
-
-    case MQTT_TOPIC_VALUE_BINARY_PRIO_ARRAY:
-      snprintf(topic_value, sizeof(topic_value), "{ \"value\" : {");
-      for (i = 0, kvp = (json_key_value_pair *)vptr; kvp->index > 0; kvp++, i++) {
-        snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value),
-          "%s\"%s\" : \"%s\"", (i == 0) ? "" : " , ", kvp->key,
-          (strcmp(kvp->value, "255")) ? kvp->value : "Null");
-      }
-      snprintf(&topic_value[strlen(topic_value)],  sizeof(topic_value) - strlen(topic_value) , "}");
-      break;
-
-    default:
-      printf("MQTT unsupported topic value: %d\n", vtype);
-      return(1);
-  }
-
-  if (priority > 0) {
-    snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value), ", \"priority\" : \"%d\" ",
-      priority);
-  }
-
-  for (i = 0; i < kvps_length; i++) {
-    snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value), ", \"%s\" : \"%s\" ",
-      kvps[i].key, kvps[i].value);
-  }
-
-  snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value), "}");
-  pubmsg.payload = topic_value;
-  pubmsg.payloadlen = strlen(topic_value);
-
-  if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
-    for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
-      if (mqtt_debug) {
-        printf("MQTT reconnect retry: %d/%d\n", (i + 1), mqtt_retry_limit);
-      }
-
-      mqtt_check_reconnect();
-      sleep(mqtt_retry_interval);
-    }
-
-    if (i >= mqtt_retry_limit) {
-      if (mqtt_debug) {
-        printf("MQTT reconnect limit reached: %d\n", i);
-      }
-
-      return(1);
-    }
-  }
-
-  pubmsg.qos = DEFAULT_PUB_QOS;
-  pubmsg.retained = 0;
-  rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
-  if (mqtt_debug) {
-    if (rc != MQTTASYNC_SUCCESS) {
-      printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
-    } else {
-      printf("MQTT published topic: \"%s\"\n", topic);
-    }
-  }
-
-  return(0);
-}
-
-
 int is_address_us(bacnet_client_cmd_opts *opts)
 {
   BACNET_IP_ADDRESS addr = {0};
@@ -1694,6 +1549,38 @@ char *get_object_type_str(int object_type)
   }
 
   return(str);
+}
+
+
+bool get_object_type_id(char *name, uint32_t *id)
+{
+  bool rc = true;
+
+  if (!strcasecmp(name, "ai")) {
+    *id = OBJECT_ANALOG_INPUT;
+  } else if (!strcasecmp(name, "ao")) {
+    *id = OBJECT_ANALOG_OUTPUT;
+  } else if (!strcasecmp(name, "av")) {
+    *id = OBJECT_ANALOG_VALUE;
+  } else if (!strcasecmp(name, "bi")) {
+    *id = OBJECT_BINARY_INPUT;
+  } else if (!strcasecmp(name, "bo")) {
+    *id = OBJECT_BINARY_OUTPUT;
+  } else if (!strcasecmp(name, "bv")) { 
+    *id = OBJECT_BINARY_VALUE;
+  } else if (!strcasecmp(name, "device")) {
+    *id = OBJECT_DEVICE;
+  } else if (!strcasecmp(name, "msi")) {
+    *id = OBJECT_MULTI_STATE_INPUT;
+  } else if (!strcasecmp(name, "mso")) {
+    *id = OBJECT_MULTI_STATE_OUTPUT;
+  } else if (!strcasecmp(name, "msv")) {
+    *id = OBJECT_MULTI_STATE_VALUE;
+  } else {
+    rc = false;
+  }
+
+  return(rc);
 }
 
 
@@ -2978,8 +2865,10 @@ int publish_bacnet_client_whois_result(llist_whois_cb *cb)
   sprintf(topic, "bacnet/cmd_result/whois");
   encode_whois_result(cb, topic_value, sizeof(topic_value));
 
-  printf("- write value result topic: %s\n", topic);
-  printf("- write value result topic value: %s\n", topic_value);
+  if (mqtt_debug) {
+    printf("- write value result topic: %s\n", topic);
+    printf("- write value result topic value: %s\n", topic_value);
+  }
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -3013,7 +2902,9 @@ int publish_bacnet_client_whois_result(llist_whois_cb *cb)
     if (rc != MQTTASYNC_SUCCESS) {
       printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
     } else {
-      printf("MQTT published topic: \"%s\"\n", topic);
+      if (mqtt_debug) {
+        printf("MQTT published topic: \"%s\"\n", topic);
+      }
     }
   }
 
@@ -3032,8 +2923,10 @@ int publish_whois_device(char *topic, char *topic_value)
   int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
   int rc, i;
 
-  printf("- write value result topic: %s\n", topic);
-  printf("- write value result topic value: %s\n", topic_value);
+  if (mqtt_debug) {
+    printf("- write value result topic: %s\n", topic);
+    printf("- write value result topic value: %s\n", topic_value);
+  }
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -3067,7 +2960,9 @@ int publish_whois_device(char *topic, char *topic_value)
     if (rc != MQTTASYNC_SUCCESS) {
       printf("MQTT failed to publish topic: \"%s\" , return code:%d\n", topic, rc);
     } else {
-      printf("MQTT published topic: \"%s\"\n", topic);
+      if (mqtt_debug) {
+        printf("MQTT published topic: \"%s\"\n", topic);
+      }
     }
   }
 
@@ -3085,8 +2980,6 @@ int publish_topic_value(char *topic, char *topic_value)
   int mqtt_retry_limit = yaml_config_mqtt_connect_retry_limit();
   int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
   int rc, i;
-
-  printf("- write value result topic: %s\n", topic);
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -3283,14 +3176,16 @@ int publish_bacnet_client_pics_result(bacnet_client_cmd_opts *opts, char *epics_
  */
 int publish_bacnet_client_point_disc_result(llist_point_disc_cb *pd_cb)
 {
+  point_entry_cb *pe_ptr;
   char topic[512];
   char *value;
-  int value_len = (pd_cb->data.points_count * 50) + 512;
+  bool first;
+  int value_len = (pd_cb->data.total_points * 50) + 512;
   int i;
 
   value = calloc(1, value_len);
   if (value == NULL) {
-    fprintf(stderr, "Error: Failed to allocate memory for PICs publish message!\n");
+    fprintf(stderr, "Error: Failed to allocate memory for points discovery publish message!\n");
     return(0);
   }
     
@@ -3320,10 +3215,117 @@ int publish_bacnet_client_point_disc_result(llist_point_disc_cb *pd_cb)
       pd_cb->data.req_tokens[i].key, pd_cb->data.req_tokens[i].value);
   }
 
-  snprintf(&value[strlen(value)], value_len - strlen(value), ", \"value\" : {\"count\" : \"%d\"",
-    pd_cb->data.points_count);
+  snprintf(&value[strlen(value)], value_len - strlen(value), ", \"value\" : {\"objects\" : [");
 
-  snprintf(&value[strlen(value)], value_len - strlen(value), " }}");
+  pd_cb->data.filtered_points = 0;
+  first = true;
+  for (i = 0; i < pd_cb->data.points_len; i++) {
+    pe_ptr = &pd_cb->data.points[i];
+    if (!pe_ptr->values_updated) {
+      if (true) {
+        printf("* WARNING: Point discovery entry not updated. Index: %d , Invoke_id: %d\n",
+          pe_ptr->request_idx, pe_ptr->request_id);
+      }
+
+      continue;
+    }
+
+    switch(pe_ptr->object_type) {
+      case OBJECT_DEVICE:
+        continue;
+        break;
+
+      default:
+        pd_cb->data.filtered_points++;
+        break;
+    }
+
+    snprintf(&value[strlen(value)], value_len - strlen(value), "%s\"%s-%d\"", 
+      ((first) ? "" : ","), get_object_type_str(pe_ptr->object_type), pe_ptr->instance);
+    if (first) {
+      first = false;
+    }
+  }
+
+  snprintf(&value[strlen(value)], value_len - strlen(value), "], \"count\" : \"%d\"}}", pd_cb->data.filtered_points);
+  publish_topic_value(topic, value);
+  free(value);
+
+  return(0);
+}
+
+
+/*
+ * Publish bacnet client points info result.
+ */
+int publish_bacnet_client_points_info_result(llist_points_info_cb *pi_cb)
+{
+  point_entry_cb *pe_cb;
+  char topic[512];
+  char *value;
+  bool first;
+  int value_len = (pi_cb->data.points_len * 100) + 512;
+  int i;
+
+  value = calloc(1, value_len);
+  if (value == NULL) {
+    fprintf(stderr, "Error: Failed to allocate memory for points info publish message!\n");
+    return(0);
+  }
+
+  sprintf(topic, "bacnet/cmd_result/points_info");
+  sprintf(value, "{");
+
+  snprintf(&value[strlen(value)], value_len - strlen(value), "\"deviceInstance\" : \"%d\"",
+    pi_cb->data.device_instance);
+
+  if (strlen(pi_cb->data.mac)) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"mac\" : \"%s\"",
+      pi_cb->data.mac);
+  }
+
+  if (pi_cb->data.dnet >= 0) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dnet\" : \"%d\"",
+      pi_cb->data.dnet);
+  }
+
+  if (strlen(pi_cb->data.dadr)) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"dadr\" : \"%s\"",
+      pi_cb->data.dadr);
+  }
+
+  for (i = 0; i < pi_cb->data.req_tokens_len; i++) {
+    snprintf(&value[strlen(value)], value_len - strlen(value), ", \"%s\" : \"%s\"",
+      pi_cb->data.req_tokens[i].key, pi_cb->data.req_tokens[i].value);
+  }
+
+  snprintf(&value[strlen(value)], value_len - strlen(value), ", \"value\" : {");
+
+  for (i = 0, first = true; i < pi_cb->data.points_len; i++) {
+    pe_cb = &pi_cb->data.points[i];
+    if (pe_cb->error) {
+      snprintf(&value[strlen(value)], value_len - strlen(value),
+        "%s\"%s\" : {\"error\" : \"%s\"}", ((first) ? "" : ","),
+        pe_cb->obj_name, pe_cb->err_msg);
+    } else {
+      if (pe_cb->reply_okay) {
+        snprintf(&value[strlen(value)], value_len - strlen(value),
+          "%s\"%s-%d\" : {\"name\" : %s}", ((first) ? "" : ","),
+          get_object_type_str(pe_cb->object_type), pe_cb->instance,
+          pe_cb->point_name);
+      } else {
+        snprintf(&value[strlen(value)], value_len - strlen(value),
+          "%s\"%s\" : {\"error\" : \"%s\"}", ((first) ? "" : ","),
+          pe_cb->obj_name, "Unknown object");
+      }
+    }
+
+    if (first) {
+      first = false;
+    }
+  }
+
+  snprintf(&value[strlen(value)], value_len - strlen(value), "}}");
   publish_topic_value(topic, value);
   free(value);
 
@@ -3334,7 +3336,7 @@ int publish_bacnet_client_point_disc_result(llist_point_disc_cb *pd_cb)
 /*
  * Process point discovery response.
  */
-void process_point_disc_resp(uint8_t *service_request,
+void process_point_disc_resp(uint32_t request_id, uint8_t *service_request,
   uint16_t service_len, BACNET_ADDRESS *src, llist_point_disc_cb *pd_data)
 {
   BACNET_READ_PROPERTY_DATA data;
@@ -3348,16 +3350,19 @@ void process_point_disc_resp(uint8_t *service_request,
 
   len = rp_ack_decode_service_request(service_request, service_len, &data);
   if (len < 0) {
-    printf("<decode failed!>\n");
+    if (mqtt_debug) {
+      printf("- point discovery response <decode failed!>\n");
+    }
+
     return;
   }
 
   if (mqtt_debug) {
     rp_ack_print_data(&data);
+    printf("- data.object_type: %d\n", data.object_type);
+    printf("- data.object_property: %d\n", data.object_property);
+    printf("- point disc state: %d\n", pd_data->state);
   }
-
-  printf("data.object_type: %d\n", data.object_type);
-  printf("data.object_property: %d\n", data.object_property);
 
   if (data.object_type != OBJECT_DEVICE) {
     printf("Invalid object_type: %d\n", data.object_type);
@@ -3368,36 +3373,30 @@ void process_point_disc_resp(uint8_t *service_request,
   application_data = data.application_data;
   application_data_len = data.application_data_len;
   if (pd_data->state == POINT_DISC_STATE_GET_SIZE_SENT) {
+    pd_data->request_id = 0;
+
     len = bacapp_decode_application_data(application_data, (unsigned)application_data_len, &value);
     if (value.tag != BACNET_APPLICATION_TAG_UNSIGNED_INT) {
       printf("Incorrect value.tag: %d\n", value.tag);
       return;
     }
 
-    pd_data->data.points_count = (unsigned long)value.type.Unsigned_Int;
+    pd_data->data.total_points = (unsigned long)value.type.Unsigned_Int;
     pd_data->state = POINT_DISC_STATE_GET_POINTS;
     pd_data->timestamp = time(NULL);
   } else if (pd_data->state == POINT_DISC_STATE_GET_POINTS_SENT) {
-    for (point_idx = 0; ; point_idx++) {
+    pd_data->request_id = 0;
+
+    for (point_idx = 0; point_idx < pd_data->data.points_len; point_idx++) {
       len = bacapp_decode_application_data(application_data, (unsigned)application_data_len, &value);
       if (mqtt_debug) {
         printf("- [%d] object_type: %d , instance: %lu\n", point_idx, value.type.Object_Id.type, (unsigned long)value.type.Object_Id.instance);
       }
 
-      pe_cb = calloc(1, sizeof(point_entry_cb));
-      if (pe_cb == NULL) {
-        printf("Failed to allocated point_entry_cb.\n");
-        return;
-      }
-
+      pe_cb = &pd_data->data.points[point_idx];
       pe_cb->object_type = value.type.Object_Id.type;
       pe_cb->instance = value.type.Object_Id.instance;
-      if (pd_data->data.point_list.head == NULL) {
-        pd_data->data.point_list.head = pd_data->data.point_list.tail = pe_cb;
-      } else {
-        pd_data->data.point_list.tail->next = pe_cb;
-        pd_data->data.point_list.tail = pe_cb;
-      }
+      pe_cb->values_updated = true;
 
       if (len > 0) {
         if (len < application_data_len) {
@@ -3411,10 +3410,107 @@ void process_point_disc_resp(uint8_t *service_request,
       }
     }
 
+    pd_data->data.last_idx = pd_data->data.points_len;
+    pd_data->timestamp = time(NULL);
     pd_data->state = POINT_DISC_STATE_PUBLISH;
+  } else if ((pd_data->state == POINT_DISC_STATE_GET_POINTS_ALL_SENT) ||
+    (pd_data->state == POINT_DISC_STATE_GET_POINTS_ALL)) {
+    pe_cb = NULL;
+    for (point_idx = 0; point_idx < pd_data->data.points_len; point_idx++) {
+      if (pd_data->data.points[point_idx].request_id == request_id) {
+        pe_cb = &pd_data->data.points[point_idx];
+        break;
+      }
+    }
+
+    if (!pe_cb) {
+      if (true) {
+        printf("- points disc entry not found for request_id: %d\n", request_id);
+      }
+
+      return;
+    }
+
+    pe_cb->request_id = 0;
+
+    len = bacapp_decode_application_data(application_data, (unsigned)application_data_len, &value);
+    if (mqtt_debug) {
+      printf("- [%d] object_type: %d , instance: %lu\n", point_idx, value.type.Object_Id.type, (unsigned long)value.type.Object_Id.instance);
+    }
+
+    pe_cb->object_type = value.type.Object_Id.type;
+    pe_cb->instance = value.type.Object_Id.instance;
+    pe_cb->values_updated = true;
+    pd_data->timestamp = time(NULL);
   } else {
     printf("- Invalid point discovery state: %d\n", pd_data->state);
   }
+}
+
+
+/*
+ * Process points info response.
+ */
+void process_points_info_resp(uint32_t request_id, uint8_t *service_request,
+  uint16_t service_len, BACNET_ADDRESS *src, llist_points_info_cb *pi_data)
+{
+  BACNET_READ_PROPERTY_DATA data;
+  BACNET_OBJECT_PROPERTY_VALUE object_value;
+  BACNET_APPLICATION_DATA_VALUE value;
+  point_entry_cb *pe_cb = NULL;
+  uint8_t *application_data;
+  int application_data_len;
+  int len;
+
+  len = rp_ack_decode_service_request(service_request, service_len, &data);
+  if (len < 0) {
+    if (mqtt_debug) {
+      printf("- points info response <decode failed!>\n");
+    }
+
+    return;
+  }
+
+  if (mqtt_debug) {
+    rp_ack_print_data(&data);
+    printf("data.object_type: %d\n", data.object_type);
+    printf("data.object_property: %d\n", data.object_property);
+  }
+
+  for (int i = 0; i < pi_data->data.points_len; i++) {
+    if (pi_data->data.points[i].request_id == request_id) {
+      pe_cb = &pi_data->data.points[i];
+      break;
+    }
+  }
+
+  if (!pe_cb) {
+    if (mqtt_debug) {
+      printf("- points info entry not found for request_id: %d\n", request_id);
+    }
+
+    return;
+  }
+
+  pe_cb->request_id = 0;
+  pe_cb->reply_okay = true;
+  pi_data->timestamp = time(NULL);
+  if (data.object_property != PROP_OBJECT_NAME) {
+    pe_cb->error = true;
+    strcpy(pe_cb->err_msg, "Unexpected property");
+    return;
+  }
+
+  memset((char *)&object_value, 0, sizeof(object_value));
+  application_data = data.application_data;
+  application_data_len = data.application_data_len;
+  len = bacapp_decode_application_data(application_data, (unsigned)application_data_len, &value);
+  object_value.object_type = data.object_type;
+  object_value.object_instance = data.object_instance;
+  object_value.object_property = data.object_property;
+  object_value.array_index = data.array_index;
+  object_value.value = &value;
+  bacapp_snprintf_value(pe_cb->point_name, sizeof(pe_cb->point_name) - 1, &object_value);
 }
 
 
@@ -3430,17 +3526,30 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
   BACNET_READ_ACCESS_DATA *rp_data;
   llist_obj_data obj_data = {0};
   llist_point_disc_cb *pd_data;
+  llist_points_info_cb *pi_data;
   int len = 0;
 
-  printf("- bacnet_client_read_value_handler() => %d\n", getpid());
-  printf("-- service_data->invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
+  if (mqtt_debug) {
+    printf("- bacnet_client_read_value_handler() => %d\n", getpid());
+    printf("-- service_data->invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
+  }
 
   if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
-    printf("-- Request with pending reply found!\n");
+    if (mqtt_debug) {
+      printf("-- Request with pending reply found!\n");
+    }
     del_bacnet_client_request(service_data->invoke_id);
   } else if ((pd_data = get_bacnet_client_point_disc_req(service_data->invoke_id, src))) {
-    printf("-- Point Discovery request with pending reply found!\n");
-    process_point_disc_resp(service_request, service_len, src, pd_data);
+    if (mqtt_debug) {
+      printf("-- Point Discovery request with pending reply found!\n");
+    }
+    process_point_disc_resp(service_data->invoke_id, service_request, service_len, src, pd_data);
+    return;
+  } else if ((pi_data = get_bacnet_client_points_info_req(service_data->invoke_id, src))) {
+    if (mqtt_debug) {
+      printf("-- Points Info request with pending reply found!\n");
+    }
+    process_points_info_resp(service_data->invoke_id, service_request, service_len, src, pi_data);
     return;
   } else if (address_match(&pics_Target_Address, src) &&
     (service_data->invoke_id == pics_Request_Invoke_ID)) {
@@ -3463,7 +3572,9 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
     }
     return;
   } else {
-    printf("-- Request with pending reply NOT found! Discarding reply!\n");
+    if (true) {
+      printf("-- Read request with pending reply NOT found! Invoke_id: %d\n", service_data->invoke_id);
+    }
     return;
   }
 
@@ -3494,7 +3605,7 @@ static void bacnet_client_write_value_handler(
     printf("-- Request with pending reply found!\n");
     del_bacnet_client_request(invoke_id);
   } else {
-    printf("-- Request with pending reply NOT found! Discarding reply!\n");
+    printf("-- Write request with pending reply NOT found! Invoke_id: %d\n", invoke_id);
     return;
   }
 
@@ -3542,7 +3653,9 @@ static void bacnet_client_whois_handler(uint8_t *service_request, uint16_t servi
 
     table = get_bacnet_client_first_whois_data();
     if (table) {
-      printf("- Adding Whois address ...\n");
+      if (mqtt_debug) {
+        printf("- Adding Whois address ...\n");
+      }
       whois_address_table_add(table, device_id, max_apdu, src);
     } else {
       printf("- WARNING: No existing whois request found!\n");
@@ -3683,8 +3796,11 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
     BACNET_ERROR_CODE error_code)
 {
   llist_cb *ptr, *tmp = NULL, *prev = NULL;
-  char err_msg[1024];
+  llist_obj_data obj_data = {0};
+  llist_point_disc_cb *pd_data;
+  llist_points_info_cb *pi_data;
   bacnet_client_cmd_opts opts;
+  char err_msg[1024];
 
   if (mqtt_debug) {
     printf("BACnet Client Error: %s: %s (invoke_id: %d)\n",
@@ -3695,6 +3811,24 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
   Error_Detected = true;
   Last_Error_Class = error_class;
   Last_Error_Code = error_code;
+
+  if (get_bacnet_client_request_obj_data(invoke_id, &obj_data)) {
+    if (mqtt_debug) {
+      printf("-- Request with pending reply found!\n");
+    }
+  } else if ((pd_data = get_bacnet_client_point_disc_request(invoke_id, src))) {
+    if (mqtt_debug) {
+      printf("-- Point Discovery request with pending reply found!\n");
+    }
+
+    return;
+  } else if ((pi_data = get_bacnet_client_points_info_req(invoke_id, src))) {
+    if (mqtt_debug) {
+      printf("-- Points Info request with pending reply found!\n");
+    }
+
+    return;
+  }
 
   if (is_request_list_locked()) {
     return;
@@ -3744,13 +3878,19 @@ static void bacnet_client_abort_handler(
   BACNET_ADDRESS *src, uint8_t invoke_id, uint8_t abort_reason, bool server)
 {
   llist_cb *ptr, *tmp = NULL, *prev = NULL;
-  char err_msg[1024];
+  llist_obj_data obj_data = {0};
+  llist_point_disc_cb *pd_data;
+  llist_points_info_cb *pi_data;
   bacnet_client_cmd_opts opts;
+  char err_msg[1024];
 
   (void)server;
-printf("- bacnet_client_abort_handler()\n");
-printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
-  invoke_id, pics_Request_Invoke_ID, abort_reason);
+  if (mqtt_debug) {
+    printf("- bacnet_client_abort_handler()\n");
+    printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
+      invoke_id, pics_Request_Invoke_ID, abort_reason);
+  }
+
   if (address_match(&pics_Target_Address, src) &&
     (invoke_id == pics_Request_Invoke_ID)) {
 #if PRINT_ERRORS
@@ -3767,6 +3907,31 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
         (ERROR_CODE_ABORT_BUFFER_OVERFLOW - 1) + abort_reason;
     } else {
       Last_Error_Code = ERROR_CODE_ABORT_OTHER;
+    }
+
+    return;
+  }
+
+  if (get_bacnet_client_request_obj_data(invoke_id, &obj_data)) {
+    if (mqtt_debug) {
+      printf("-- Request with pending reply found!\n");
+    }
+  } else if ((pd_data = get_bacnet_client_point_disc_req(invoke_id, src))) {
+    if (mqtt_debug) {
+      printf("-- Point Discovery request with pending reply found - abort!\n");
+    }
+
+    if (pd_data->state == POINT_DISC_STATE_GET_POINTS_SENT) {
+      pd_data->state = POINT_DISC_STATE_GET_POINTS_ALL;
+    }
+
+    pd_data->request_id = 0;
+    pd_data->data.last_idx = 0;
+
+    return;
+  } else if ((pi_data = get_bacnet_client_points_info_req(invoke_id, src))) {
+    if (mqtt_debug) {
+      printf("-- Points Info request with pending reply found!\n");
     }
 
     return;
@@ -3939,451 +4104,6 @@ void set_kvps_for_reply(json_key_value_pair *kvps, int kvps_len, int *kvps_outle
   }
 
   *kvps_outlen = i;
-}
-
-
-/*
- * Return object_type name.
- */
-static char *object_type_id_to_name(BACNET_OBJECT_TYPE object_type)
-{
-  char *name = "";
-
-  switch (object_type) {
-    case OBJECT_DEVICE:
-      name = "device";
-      break;
-
-    case OBJECT_ANALOG_INPUT:
-      name = "analog-input";
-      break;
-
-    case OBJECT_ANALOG_OUTPUT:
-      name = "analog-output";
-      break;
-
-    case OBJECT_ANALOG_VALUE:
-      name = "analog-value";
-      break;
-
-    case OBJECT_BINARY_INPUT:
-      name = "binary-input";
-      break;
-
-    case OBJECT_BINARY_OUTPUT:
-      name = "binary-output";
-      break;
-
-    case OBJECT_BINARY_VALUE:
-      name = "binary-value";
-      break;
-
-    case OBJECT_MULTI_STATE_INPUT:
-      name = "multi-state-input";
-      break;
-
-    case OBJECT_MULTI_STATE_OUTPUT:
-      name = "multi-state-output";
-      break;
-
-    case OBJECT_MULTI_STATE_VALUE:
-      name = "multi-state-value";
-      break;
-
-    default:
-      break;
-  }
-
-  return(name);
-}
-
-
-/*
- * Get device address.
- */
-static void get_device_address(char *buf, int buf_len)
-{
-  BACNET_IP_ADDRESS addr = {0};
-  uint16_t port = bip_get_port();
-
-  bip_get_addr(&addr);
-  snprintf(buf, buf_len - 1, "%u.%u.%u.%u:%u",
-    addr.address[0], addr.address[1], addr.address[2], addr.address[3], port);
-}
-
-
-/*
- * Process local bacnet client read value command.
- */
-int process_local_read_value_command(bacnet_client_cmd_opts *opts)
-{
-  BACNET_CHARACTER_STRING bs_val;
-  BACNET_BINARY_PV b_array[BACNET_MAX_PRIORITY] = {0};
-  BACNET_DEVICE_STATUS device_status;
-  BACNET_OBJECT_TYPE object_type = OBJECT_NONE;
-  uint32_t instance = 0;
-  json_key_value_pair kvps[MAX_JSON_KEY_VALUE_PAIR] = {0};
-  float f_array[BACNET_MAX_PRIORITY] = {0};
-  float f_val;
-  int i_val;
-  int u_val;
-  char s_val[MAX_TOPIC_VALUE_LENGTH] = {0};
-  char s_obj_list[30000] = {0};
-  char *s_ptr;
-  bool found;
-  int i, obj_n, kvps_length = 0;
-
-  /* include device instance number in the reply */
-  u_val = Device_Object_Instance_Number();
-  strcpy(kvps[kvps_length].key, "deviceInstance");
-  sprintf(kvps[kvps_length++].value, "%d", u_val);
-
-  /* include device IP address in the reply */
-  get_device_address(s_val, sizeof(s_val));
-  if (strlen(s_val)) {
-    strcpy(kvps[kvps_length].key, "mac");
-    strcpy(kvps[kvps_length++].value, s_val);
-  }
-
-  if (opts->index >= 0) {
-    strcpy(kvps[kvps_length].key, "index");
-    sprintf(kvps[kvps_length++].value, "%d", opts->index);
-  }
-
-  /* include request tokens */
-  for (i = 0; i < opts->req_tokens_len; i++) {
-    strcpy(kvps[kvps_length].key, opts->req_tokens[i].key);
-    strcpy(kvps[kvps_length++].value, opts->req_tokens[i].value);
-  }
-
-  switch (opts->object_type) {
-    case OBJECT_ANALOG_INPUT:
-      if (Analog_Input_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          f_val = Analog_Input_Present_Value(opts->object_instance);
-          mqtt_publish_command_result(OBJECT_ANALOG_INPUT, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_NAME:
-          Analog_Input_Object_Name(opts->object_instance, &bs_val);
-          mqtt_publish_command_result(OBJECT_ANALOG_INPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        default:
-          return(1);
-      }
-
-      break;
-
-    case OBJECT_ANALOG_OUTPUT:
-      if (Analog_Output_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          f_val = Analog_Output_Present_Value(opts->object_instance);
-          mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_NAME:
-          Analog_Output_Object_Name(opts->object_instance, &bs_val);
-          mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_PRIORITY_ARRAY:
-          set_kvps_for_reply(&kvps[0], MAX_JSON_KEY_VALUE_PAIR, &kvps_length, opts);
-          get_ao_priority_array(opts->object_instance, f_array, BACNET_MAX_PRIORITY);
-          if (opts->index == 0) {
-            i_val = BACNET_MAX_PRIORITY;
-            mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else if (opts->index > 0 && opts->index <= BACNET_MAX_PRIORITY) {
-            f_val = f_array[opts->index -1];
-            if (f_val == AO_LEVEL_NULL) {
-              mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_STRING, "Null", MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            } else {
-              mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            }
-          } else if (opts->index == BACNET_ARRAY_ALL) {
-            mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_FLOAT_MAX_PRIO, f_array, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else {
-            return(1);
-          }
-          break;
-
-        default:
-          return(1);
-      }
-
-      break;
-
-    case OBJECT_ANALOG_VALUE:
-      if (Analog_Value_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          f_val = Analog_Value_Present_Value(opts->object_instance);
-          mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_NAME:
-          Analog_Value_Object_Name(opts->object_instance, &bs_val);
-          mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_PRIORITY_ARRAY:
-          set_kvps_for_reply(&kvps[0], MAX_JSON_KEY_VALUE_PAIR, &kvps_length, opts);
-          get_av_priority_array(opts->object_instance, f_array, BACNET_MAX_PRIORITY);
-          if (opts->index == 0) {
-            i_val = BACNET_MAX_PRIORITY;
-            mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else if (opts->index > 0 && opts->index <= BACNET_MAX_PRIORITY) {
-            f_val = f_array[opts->index -1];
-            if (f_val == AV_LEVEL_NULL) {
-              mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_STRING, "Null", MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            } else {
-              mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            }
-          } else if (opts->index == BACNET_ARRAY_ALL) {
-            mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_FLOAT_MAX_PRIO, f_array, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else {
-            return(1);
-          }
-          break;
-
-        default:
-          return(1);
-      }
-
-      break;
-
-    case OBJECT_BINARY_INPUT:
-      if (Binary_Input_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          i_val = Binary_Input_Present_Value(opts->object_instance);
-          mqtt_publish_command_result(OBJECT_BINARY_INPUT, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_NAME:
-          Binary_Input_Object_Name(opts->object_instance, &bs_val);
-          mqtt_publish_command_result(OBJECT_BINARY_INPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        default:
-          return(1);
-      }
-        
-      break;
-
-    case OBJECT_BINARY_OUTPUT:
-      if (Binary_Output_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-        
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          i_val = Binary_Output_Present_Value(opts->object_instance);
-          mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_NAME:
-          Binary_Output_Object_Name(opts->object_instance, &bs_val);
-          mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_PRIORITY_ARRAY:
-          set_kvps_for_reply(&kvps[0], MAX_JSON_KEY_VALUE_PAIR, &kvps_length, opts);
-          get_bo_priority_array(opts->object_instance, b_array, BACNET_MAX_PRIORITY);
-          if (opts->index == 0) {
-            i_val = BACNET_MAX_PRIORITY;
-            mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else if (opts->index > 0 && opts->index <= BACNET_MAX_PRIORITY) {
-            i_val = b_array[opts->index -1];
-            if (i_val == BINARY_NULL) {
-              mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_STRING, "Null", MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            } else {
-              mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            }
-          } else if (opts->index == BACNET_ARRAY_ALL) {
-            mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_BINARY_MAX_PRIO, b_array, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else {
-            return(1);
-          }
-          break;
-
-        default:
-          return(1);
-      }
-        
-      break;
-
-    case OBJECT_BINARY_VALUE:
-      if (Binary_Value_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          i_val = Binary_Value_Present_Value(opts->object_instance);
-          mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_NAME:
-          Binary_Value_Object_Name(opts->object_instance, &bs_val);
-          mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_PRIORITY_ARRAY:
-          set_kvps_for_reply(&kvps[0], MAX_JSON_KEY_VALUE_PAIR, &kvps_length, opts);
-          get_bv_priority_array(opts->object_instance, b_array, BACNET_MAX_PRIORITY);
-          if (opts->index == 0) {
-            i_val = BACNET_MAX_PRIORITY;
-            mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else if (opts->index > 0 && opts->index <= BACNET_MAX_PRIORITY) {
-            i_val = b_array[opts->index -1];
-            if (i_val == BINARY_NULL) {
-              mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_STRING, "Null", MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            } else {
-              mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-                MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            }
-          } else if (opts->index == BACNET_ARRAY_ALL) {
-            mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, -1,
-              MQTT_TOPIC_VALUE_BINARY_MAX_PRIO, b_array, MQTT_READ_VALUE_CMD_RESULT_TOPIC, NULL, 0);
-          } else {
-            return(1);
-          }
-          break;
-
-        default:
-          return(1);
-      }
-
-      break;
-
-    case OBJECT_DEVICE:
-      if (!Device_Valid_Object_Instance_Number(opts->object_instance)) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_OBJECT_NAME:
-          Device_Object_Name(opts->object_instance, &bs_val);
-          mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bs_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_IDENTIFIER:
-          u_val = Device_Object_Instance_Number();
-          mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_OBJECT_IDENTIFIER, -1,
-            MQTT_TOPIC_VALUE_INTEGER, &u_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_SYSTEM_STATUS:
-          device_status = Device_System_Status();
-          device_status_to_str(device_status, s_val, sizeof(s_val));
-          mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_SYSTEM_STATUS, -1,
-            MQTT_TOPIC_VALUE_STRING, s_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_VENDOR_NAME:
-          s_ptr = (char *)Device_Vendor_Name();
-          mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_VENDOR_NAME, -1,
-            MQTT_TOPIC_VALUE_STRING, s_ptr, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_VENDOR_IDENTIFIER:
-          u_val = Device_Vendor_Identifier();
-          mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_VENDOR_IDENTIFIER, -1,
-            MQTT_TOPIC_VALUE_INTEGER, &u_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_LIST:
-          obj_n = Device_Object_List_Count();
-          if (opts->index == 0) {
-            i_val = obj_n;
-            mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_OBJECT_LIST, -1,
-              MQTT_TOPIC_VALUE_INTEGER, &i_val, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else if (opts->index == BACNET_ARRAY_ALL) {
-            if (obj_n > 0) {
-              strcpy(s_obj_list, "[");
-            }
-            for (i = 1; i <= obj_n; i++) {
-              found = Device_Object_List_Identifier(i, &object_type, &instance);
-              if (found) {
-                s_ptr = object_type_id_to_name(object_type);
-                snprintf(&s_obj_list[strlen(s_obj_list)], sizeof(s_obj_list) - strlen(s_obj_list),
-                  "%s[\"%s\", \"%d\"]", (i > 1) ? "," : "", s_ptr, instance + 1);
-              }
-            }
-
-            if (obj_n > 0) {
-              snprintf(&s_obj_list[strlen(s_obj_list)], sizeof(s_obj_list) - strlen(s_obj_list), "]");
-            }
-            mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_OBJECT_LIST, -1,
-              MQTT_TOPIC_VALUE_OBJECT_LIST, s_obj_list, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          } else {
-            found = Device_Object_List_Identifier(opts->index, &object_type, &instance);
-            if (found) {
-              s_ptr = object_type_id_to_name(object_type);
-              snprintf(&s_obj_list[strlen(s_obj_list)], sizeof(s_obj_list) - strlen(s_obj_list),
-                "[\"%s\", \"%d\"]", s_ptr, instance + 1);
-              mqtt_publish_command_result(OBJECT_DEVICE, opts->object_instance, PROP_OBJECT_LIST, -1,
-              MQTT_TOPIC_VALUE_OBJECT_LIST, s_obj_list, MQTT_READ_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            }
-          }
-          break;
-
-        default:
-          return(1);
-      }
-
-      break;
-
-    default:
-      if (mqtt_debug) {
-        printf("Unknown read value object_type: [%d]\n", opts->object_type);
-      }
-      return(1);
-  }
-
-  return(0);
 }
 
 
@@ -4592,10 +4312,6 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     address_add(opts->device_instance, MAX_APDU, &dest);
   }
 
-  /* if (is_command_for_us(opts)) {
-    printf("*** Command for us\n");
-    process_local_read_value_command(opts);
-  } else { */
     if (opts->tag_flags & CMD_TAG_FLAG_SLOW_TEST) {
       printf("** Slow test enabled!\n");
       usleep(1000000);
@@ -4639,7 +4355,6 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     if (pdu_len) {
       npdu_handler(&src, &Rx_Buf[0], pdu_len);
     }
-  // }
 
   return(0);
 }
@@ -4847,282 +4562,6 @@ static int check_and_set_priority_array_set(bacnet_client_cmd_opts *opts)
       default:
         break;
     }
-  }
-
-  return(0);
-}
-
-
-/*
- * Process local bacnet client write value command.
- */
-int process_local_write_value_command(bacnet_client_cmd_opts *opts)
-{
-  BACNET_CHARACTER_STRING bacnet_string;
-  BACNET_BINARY_PV pv;
-  json_key_value_pair kvps[MAX_JSON_KEY_VALUE_PAIR] = {0};
-  int priority;
-  int i_val;
-  float f_val;
-  int u_val;
-  char s_val[MAX_TOPIC_VALUE_LENGTH] = {0};
-  char *endptr;
-  int i, ret, kvps_length = 0;
-
-  /* check and set priority array set */
-  if (opts->prio_array_len > 0) {
-    ret = check_and_set_priority_array_set(opts);
-    if (ret) {
-      if (mqtt_debug) {
-        printf("Invalid priority array set!\n");
-      }
-
-      return(1);
-    }
-  }
-
-  /* include device instance number in the reply */
-  u_val = Device_Object_Instance_Number();
-  strcpy(kvps[kvps_length].key, "deviceInstance");
-  sprintf(kvps[kvps_length++].value, "%d", u_val);
-
-  /* include device IP address in the reply */
-  get_device_address(s_val, sizeof(s_val));
-  if (strlen(s_val)) {
-    strcpy(kvps[kvps_length].key, "mac");
-    strcpy(kvps[kvps_length++].value, s_val);
-  }
-
-  /* include request tokens */
-  for (i = 0; i < opts->req_tokens_len; i++) {
-    strcpy(kvps[kvps_length].key, opts->req_tokens[i].key);
-    strcpy(kvps[kvps_length++].value, opts->req_tokens[i].value);
-  }
-
-  switch (opts->object_type) {
-    case OBJECT_ANALOG_INPUT:
-      if (Analog_Input_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          f_val = strtof(opts->value, &endptr);
-          Analog_Input_Present_Value_Set(opts->object_instance, f_val, NULL, true);
-          f_val = Analog_Input_Present_Value(opts->object_instance);
-          mqtt_publish_command_result(OBJECT_ANALOG_INPUT, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-        
-        case PROP_OBJECT_NAME:
-          characterstring_init_ansi(&bacnet_string, opts->value);
-          Analog_Input_Set_Object_Name(opts->object_instance, &bacnet_string, NULL, true);
-          mqtt_publish_command_result(OBJECT_ANALOG_INPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bacnet_string, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        default:
-          return(1);
-      }
-
-      break;
-
-    case OBJECT_ANALOG_OUTPUT:
-      if (Analog_Output_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      if (opts->prio_array_len > 0) {
-        printf("- Writing AO priority array\n");
-        for (i = 0; i < opts->prio_array_len; i++) {
-          if (mqtt_debug) {
-            printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
-          }
-          f_val = strtof(opts->prio_array[i].value, &endptr);
-          Analog_Output_Present_Value_Set(opts->object_instance, f_val, opts->prio_array[i].index, NULL, true);
-        }
-        mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, 0,
-          MQTT_TOPIC_VALUE_FLOAT_PRIO_ARRAY, &opts->prio_array[0], MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-      } else {
-        priority = (opts->priority) ? opts->priority : BACNET_MAX_PRIORITY;
-        switch(opts->property) {
-          case PROP_PRESENT_VALUE:
-            f_val = strtof(opts->value, &endptr);
-            Analog_Output_Present_Value_Set(opts->object_instance, f_val, priority, NULL, true);
-            f_val = Analog_Output_Present_Value(opts->object_instance);
-            mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_PRESENT_VALUE, opts->priority,
-              MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          case PROP_OBJECT_NAME:
-            characterstring_init_ansi(&bacnet_string, opts->value);
-            Analog_Output_Set_Object_Name(opts->object_instance, &bacnet_string, NULL, true);
-            mqtt_publish_command_result(OBJECT_ANALOG_OUTPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-              MQTT_TOPIC_VALUE_BACNET_STRING, &bacnet_string, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          default:
-            return(1);
-        }
-      }
-
-      break;
-
-    case OBJECT_ANALOG_VALUE:
-      if (Analog_Value_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      if (opts->prio_array_len > 0) {
-        printf("- Writing AV priority array\n");
-        for (i = 0; i < opts->prio_array_len; i++) {
-          if (mqtt_debug) {
-            printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
-          }
-          f_val = strtof(opts->prio_array[i].value, &endptr);
-          Analog_Value_Present_Value_Set(opts->object_instance, f_val, opts->prio_array[i].index, NULL, true);
-        }
-        mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, 0,
-          MQTT_TOPIC_VALUE_FLOAT_PRIO_ARRAY, &opts->prio_array[0], MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-      } else {
-        priority = (opts->priority) ? opts->priority : BACNET_MAX_PRIORITY;
-        switch(opts->property) {
-          case PROP_PRESENT_VALUE:
-            f_val = strtof(opts->value, &endptr);
-            Analog_Value_Present_Value_Set(opts->object_instance, f_val, priority, NULL, true);
-            f_val = Analog_Value_Present_Value(opts->object_instance);
-            mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_PRESENT_VALUE, opts->priority,
-              MQTT_TOPIC_VALUE_FLOAT, &f_val, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          case PROP_OBJECT_NAME:
-            characterstring_init_ansi(&bacnet_string, opts->value);
-            Analog_Value_Set_Object_Name(opts->object_instance, &bacnet_string, NULL, true);
-            mqtt_publish_command_result(OBJECT_ANALOG_VALUE, opts->object_instance, PROP_OBJECT_NAME, -1,
-              MQTT_TOPIC_VALUE_BACNET_STRING, &bacnet_string, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          default:
-            return(1);
-        }
-      }
-
-      break;
-
-    case OBJECT_BINARY_INPUT:
-      if (Binary_Input_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      switch(opts->property) {
-        case PROP_PRESENT_VALUE:
-          i_val = atoi(opts->value);
-          pv = (i_val == 0) ? 0 : 1;
-          Binary_Input_Present_Value_Set(opts->object_instance, pv, NULL, true);
-          mqtt_publish_command_result(OBJECT_BINARY_INPUT, opts->object_instance, PROP_PRESENT_VALUE, -1,
-            MQTT_TOPIC_VALUE_INTEGER, &pv, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        case PROP_OBJECT_NAME:
-          characterstring_init_ansi(&bacnet_string, opts->value);
-          Binary_Input_Set_Object_Name(opts->object_instance, &bacnet_string, NULL, true);
-          mqtt_publish_command_result(OBJECT_BINARY_INPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-            MQTT_TOPIC_VALUE_BACNET_STRING, &bacnet_string, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-          break;
-
-        default:
-          return(1);
-      }
-
-      break;
-
-    case OBJECT_BINARY_OUTPUT:
-      if (Binary_Output_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      if (opts->prio_array_len > 0) {
-        printf("- Writing BO priority array\n");
-        for (i = 0; i < opts->prio_array_len; i++) {
-          if (mqtt_debug) {
-            printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
-          }
-          pv = atoi(opts->prio_array[i].value);
-          Binary_Output_Present_Value_Set(opts->object_instance, pv, opts->prio_array[i].index, NULL, true);
-        }
-        mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRIORITY_ARRAY, 0,
-          MQTT_TOPIC_VALUE_BINARY_PRIO_ARRAY, &opts->prio_array[0], MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-      } else {
-        priority = (opts->priority) ? opts->priority : BACNET_MAX_PRIORITY;
-        switch(opts->property) {
-          case PROP_PRESENT_VALUE:
-            i_val = atoi(opts->value);
-            pv = (i_val == 0) ? 0 : 1;
-            Binary_Output_Present_Value_Set(opts->object_instance, pv, priority, NULL, true);
-            mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_PRESENT_VALUE, opts->priority,
-              MQTT_TOPIC_VALUE_INTEGER, &pv, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          case PROP_OBJECT_NAME:
-            characterstring_init_ansi(&bacnet_string, opts->value);
-            Binary_Output_Set_Object_Name(opts->object_instance, &bacnet_string, NULL, true);
-            mqtt_publish_command_result(OBJECT_BINARY_OUTPUT, opts->object_instance, PROP_OBJECT_NAME, -1,
-              MQTT_TOPIC_VALUE_BACNET_STRING, &bacnet_string, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          default:
-            return(1);
-        }
-      }
-
-      break;
-
-    case OBJECT_BINARY_VALUE:
-      if (Binary_Value_Instance_To_Index(opts->object_instance) < 1) {
-        return(1);
-      }
-
-      if (opts->prio_array_len > 0) {
-        printf("- Writing BV priority array\n");
-        for (i = 0; i < opts->prio_array_len; i++) {
-          if (mqtt_debug) {
-            printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
-          }
-          pv = atoi(opts->prio_array[i].value);
-          Binary_Value_Present_Value_Set(opts->object_instance, pv, opts->prio_array[i].index, NULL, true);
-        }
-        mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRIORITY_ARRAY, 0,
-          MQTT_TOPIC_VALUE_BINARY_PRIO_ARRAY, &opts->prio_array[0], MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-      } else {
-        priority = (opts->priority) ? opts->priority : BACNET_MAX_PRIORITY;
-        switch(opts->property) {
-          case PROP_PRESENT_VALUE:
-            i_val = atoi(opts->value);
-            pv = (i_val == 0) ? 0 : 1;
-            Binary_Value_Present_Value_Set(opts->object_instance, pv, priority, NULL, true);
-            mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_PRESENT_VALUE, opts->priority,
-              MQTT_TOPIC_VALUE_INTEGER, &pv, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          case PROP_OBJECT_NAME:
-            characterstring_init_ansi(&bacnet_string, opts->value);
-            Binary_Value_Set_Object_Name(opts->object_instance, &bacnet_string, NULL, true);
-            mqtt_publish_command_result(OBJECT_BINARY_VALUE, opts->object_instance, PROP_OBJECT_NAME, -1,
-              MQTT_TOPIC_VALUE_BACNET_STRING, &bacnet_string, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC, kvps, kvps_length);
-            break;
-
-          default:
-            return(1);
-        }
-      }
-
-      break;
-
-    default:
-      if (mqtt_debug) {
-        printf("Unknown read value object_type: [%d]\n", opts->object_type);
-      }
-      return(1);
   }
 
   return(0);
@@ -5586,10 +5025,6 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       return(1);
   }
 
-  /* if (is_command_for_us(opts)) {
-    printf("command for us\n");
-    process_local_write_value_command(opts);
-  } else { */
     if (opts->prio_array_len > 0) {
       ret = check_and_set_priority_array_set(opts);
       if (ret) {
@@ -5641,7 +5076,7 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
 
         send_write_request(&obj_data, &value, opts, send_reply);
       }
-    } else {
+  } else {
     memset(&obj_data, 0, sizeof(obj_data));
     obj_data.device_instance = opts->device_instance;
     obj_data.object_type = opts->object_type;
@@ -5686,7 +5121,6 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       npdu_handler(&src, &Rx_Buf[0], pdu_len);
     }
   }
-  // }
 
   return(0);
 }
@@ -5708,6 +5142,8 @@ int process_bacnet_client_command(char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_
     process_bacnet_client_pics_command(opts);
   } else if (!strcasecmp(topic_tokens[2], "point_discovery")) {
     process_bacnet_client_point_discovery_command(opts);
+  } else if (!strcasecmp(topic_tokens[2], "points_info")) {
+    process_bacnet_client_points_info_command(opts);
   } else {
     if (mqtt_debug) {
       printf("Unknown Bacnet client command: [%s]\n", topic_tokens[2]);
@@ -5760,6 +5196,7 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     "objects",
     "page_number",
     "page_size",
+    "points",
     NULL
   };
 
@@ -5874,6 +5311,19 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
     } else if (!strcmp(key, "page_size")) {
       strncpy(value, json_object_get_string(json_field), sizeof(value) - 1);
       cmd_opts->page_size = atoi(value);
+    } else if (!strcmp(key, "points")) {
+      point_entry_cb *point_cb;
+      array_len = json_object_array_length(json_field); 
+      cmd_opts->points = malloc((sizeof(point_entry_cb)) * array_len);
+      cmd_opts->points_len = array_len;
+      printf("- points_len: %d\n", cmd_opts->points_len);
+      for (ii = 0; ii < array_len; ii++) {
+        point_cb = &cmd_opts->points[ii];
+        memset(point_cb, 0, sizeof(point_entry_cb));
+        obj = json_object_array_get_idx(json_field, ii);
+        strncpy(&point_cb->obj_name[0], json_object_get_string(obj), sizeof(point_cb->obj_name) - 1);
+        printf("- [%d] => [%s]\n", ii, point_cb->obj_name);
+      }
     }
   }
 
@@ -5913,7 +5363,7 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_messag
   int n_topic_tokens;
   int rc = 1;
 
-  mqtt_msg = malloc(sizeof(mqtt_msg_cb));
+  mqtt_msg = calloc(1, sizeof(mqtt_msg_cb));
   if (!mqtt_msg) {
     printf("Failed to allocation memory for mqtt_msg_cb!\n");
     goto EXIT;
@@ -5925,9 +5375,14 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_messag
   memset(&cmd_opts->prio_array[0], 0, sizeof(cmd_opts->prio_array));
   cmd_opts->rpm_objects_len = 0;
   cmd_opts->rpm_objects = NULL;
-  memset(mqtt_msg->topic_value, 0, sizeof(mqtt_msg->topic_value));
-  strncpy(mqtt_msg->topic_value, (char*)message->payload,
-    (message->payloadlen > sizeof(mqtt_msg->topic_value)) ? sizeof(mqtt_msg->topic_value) -1 : message->payloadlen);
+  mqtt_msg->topic_value_length = message->payloadlen + 1;
+  mqtt_msg->topic_value = calloc(1, mqtt_msg->topic_value_length);
+  if (!mqtt_msg->topic_value) {
+    printf("Failed to allocation memory for mqtt_msg_cb->topic_value!\n");
+    goto EXIT;
+  }
+
+  strncpy(mqtt_msg->topic_value, (char*)message->payload, message->payloadlen);
 
   if (mqtt_debug) {
      printf("MQTT message arrived: => %d\n", getpid());
@@ -5978,8 +5433,18 @@ int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_messag
 
   if (rc) {
     if (mqtt_msg) {
-      if (cmd_opts && cmd_opts->rpm_objects) {
-        free(cmd_opts->rpm_objects);
+      if (cmd_opts) {
+        if (cmd_opts->rpm_objects) {
+          free(cmd_opts->rpm_objects);
+        }
+
+        if (cmd_opts->points) {
+          free(cmd_opts->points);
+        }
+      }
+
+      if (mqtt_msg->topic_value) {
+        free(mqtt_msg->topic_value);
       }
 
       free(mqtt_msg);
@@ -6574,7 +6039,7 @@ void sweep_bacnet_client_point_disc_requests(void)
   time_t cur_tt = time(NULL);
 
   while (ptr != NULL) {
-    if ((ptr->timestamp + ptr->data.timeout) < cur_tt) {
+    if (((ptr->timestamp + ptr->data.timeout) < cur_tt) && (ptr->data.last_idx >= ptr->data.points_len)) {
       printf("- Point discovery Aged request found: %d\n", ptr->request_id);
 
       tmp = ptr;
@@ -6599,6 +6064,10 @@ void sweep_bacnet_client_point_disc_requests(void)
         free(pe_tmp);
       }
 
+      if (tmp->data.points) {
+        free(tmp->data.points);
+      }
+
       free(tmp);
       continue;
     } else {
@@ -6606,6 +6075,59 @@ void sweep_bacnet_client_point_disc_requests(void)
       switch (ptr->state) {
         case POINT_DISC_STATE_GET_POINTS:
           get_bacnet_client_point_disc_points(ptr);
+          break;
+
+        case POINT_DISC_STATE_GET_POINTS_ALL:
+          get_bacnet_client_point_disc_points_all(ptr);
+          break;
+      }
+    }
+
+    prev = ptr;
+    ptr = ptr->next;
+  }
+}
+
+
+/*
+ * Sweep aged bacnet client points info requests.
+ */
+void sweep_bacnet_client_points_info_requests(void)
+{
+  llist_points_info_cb *tmp, *prev = NULL;
+  llist_points_info_cb *ptr = bc_points_info_head;
+  time_t cur_tt = time(NULL);
+      
+  while (ptr != NULL) {
+    if (((ptr->timestamp + ptr->data.timeout) < cur_tt) && (ptr->data.last_idx >= ptr->data.points_len)) {
+      printf("- Points info Aged request found: %d\n", ptr->request_object_id);
+        
+      tmp = ptr;
+      if (ptr == bc_points_info_head) {
+        bc_points_info_head = ptr->next;
+        ptr = bc_points_info_head;
+      } else {
+        prev->next = ptr->next;
+        if (ptr == bc_points_info_tail) {
+          bc_points_info_tail = prev;
+        } 
+          
+        ptr = ptr->next;
+      }
+
+      publish_bacnet_client_points_info_result(tmp);
+    
+      if (tmp->data.points) {
+        free(tmp->data.points);
+      }
+
+      free(tmp);
+      continue;
+    } else {
+      /* perform state machine */
+      switch (ptr->state) {
+        case POINTS_INFO_STATE_GET_POINTS_ALL:
+          get_bacnet_client_points_info_points_all(ptr);
           break;
       }
     }
@@ -6751,15 +6273,89 @@ void shutdown_bacnet_client_point_disc_list(void)
 /*
  * Get bacnet client point discovery request.
  */
-llist_point_disc_cb *get_bacnet_client_point_disc_req(uint32_t request_id, BACNET_ADDRESS *src)
+llist_point_disc_cb *get_bacnet_client_point_disc_request(uint32_t request_id, BACNET_ADDRESS *src)
 {
   llist_point_disc_cb *ptr = bc_point_disc_head;
 
   while (ptr != NULL) {
     if (ptr->request_id == request_id && !memcmp(src, &ptr->data.dest, sizeof(BACNET_ADDRESS))) {
-      ptr->data_received = true;
       ptr->timestamp = time(NULL);
       return(ptr);
+    }
+
+    ptr = ptr->next;
+  }
+
+  return(NULL);
+}
+
+
+/*
+ * Get bacnet client point discovery request.
+ */
+llist_point_disc_cb *get_bacnet_client_point_disc_req(uint32_t request_id, BACNET_ADDRESS *src)
+{
+  llist_point_disc_cb *ptr = bc_point_disc_head;
+
+  while (ptr != NULL) {
+    if (!memcmp(src, &ptr->data.dest, sizeof(BACNET_ADDRESS))) {
+      if (ptr->request_id == request_id) {
+        return(ptr);
+      }
+
+      for (int i = 0; i < ptr->data.points_len; i++) {
+        if (ptr->data.points[i].request_id == request_id) {
+          return(ptr);
+        }
+      }
+    }
+
+    ptr = ptr->next;
+  }
+
+  return(NULL);
+}
+
+
+/*
+ * Intialize bacnet client points info list.
+ */
+void init_bacnet_client_points_info_list(void)
+{
+  bc_points_info_head = bc_points_info_tail = NULL;
+}
+
+
+/*
+ * Shutdown bacnet client points info list.
+ */
+void shutdown_bacnet_client_points_info_list(void)
+{
+  llist_points_info_cb *tmp, *ptr = bc_points_info_head;
+
+  while (ptr != NULL) {
+    tmp = ptr;
+    ptr = ptr->next;
+    free(tmp);
+  }
+}
+
+
+/*
+ * Get bacnet client point discovery request.
+ */
+llist_points_info_cb *get_bacnet_client_points_info_req(uint32_t request_id, BACNET_ADDRESS *src)
+{
+  llist_points_info_cb *ptr = bc_points_info_head;
+
+  while (ptr != NULL) {
+    if (!memcmp(src, &ptr->data.dest, sizeof(BACNET_ADDRESS))) {
+      for (int i = 0; i < ptr->data.points_len; i++) {
+        if (ptr->data.points[i].request_id == request_id) {
+          ptr->timestamp = time(NULL);
+          return(ptr);
+        }
+      }
     }
 
     ptr = ptr->next;
@@ -6855,6 +6451,7 @@ int mqtt_client_init(void)
   init_request_tokens();
   init_bacnet_client_pics_list();
   init_bacnet_client_point_disc_list();
+  init_bacnet_client_points_info_list();
 
   pthread_mutexattr_init(&mutex_attr);
   rc = pthread_mutex_init(&mqtt_mutex, &mutex_attr);
@@ -7078,6 +6675,7 @@ void mqtt_client_shutdown(void)
   shutdown_bacnet_client_whois_list();
   shutdown_bacnet_client_pics_list();
   shutdown_bacnet_client_point_disc_list();
+  shutdown_bacnet_client_points_info_list();
 
   mqtt_msg_queue_shutdown();
 }
@@ -7599,6 +7197,7 @@ int subscribe_bacnet_client_point_discovery_command(void *context)
   int rc;
   const char *topics[] = {
     "bacnet/cmd/point_discovery",
+    "bacnet/cmd/points_info",
     NULL
   };
 
@@ -10277,10 +9876,12 @@ int process_bacnet_client_point_discovery_command(bacnet_client_cmd_opts *opts)
     address_add(opts->device_instance, MAX_APDU, &dest);
   }
 
-  /* Get number of points */
+  /* Get total number of objects */
   request_invoke_id = Send_Read_Property_Request(opts->device_instance,
     OBJECT_DEVICE, opts->device_instance, PROP_OBJECT_LIST, 0);
-  printf("point discovery request_invoke_id: %d\n", request_invoke_id);
+  if (mqtt_debug) {
+    printf("point discovery request_invoke_id: %d\n", request_invoke_id);
+  }
 
   if (opts->timeout > 0) {
     timeout = opts->timeout;
@@ -10309,15 +9910,334 @@ int get_bacnet_client_point_disc_points(llist_point_disc_cb *pd_ptr)
   uint16_t pdu_len;
   uint32_t request_invoke_id;
 
+  pd_ptr->request_id = 0;
+  pd_ptr->data.last_idx = 0;
+  pd_ptr->data.points_len = pd_ptr->data.total_points;
+  pd_ptr->data.points = calloc(pd_ptr->data.points_len, sizeof(point_entry_cb));
+
+  /* get list of objects */
   request_invoke_id = Send_Read_Property_Request(pd_ptr->data.device_instance,
     OBJECT_DEVICE, pd_ptr->data.device_instance, PROP_OBJECT_LIST, BACNET_ARRAY_ALL);
-  printf("point discovery request_invoke_id: %d\n", request_invoke_id);
+  if (mqtt_debug) {
+    printf("- Point discovery points request_invoke_id: %d\n", request_invoke_id);
+  }
+
   pd_ptr->request_id = request_invoke_id;
   pd_ptr->state = POINT_DISC_STATE_GET_POINTS_SENT;
+  pd_ptr->timestamp = time(NULL);
 
   pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, pd_ptr->data.timeout);
   if (pdu_len) {
     npdu_handler(&src, &Rx_Buf[0], pdu_len);
+  }
+
+  return(0);
+}
+
+
+/*
+ * Get point desc point.
+ */
+int get_bacnet_client_point_disc_points_all(llist_point_disc_cb *pd_ptr)
+{
+  uint8_t Rx_Buf[MAX_MPDU] = { 0 };
+  BACNET_ADDRESS src = { 0 };
+  uint16_t pdu_len;
+  uint32_t request_invoke_id;
+  point_entry_cb *point_cb;
+  int idx = 0;
+  int ii;
+
+  if (mqtt_debug) {
+    printf("- point disc last_idx: %d\n", pd_ptr->data.last_idx);
+  }
+
+  for (int i = pd_ptr->data.last_idx, bi = 0; (i < pd_ptr->data.points_len) && (bi < POINT_DISC_REQ_ALL_BATCH_SIZE); i++, bi++) {
+    idx = i + 1;
+    pd_ptr->data.last_idx = idx;
+
+    for (ii = 1; ii <= POINT_DISC_REQ_ALL_RETRY_LIMIT; ii++) {
+      request_invoke_id = Send_Read_Property_Request(pd_ptr->data.device_instance,
+        OBJECT_DEVICE, pd_ptr->data.device_instance, PROP_OBJECT_LIST, idx);
+      if (mqtt_debug) {
+        printf("- Point discovery point request_invoke_id: %d , last_idx: %d/%d\n",
+          request_invoke_id, idx, pd_ptr->data.total_points);
+      }
+
+      if (request_invoke_id > 0) {
+        break;
+      } else {
+        if (mqtt_debug) {
+          printf("- Failed to send read request #%d, retrying.\n", ii);
+        }
+
+        usleep(500000 * ii);
+      }
+    }
+
+    if (ii > POINT_DISC_REQ_ALL_RETRY_LIMIT) {
+      if (mqtt_debug) {
+        printf("- WARNING: Error sending point discovery read request!\n");
+      }
+
+      continue;
+    }
+
+    point_cb = &pd_ptr->data.points[i];
+    point_cb->request_id = request_invoke_id;
+    point_cb->sent = true;
+    point_cb->values_updated = false;
+    point_cb->request_idx = idx;
+    pd_ptr->timestamp = time(NULL);
+
+    pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, pd_ptr->data.timeout);
+    if (pdu_len) {
+      npdu_handler(&src, &Rx_Buf[0], pdu_len);
+    }
+  }
+
+  if (idx >= pd_ptr->data.points_len) {
+    pd_ptr->state = POINT_DISC_STATE_GET_POINTS_ALL_SENT;
+  }
+
+  return(0);
+}
+
+
+/*
+ * Add bacnet client points info.
+ */
+llist_points_info_cb *add_bacnet_client_points_info(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts)
+{
+  llist_points_info_cb *ptr;
+
+  ptr = malloc(sizeof(llist_points_info_cb));
+  if (!ptr) {
+    printf("Error allocating memory for llist_points_info_cb!\n");
+    return(NULL);
+  }
+
+  memset(ptr, 0, sizeof(llist_points_info_cb));
+  ptr->request_object_id = bc_points_info_request_ctr++;
+  ptr->timestamp = time(NULL);
+  ptr->data.timeout = opts->timeout;
+  memcpy(&ptr->data.dest, dest, sizeof(BACNET_ADDRESS));
+  ptr->data.device_instance = opts->device_instance;
+  ptr->data.dnet = opts->dnet;
+  if (strlen(opts->mac)) {
+    strcpy(ptr->data.mac, opts->mac);
+  }
+
+  if (strlen(opts->dadr)) {
+    strcpy(ptr->data.dadr, opts->dadr);
+  }
+
+  if (opts->req_tokens_len > 0) {
+    ptr->data.req_tokens_len = opts->req_tokens_len;     
+    memcpy((char *)&ptr->data.req_tokens[0], (char *)&opts->req_tokens[0],
+      sizeof(request_token_cb) * opts->req_tokens_len);
+  }
+
+  if (opts->points_len > 0) {
+    ptr->data.points_len = opts->points_len;     
+    ptr->data.points = malloc(sizeof(point_entry_cb) * ptr->data.points_len);
+    if (!ptr->data.points) {
+      printf("Error allocating memory for llist_points_info_cb points!\n");
+      free(ptr);
+      return(NULL);
+    }
+
+    memcpy((char *)&ptr->data.points[0], (char *)&opts->points[0],
+      sizeof(point_entry_cb) * opts->points_len);
+  }
+
+  if (!bc_points_info_head) {
+    bc_points_info_head = bc_points_info_tail = ptr;
+  } else {
+    bc_points_info_tail->next = ptr;
+    bc_points_info_tail = ptr;
+  }
+
+  ptr->next = NULL;
+
+  if (mqtt_debug) {
+    printf("- Added points info request: %d\n", ptr->request_object_id);
+  }
+
+  return(ptr);
+}
+
+
+/*
+ * Process Bacnet client points info command.
+ */
+int process_bacnet_client_points_info_command(bacnet_client_cmd_opts *opts)
+{
+  BACNET_MAC_ADDRESS mac = { 0 };
+  BACNET_MAC_ADDRESS dadr = { 0 };
+  BACNET_ADDRESS dest = { 0 };
+  llist_points_info_cb *lpi_ptr;
+  point_entry_cb *point_cb;
+  int i, dnet = -1;
+  bool specific_address = false;
+  char *ptr, *s_ptr, obj_name[MAX_JSON_VALUE_LENGTH] = {0};
+
+  if (strlen(opts->mac)) {
+    if (address_mac_from_ascii(&mac, opts->mac)) {
+      specific_address = true;
+    }
+  }
+
+  if (strlen(opts->dadr)) {
+    if (address_mac_from_ascii(&dadr, opts->dadr)) {
+      specific_address = true;
+    }
+  }
+
+  if (opts->dnet >= 0) {
+    dnet = opts->dnet;
+    if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+      specific_address = true;
+    }
+  }
+
+  if (specific_address) {
+    if (dadr.len && mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      memcpy(&dest.adr[0], &dadr.adr[0], dadr.len);
+      dest.len = dadr.len;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+    } else if (mac.len) {
+      memcpy(&dest.mac[0], &mac.adr[0], mac.len);
+      dest.mac_len = mac.len;
+      dest.len = 0;
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = 0;
+      }
+    } else {
+      if ((dnet >= 0) && (dnet <= BACNET_BROADCAST_NETWORK)) {
+        dest.net = dnet;
+      } else {
+        dest.net = BACNET_BROADCAST_NETWORK;
+      }
+      dest.mac_len = 0;
+      dest.len = 0;
+    }
+
+    address_add(opts->device_instance, MAX_APDU, &dest);
+  }
+
+  for (i = 0; i < opts->points_len; i++) {
+    point_cb = &opts->points[i];
+    strcpy(obj_name, point_cb->obj_name);
+    if (mqtt_debug) {
+      printf("- [%d] Get point name of %s\n", i, obj_name);
+    }
+    s_ptr = &obj_name[0];
+    ptr = strsep(&s_ptr, "-");
+    point_cb->instance = atoi(s_ptr);
+    if (!get_object_type_id(ptr, &point_cb->object_type)) {
+      if (mqtt_debug) {
+        printf("-- Unsupported object name: [%s]\n", ptr);
+      }
+
+      point_cb->error = true;
+      strcpy(point_cb->err_msg, "Unsupported object type");
+      continue;
+    }
+
+    if (point_cb->instance < 1) {
+      if (mqtt_debug) {
+        printf("-- Invalid object instance: [%d]\n", point_cb->instance);
+      }
+
+      point_cb->error = true;
+      strcpy(point_cb->err_msg, "Invalid object instance");
+      continue;
+    }
+  }
+
+  if (!opts->timeout) {
+    opts->timeout = BACNET_CLIENT_POINT_DISC_TIMEOUT;
+  }
+
+  lpi_ptr = add_bacnet_client_points_info(&dest, opts);
+  if (!lpi_ptr) {
+    return(1);
+  }
+
+  lpi_ptr->state = POINTS_INFO_STATE_GET_POINTS_ALL;
+
+  get_bacnet_client_points_info_points_all(lpi_ptr);
+
+  return(0);
+}
+
+
+/*
+ * Get points info all points.
+ */
+int get_bacnet_client_points_info_points_all(llist_points_info_cb *lpi_ptr)
+{
+  point_entry_cb *point_cb;
+  int i, ii, bi, idx = 0;
+  uint32_t request_invoke_id;
+
+  for (i = lpi_ptr->data.last_idx, bi = 0; (i < lpi_ptr->data.points_len) && (bi < POINTS_INFO_REQ_ALL_BATCH_SIZE); i++, bi++) {
+    idx = i + 1;
+    lpi_ptr->data.last_idx = idx;
+
+    point_cb = &lpi_ptr->data.points[i];
+    if (point_cb->error) {
+      continue;
+    }
+
+    if (mqtt_debug) {
+      printf("- [%d/%d] Sending points info read property object name request for device: %d , object_type: %d , object_instance: %d\n",
+       idx, lpi_ptr->data.points_len, lpi_ptr->data.device_instance, point_cb->object_type, point_cb->instance);
+    }
+
+    for (ii = 1; ii <= POINTS_INFO_REQ_ALL_RETRY_LIMIT; ii++) {
+      request_invoke_id = Send_Read_Property_Request(lpi_ptr->data.device_instance,
+        point_cb->object_type, point_cb->instance, PROP_OBJECT_NAME, BACNET_ARRAY_ALL);
+      if (mqtt_debug) {
+        printf("- Points info request_invoke_id: %d , last_idx: %d/%d\n",
+          request_invoke_id, idx, lpi_ptr->data.points_len);
+      }
+
+      if (request_invoke_id > 0) {
+        break;
+      } else {
+        if (mqtt_debug) {
+          printf("- Failed to send read request #%d, retrying.\n", ii);
+        }
+
+        usleep(500000 * ii);
+      }
+    }
+
+    if (ii > POINT_DISC_REQ_ALL_RETRY_LIMIT) {
+      if (mqtt_debug) {
+        printf("- WARNING: Error sending points info read request!\n");
+      }
+      continue;
+    }
+
+    point_cb->request_id = request_invoke_id;
+    point_cb->values_updated = false;
+    point_cb->sent = true;
+    lpi_ptr->timestamp = time(NULL);
+  }
+
+  if (idx >= lpi_ptr->data.points_len) {
+    lpi_ptr->state = POINTS_INFO_STATE_GET_POINTS_ALL_SENT;
   }
 
   return(0);
@@ -10501,6 +10421,10 @@ int mqtt_msg_pop_and_process(void)
   if (mqtt_msg) {
     if (mqtt_msg->cmd_opts.rpm_objects) {
       free(mqtt_msg->cmd_opts.rpm_objects);
+    }
+
+    if (mqtt_msg->cmd_opts.points) {
+      free(mqtt_msg->cmd_opts.points);
     }
 
     free(mqtt_msg);
