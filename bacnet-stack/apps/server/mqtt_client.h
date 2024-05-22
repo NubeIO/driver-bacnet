@@ -243,6 +243,7 @@ extern int pics_request_locked;
 void mqtt_msg_queue_init(void);
 void mqtt_msg_queue_shutdown(void);
 int mqtt_msg_length(void);
+unsigned int mqtt_msg_queue_size(void);
 int mqtt_msg_pop_and_process(void);
 
 #ifdef __cplusplus

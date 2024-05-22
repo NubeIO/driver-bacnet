@@ -368,6 +368,10 @@ float Analog_Value_Present_Value(uint32_t object_instance)
         }
     }
 
+    if (yaml_config_mqtt_debug()) {
+      printf("- Analog_Value_Present_Value[%d]: %f\n", index, value);
+    }
+
     return value;
 }
 
