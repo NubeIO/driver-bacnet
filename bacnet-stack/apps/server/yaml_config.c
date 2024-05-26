@@ -57,6 +57,7 @@ struct _bacnet_config {
   unsigned int msi_max;
   unsigned int mso_max;
   unsigned int msv_max;
+  unsigned int main_proc_delay;
   struct _mqtt *mqtt;
   char **objects;
   unsigned int n_objects;
@@ -202,6 +203,10 @@ static const cyaml_schema_field_t config_fields_schema[] = {
     "msv_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, msv_max),
 
+  CYAML_FIELD_UINT(
+    "main_proc_delay", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, main_proc_delay),
+
   CYAML_FIELD_MAPPING_PTR(
     "mqtt", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, mqtt, mqtt_fields_schema),
@@ -290,6 +295,10 @@ void load_default_settings(void)
 
     if (!bacnet_config->msv_max) {
       bacnet_config->msv_max = 20;
+    }
+
+    if (!bacnet_config->main_proc_delay) {
+      bacnet_config->main_proc_delay = 30;
     }
 
     if (!bacnet_config->mqtt) {
@@ -481,6 +490,7 @@ void yaml_config_dump(void)
   printf("YAML Config: msi_max: %d\n", bacnet_config->msi_max);
   printf("YAML Config: mso_max: %d\n", bacnet_config->mso_max);
   printf("YAML Config: msv_max: %d\n", bacnet_config->msv_max);
+  printf("YAML Config: main_proc_delay: %d\n", bacnet_config->main_proc_delay);
   if (bacnet_config->mqtt) {
     printf("YAML Config: mqtt->broker_ip: %s\n", (bacnet_config->mqtt->broker_ip) ?
       bacnet_config->mqtt->broker_ip : "null");
@@ -659,6 +669,15 @@ int yaml_config_mso_max(void)
 int yaml_config_msv_max(void)
 {
   return(bacnet_config->msv_max);
+}
+
+
+/*
+ * Get Main proce delay.
+ */
+unsigned int yaml_config_main_proc_delay(void)
+{
+  return(bacnet_config->main_proc_delay);
 }
 
 

@@ -212,6 +212,10 @@ float Analog_Input_Present_Value(uint32_t object_instance)
         value = AI_Descr[index - 1].Present_Value;
     }
 
+    if (yaml_config_mqtt_debug()) {
+      printf("- Analog_Input_Present_Value[%d]: %f\n", index, value);
+    }
+
     return value;
 }
 

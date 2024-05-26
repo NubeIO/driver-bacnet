@@ -227,6 +227,7 @@ int main(int argc, char *argv[])
     time_t last_seconds = 0;
     time_t last_sweep_seconds = 0;
     time_t current_seconds = 0;
+    time_t main_proc_delay_start_tt = 0;
     uint32_t elapsed_seconds = 0;
     uint32_t elapsed_milliseconds = 0;
     uint32_t address_binding_tmr = 0;
@@ -351,6 +352,8 @@ int main(int argc, char *argv[])
     }
 #endif /* defined(MQTT) */
 
+    main_proc_delay_start_tt = time(NULL);
+
     /* loop forever */
     for (; running ;) {
         // printf("- mqtt msg queue length: %d\n", mqtt_msg_length());
@@ -362,6 +365,16 @@ int main(int argc, char *argv[])
 
         /* input */
         current_seconds = time(NULL);
+
+        /* if persistent restore is enabled wait until the delay is done */
+        if (!yaml_config_mqtt_disable_persistence()) {
+          if ((current_seconds < (main_proc_delay_start_tt + yaml_config_main_proc_delay())) ||
+              (mqtt_msg_queue_size() > 0)) {
+            mqtt_msg_pop_and_process();
+            usleep(100000);
+            continue;
+          }
+        }
 
         /* returns 0 bytes on timeout */
         pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);

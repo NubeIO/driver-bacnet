@@ -420,6 +420,7 @@ mqtt_msg_cb *mqtt_msg_pop(void);
 
 static mqtt_msg_queue_cb *mqtt_msg_head = NULL;
 static mqtt_msg_queue_cb *mqtt_msg_tail = NULL;
+static unsigned int mqtt_msg_size = 0;
 
 static int enable_pics_filter_objects = true;
 
@@ -433,6 +434,7 @@ static int pics_retry_ctr = 0;
 void mqtt_msg_queue_init(void)
 {
   mqtt_msg_head = mqtt_msg_tail = NULL;
+  mqtt_msg_size = 0;
 }
 
 
@@ -476,6 +478,8 @@ int mqtt_msg_push(mqtt_msg_cb *msg)
     mqtt_msg_tail = entry;
   }
 
+  mqtt_msg_size++;
+
   mqtt_msg_queue_unlock();
 
   return(0);
@@ -501,6 +505,10 @@ mqtt_msg_cb *mqtt_msg_pop(void)
     if (!mqtt_msg_head) {
       mqtt_msg_tail = mqtt_msg_head;
     }
+
+    if (mqtt_msg_size > 0) {
+      mqtt_msg_size--;
+    }
   }
 
   mqtt_msg_queue_unlock();
@@ -522,6 +530,15 @@ int mqtt_msg_length(void)
   mqtt_msg_queue_unlock();
 
   return(i);
+}
+
+
+/*
+ * Get size of mqtt message queue.
+ */
+unsigned int mqtt_msg_queue_size(void)
+{
+  return(mqtt_msg_size);
 }
 
 
@@ -10389,6 +10406,7 @@ int mqtt_msg_pop_and_process(void)
   printf("\n** Processing MQTT Message\n");
   if (mqtt_debug) {
     dump_topic_tokens(mqtt_msg->topic_tokens_length, mqtt_msg->topic_tokens);
+    printf("- value  : [%s]\n", mqtt_msg->topic_value);
   }
 
   if (!strcmp(mqtt_msg->topic_tokens[1], "cmd")) {
