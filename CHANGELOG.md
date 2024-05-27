@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## [v1.0.0](https://github.com/NubeIO/bacnet-server-c/tree/v1.0.0) (2024-05-28)
+
+- Complete persistent storage initialization before main loop.
+- Public Release
+- Prerequisites:
+    - ROS >= 1.0.0
+
 ## v1.0.0-rc.1
 - initial release
 
