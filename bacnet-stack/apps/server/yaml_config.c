@@ -298,7 +298,7 @@ void load_default_settings(void)
     }
 
     if (!bacnet_config->main_proc_delay) {
-      bacnet_config->main_proc_delay = 30;
+      bacnet_config->main_proc_delay = 15;
     }
 
     if (!bacnet_config->mqtt) {
