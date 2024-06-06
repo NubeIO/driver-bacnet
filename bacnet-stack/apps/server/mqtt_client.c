@@ -284,6 +284,7 @@ void init_request_tokens(void);
 
 int extract_char_string(char *buf, int buf_len, BACNET_APPLICATION_DATA_VALUE *value);
 
+int get_persistent_object_point_count(const char *obj_name);
 int restore_persistent_values(void* context);
 int is_restore_persistent_done(void);
 
@@ -10534,6 +10535,31 @@ int mqtt_msg_pop_and_process(void)
 
 
 /*
+ * Get persistent object point count.
+ */
+int get_persistent_object_point_count(const char *obj_name)
+{
+  int ret = 0;
+
+  if (!strcmp(obj_name, "ai")) {
+    ret = yaml_config_ai_max();
+  } else if (!strcmp(obj_name, "ao")) {
+    ret = yaml_config_ao_max();
+  } else if (!strcmp(obj_name, "av")) {
+    ret = yaml_config_av_max();
+  } else if (!strcmp(obj_name, "bi")) {
+    ret = yaml_config_bi_max();
+  } else if (!strcmp(obj_name, "bo")) {
+    ret = yaml_config_bo_max();
+  } else if (!strcmp(obj_name, "bv")) {
+    ret = yaml_config_bv_max();
+  }
+
+  return(ret);
+}
+
+
+/*
  * Restore persistent values.
  */
 int restore_persistent_values(void* context)
@@ -10541,25 +10567,21 @@ int restore_persistent_values(void* context)
   MQTTAsync client = (MQTTAsync)context;
   MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
-  const char *topics[] = {
-    "bacnet/ai/+/name",
-    "bacnet/ao/+/name",
-    "bacnet/av/+/name",
-    "bacnet/bi/+/name",
-    "bacnet/bo/+/name",
-    "bacnet/bv/+/name",
-    "bacnet/ai/+/pv",
-    "bacnet/ao/+/pv",
-    "bacnet/av/+/pv",
-    "bacnet/bi/+/pv",
-    "bacnet/bo/+/pv",
-    "bacnet/bv/+/pv",
-    "bacnet/ai/+/pri",
-    "bacnet/ao/+/pri",
-    "bacnet/av/+/pri",
-    "bacnet/bi/+/pri",
-    "bacnet/bo/+/pri",
-    "bacnet/bv/+/pri",
+  int pc;
+  char topic[MAX_TOPIC_VALUE_LENGTH];
+  const char *objects[] = {
+    "ai",
+    "ao",
+    "av",
+    "bi",
+    "bo",
+    "bv",
+    NULL
+  };
+  const char *props[] = {
+    "name",
+    "pv",
+    "pri",
     NULL
   };
 
@@ -10568,34 +10590,56 @@ int restore_persistent_values(void* context)
   }
 
   /* subscribe topics */
-  for (int i = 0; topics[i] != NULL; i++) {
+  for (int i = 0; objects[i] != NULL; i++) {
     if (mqtt_debug) {
-      printf("- Subscribing persistent topic[%d] = [%s]\n", i, topics[i]);
+      printf("- Subscribing to persistent object[%d] = [%s]\n", i, objects[i]);
     }
 
-    opts.onSuccess = mqtt_on_subscribe;
-    opts.onFailure = mqtt_on_subscribe_failure;
-    opts.context = client;
-    rc = MQTTAsync_subscribe(mqtt_client, topics[i], 0, &opts);
-    if (rc != MQTTASYNC_SUCCESS) {
-      if (mqtt_debug) {
-        printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
+    pc = get_persistent_object_point_count(objects[i]);
+    if (mqtt_debug) {
+      printf("- Point object count: %d\n", pc);
+    }
+
+    for (int ii = 1; ii <= pc; ii++) {
+      for (int iii = 0; props[iii] != NULL; iii++) {
+        snprintf(topic, sizeof(topic), "bacnet/%s/%d/%s", objects[i], ii, props[iii]);
+        opts.onSuccess = mqtt_on_subscribe;
+        opts.onFailure = mqtt_on_subscribe_failure;
+        opts.context = client;
+        rc = MQTTAsync_subscribe(mqtt_client, topic, 0, &opts);
+        if (rc != MQTTASYNC_SUCCESS) {
+          if (mqtt_debug) {
+            printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
+          }
+        }
       }
     }
   }
 
-  /* fetch last values asynchronously */
-
   /* unsubscribe topics */
-  for (int i = 0; topics[i] != NULL; i++) {
+  for (int i = 0; objects[i] != NULL; i++) {
     if (mqtt_debug) {
-      printf("- Unsubscribing persistent topic[%d] = [%s]\n", i, topics[i]);
+      printf("- Unsubscribing to persistent object[%d] = [%s]\n", i, objects[i]);
     }
 
-    rc = MQTTAsync_unsubscribe(mqtt_client, topics[i], NULL);
-    if (rc != MQTTASYNC_SUCCESS) {
-      if (mqtt_debug) {
-        printf("- WARNING: Failed to unsubscribe: %s\n", MQTTAsync_strerror(rc));
+    pc = get_persistent_object_point_count(objects[i]);
+    if (mqtt_debug) {
+      printf("- Point object count: %d\n", pc);
+    }
+
+    if (!pc) {
+      continue;
+    }
+
+    for (int iii = 0; props[iii] != NULL; iii++) {
+      snprintf(topic, sizeof(topic), "bacnet/%s/+/%s", objects[i], props[iii]);
+      printf("-- Unsubscribing to topic: [%s]\n", topic);
+
+      rc = MQTTAsync_unsubscribe(mqtt_client, topic, NULL);
+      if (rc != MQTTASYNC_SUCCESS) {
+        if (mqtt_debug) {
+          printf("- WARNING: Failed to unsubscribe: %s\n", MQTTAsync_strerror(rc));
+        }
       }
     }
   }

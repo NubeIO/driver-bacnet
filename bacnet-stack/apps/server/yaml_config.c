@@ -48,15 +48,16 @@ struct _bacnet_config {
   char *device_id;
   char *iface;
   uint16_t port;
-  unsigned int bi_max;
-  unsigned int bo_max;
-  unsigned int bv_max;
-  unsigned int ai_max;
-  unsigned int ao_max;
-  unsigned int av_max;
-  unsigned int msi_max;
-  unsigned int mso_max;
-  unsigned int msv_max;
+  char *bi_max;
+  char *bo_max;
+  char *bv_max;
+  char *ai_max;
+  char *ao_max;
+  char *av_max;
+  char *msi_max;
+  char *mso_max;
+  char *msv_max;
+  unsigned int persistent_load_duration;
   unsigned int main_proc_delay;
   struct _mqtt *mqtt;
   char **objects;
@@ -167,41 +168,45 @@ static const cyaml_schema_field_t config_fields_schema[] = {
     "port", CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, port),
 
-  CYAML_FIELD_UINT(
-    "bi_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, bi_max),
+  CYAML_FIELD_STRING_PTR(
+    "bi_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, bi_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "bo_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, bo_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "bv_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, bv_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "ai_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, ai_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "ao_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, ao_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "av_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, av_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "msi_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, msi_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "mso_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, mso_max, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "msv_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, msv_max, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_UINT(
-    "bo_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, bo_max),
-
-  CYAML_FIELD_UINT(
-    "bv_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, bv_max),
-
-  CYAML_FIELD_UINT(
-    "ai_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, ai_max),
-
-  CYAML_FIELD_UINT(
-    "ao_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, ao_max),
-
-  CYAML_FIELD_UINT(
-    "av_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, av_max),
-
-  CYAML_FIELD_UINT(
-    "msi_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, msi_max),
-
-  CYAML_FIELD_UINT(
-    "mso_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, mso_max),
-
-  CYAML_FIELD_UINT(
-    "msv_max", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, msv_max),
+    "persistent_load_duration", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, persistent_load_duration),
 
   CYAML_FIELD_UINT(
     "main_proc_delay", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
@@ -262,43 +267,56 @@ void load_default_settings(void)
     }
 
     if (!bacnet_config->bi_max) {
-      bacnet_config->bi_max = 10;
+      bacnet_config->bi_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->bi_max, "10");
     }
 
     if (!bacnet_config->bo_max) {
-      bacnet_config->bo_max = 10;
+      bacnet_config->bo_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->bo_max, "10");
     }
 
     if (!bacnet_config->bv_max) {
-      bacnet_config->bv_max = 20;
+      bacnet_config->bv_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->bv_max, "20");
     }
 
     if (!bacnet_config->ai_max) {
-      bacnet_config->ai_max = 10;
+      bacnet_config->ai_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->ai_max, "10");
     }
 
     if (!bacnet_config->ao_max) {
-      bacnet_config->ao_max = 10;
+      bacnet_config->ao_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->ao_max, "10");
     }
 
     if (!bacnet_config->av_max) {
-      bacnet_config->av_max = 20;
+      bacnet_config->av_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->av_max, "20");
     }
 
     if (!bacnet_config->msi_max) {
-      bacnet_config->msi_max = 20;
+      bacnet_config->msi_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->msi_max, "20");
     }
 
     if (!bacnet_config->mso_max) {
-      bacnet_config->mso_max = 20;
+      bacnet_config->mso_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->mso_max, "20");
     }
 
     if (!bacnet_config->msv_max) {
-      bacnet_config->msv_max = 20;
+      bacnet_config->msv_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->msv_max, "20");
+    }
+
+    if (!bacnet_config->persistent_load_duration) {
+      bacnet_config->persistent_load_duration = 15;
     }
 
     if (!bacnet_config->main_proc_delay) {
-      bacnet_config->main_proc_delay = 15;
+      bacnet_config->main_proc_delay = 0;
     }
 
     if (!bacnet_config->mqtt) {
@@ -481,15 +499,16 @@ void yaml_config_dump(void)
   printf("YAML Config: iface: %s\n", (bacnet_config->iface) ?
     bacnet_config->iface : "null");
   printf("YAML Config: port: %d\n", bacnet_config->port);
-  printf("YAML Config: bi_max: %d\n", bacnet_config->bi_max);
-  printf("YAML Config: bo_max: %d\n", bacnet_config->bo_max);
-  printf("YAML Config: bv_max: %d\n", bacnet_config->bv_max);
-  printf("YAML Config: ai_max: %d\n", bacnet_config->ai_max);
-  printf("YAML Config: ao_max: %d\n", bacnet_config->ao_max);
-  printf("YAML Config: av_max: %d\n", bacnet_config->av_max);
-  printf("YAML Config: msi_max: %d\n", bacnet_config->msi_max);
-  printf("YAML Config: mso_max: %d\n", bacnet_config->mso_max);
-  printf("YAML Config: msv_max: %d\n", bacnet_config->msv_max);
+  printf("YAML Config: bi_max: %s\n", bacnet_config->bi_max);
+  printf("YAML Config: bo_max: %s\n", bacnet_config->bo_max);
+  printf("YAML Config: bv_max: %s\n", bacnet_config->bv_max);
+  printf("YAML Config: ai_max: %s\n", bacnet_config->ai_max);
+  printf("YAML Config: ao_max: %s\n", bacnet_config->ao_max);
+  printf("YAML Config: av_max: %s\n", bacnet_config->av_max);
+  printf("YAML Config: msi_max: %s\n", bacnet_config->msi_max);
+  printf("YAML Config: mso_max: %s\n", bacnet_config->mso_max);
+  printf("YAML Config: msv_max: %s\n", bacnet_config->msv_max);
+  printf("YAML Config: persistent_load_duration: %d\n", bacnet_config->persistent_load_duration);
   printf("YAML Config: main_proc_delay: %d\n", bacnet_config->main_proc_delay);
   if (bacnet_config->mqtt) {
     printf("YAML Config: mqtt->broker_ip: %s\n", (bacnet_config->mqtt->broker_ip) ?
@@ -596,7 +615,7 @@ int yaml_config_port(void)
  */
 int yaml_config_bi_max(void)
 {
-  return(bacnet_config->bi_max);
+  return(atoi(bacnet_config->bi_max));
 }
 
 
@@ -605,7 +624,7 @@ int yaml_config_bi_max(void)
  */
 int yaml_config_bo_max(void)
 {
-  return(bacnet_config->bo_max);
+  return(atoi(bacnet_config->bo_max));
 }
 
 
@@ -614,7 +633,7 @@ int yaml_config_bo_max(void)
  */
 int yaml_config_bv_max(void)
 {
-  return(bacnet_config->bv_max);
+  return(atoi(bacnet_config->bv_max));
 }
 
 
@@ -623,7 +642,7 @@ int yaml_config_bv_max(void)
  */
 int yaml_config_ai_max(void)
 {
-  return(bacnet_config->ai_max);
+  return(atoi(bacnet_config->ai_max));
 }
 
 
@@ -632,7 +651,7 @@ int yaml_config_ai_max(void)
  */
 int yaml_config_ao_max(void)
 {
-  return(bacnet_config->ao_max);
+  return(atoi(bacnet_config->ao_max));
 }
 
 
@@ -641,7 +660,7 @@ int yaml_config_ao_max(void)
  */
 int yaml_config_av_max(void)
 {
-  return(bacnet_config->av_max);
+  return(atoi(bacnet_config->av_max));
 }
 
 
@@ -650,7 +669,7 @@ int yaml_config_av_max(void)
  */
 int yaml_config_msi_max(void)
 {
-  return(bacnet_config->msi_max);
+  return(atoi(bacnet_config->msi_max));
 }
 
 
@@ -659,7 +678,7 @@ int yaml_config_msi_max(void)
  */
 int yaml_config_mso_max(void)
 {
-  return(bacnet_config->mso_max);
+  return(atoi(bacnet_config->mso_max));
 }
 
 
@@ -668,12 +687,21 @@ int yaml_config_mso_max(void)
  */
 int yaml_config_msv_max(void)
 {
-  return(bacnet_config->msv_max);
+  return(atoi(bacnet_config->msv_max));
 }
 
 
 /*
- * Get Main proce delay.
+ * Get persistent load duration
+ */
+unsigned int yaml_config_persistent_load_duration(void)
+{
+  return(bacnet_config->persistent_load_duration);
+}
+
+
+/*
+ * Get Main process delay.
  */
 unsigned int yaml_config_main_proc_delay(void)
 {
