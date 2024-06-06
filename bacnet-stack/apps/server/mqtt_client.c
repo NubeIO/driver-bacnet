@@ -4846,9 +4846,9 @@ static int check_and_set_priority_array_set(bacnet_client_cmd_opts *opts)
     }
 
     opts->prio_array[i].index = index;
-    if (!strcasecmp(opts->prio_array[i].value, "null")) {
+    /* if (!strcasecmp(opts->prio_array[i].value, "null")) {
       strcpy(opts->prio_array[i].value, "255");
-    }
+    } */
 
     switch(opts->object_type) {
       case OBJECT_BINARY_INPUT:
@@ -4856,7 +4856,7 @@ static int check_and_set_priority_array_set(bacnet_client_cmd_opts *opts)
       case OBJECT_BINARY_VALUE:
         if (strcmp(opts->prio_array[i].value, "0") &&
           strcmp(opts->prio_array[i].value, "1") &&
-          strcmp(opts->prio_array[i].value, "255")) {
+          strcasecmp(opts->prio_array[i].value, "null")) {
           return(1);
         }
         break;
@@ -5151,6 +5151,8 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts)
  */
 static int set_app_data_value_from_string(int object_type, int object_property, char *str, BACNET_APPLICATION_DATA_VALUE *value)
 {
+  BACNET_APPLICATION_TAG property_tag;
+
   switch (object_type) {
     case OBJECT_ANALOG_INPUT:
     case OBJECT_ANALOG_OUTPUT:
@@ -5158,7 +5160,8 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
       switch (object_property) {
         case PROP_PRESENT_VALUE:
         case PROP_PRIORITY_ARRAY:
-          bacapp_parse_application_data(BACNET_APPLICATION_TAG_REAL, str, value);
+          property_tag = (strcasecmp(str, "null")) ? BACNET_APPLICATION_TAG_REAL : BACNET_APPLICATION_TAG_NULL;
+          bacapp_parse_application_data(property_tag, str, value);
           break;
 
         case PROP_OBJECT_NAME:
@@ -5183,7 +5186,8 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
       switch (object_property) {
         case PROP_PRESENT_VALUE:
         case PROP_PRIORITY_ARRAY:
-          bacapp_parse_application_data(BACNET_APPLICATION_TAG_ENUMERATED, str, value);
+          property_tag = (strcasecmp(str, "null")) ? BACNET_APPLICATION_TAG_ENUMERATED : BACNET_APPLICATION_TAG_NULL;
+          bacapp_parse_application_data(property_tag, str, value);
           break;
 
         case PROP_OBJECT_NAME:
@@ -5203,7 +5207,8 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
     case OBJECT_MULTI_STATE_VALUE:
       switch (object_property) {
         case PROP_PRESENT_VALUE:
-          bacapp_parse_application_data(BACNET_APPLICATION_TAG_UNSIGNED_INT, str, value);
+          property_tag = (strcasecmp(str, "null")) ? BACNET_APPLICATION_TAG_UNSIGNED_INT: BACNET_APPLICATION_TAG_NULL;
+          bacapp_parse_application_data(property_tag, str, value);
           break;
 
         case PROP_OBJECT_NAME:
@@ -5633,9 +5638,9 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
         obj_data.device_instance = opts->device_instance;
         obj_data.object_type = opts->object_type;
         obj_data.object_instance = opts->object_instance;
-        obj_data.object_property = PROP_PRIORITY_ARRAY;
-        obj_data.priority = 0;
-        obj_data.index = opts->prio_array[i].index;
+        obj_data.object_property = opts->property;
+        obj_data.priority = opts->prio_array[i].index;
+        obj_data.index = BACNET_ARRAY_ALL;
 
         if ((i + 1) == opts->prio_array_len) {
           send_reply = true;
