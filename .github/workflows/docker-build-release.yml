@@ -4,11 +4,9 @@ on:
   pull_request:
     types: [ opened, synchronize, reopened, closed ]
     branches:
-      - main
       - master
   push:
     branches:
-      - main
       - master
     tags:
       - 'v*'
@@ -25,9 +23,7 @@ jobs:
 
     outputs:
       shouldBuild: ${{ steps.context.outputs.decision_build }}
-      shouldPublish: ${{ steps.context.outputs.decision_publish }}
       isRelease: ${{ steps.context.outputs.isTag }}
-      afterRelease: ${{ steps.context.outputs.isAfterMergedReleasePR }}
       sha: ${{ steps.context.outputs.commitId }}
       version: ${{ steps.context.outputs.version }}
       fqn: ${{ env.APP_NAME }}-${{ steps.context.outputs.version }}-${{ steps.context.outputs.shortCommitId }}
@@ -117,6 +113,7 @@ jobs:
           push: true
 
       - name: Zip artifacts
+        if: ${{ needs.context.outputs.isRelease == 'true' }}
         run: |
           image=localhost:5000/${{ env.APP_NAME }}:${{ needs.context.outputs.sha }}
           output=/opt/bacnet-stack/app/
@@ -133,6 +130,7 @@ jobs:
           done
 
       - name: Login to GitHub Container Registry
+        if: ${{ needs.context.outputs.isRelease == 'true' }}
         uses: docker/login-action@v1
         with:
           registry: ghcr.io
