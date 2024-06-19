@@ -2,7 +2,7 @@ name: build-release
 
 on:
   pull_request:
-    types: [ opened, synchronize, reopened, closed ]
+    types: [ opened, synchronize, reopened ]
     branches:
       - master
   push:
@@ -10,6 +10,11 @@ on:
       - master
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version name for the test release (e.g., 1.0.0).'
+        required: true
 
 env:
   APP_NAME: bacnet-server-c
@@ -22,11 +27,10 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      shouldBuild: ${{ steps.context.outputs.decision_build }}
-      isRelease: ${{ steps.context.outputs.isTag }}
-      sha: ${{ steps.context.outputs.commitId }}
-      version: ${{ steps.context.outputs.version }}
-      fqn: ${{ env.APP_NAME }}-${{ steps.context.outputs.version }}-${{ steps.context.outputs.shortCommitId }}
+      isRelease: ${{ steps.check_release.outputs.is_release }}
+      sha: ${{ github.sha }}
+      version: ${{ steps.extract_version.outputs.version }}
+      fqn: ${{ env.APP_NAME }}-${{ steps.extract_version.outputs.version }}-${{ steps.short_commit.outputs.short_commit }}
 
     steps:
       - uses: actions/checkout@v2
@@ -43,19 +47,45 @@ jobs:
           gpg-private-key: ${{ secrets.NUBEIO_CI_GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.NUBEIO_CI_GPG_PASSPHARSE }}
 
-      - name: Project context
-        id: context
-        uses: zero88/gh-project-context@v1
-        with:
-          dry: false
-          mustSign: true
-          defaultBranch: master
+      - name: Extract Version
+        id: extract_version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version_name }}"
+          else
+            BRANCH_NAME="${{ github.ref }}"
+            if [[ "${BRANCH_NAME}" == "refs/heads/release/"* ]]; then
+              VERSION="${BRANCH_NAME#refs/heads/release/}"
+            else
+              VERSION="0.0.0"
+            fi
+            echo "::set-output name=version::v${VERSION}"
+          fi
+          echo "::set-output name=version::${VERSION}"
+          echo "Version: ${VERSION}"
+
+      - name: Check if Release
+        id: check_release
+        run: |
+          if [[ "${{ github.ref }}" == "refs/tags"* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "::set-output name=is_release::true"
+            echo "Is Release: true"
+          else
+            echo "::set-output name=is_release::false"
+            echo "Is Release: false"
+          fi
+
+      - name: Get Short Commit ID
+        id: short_commit
+        run: |
+          SHORT_COMMIT=$(git rev-parse --short=7 HEAD)
+          echo "::set-output name=short_commit::$SHORT_COMMIT"
+          echo "Short Commit ID: $SHORT_COMMIT"
 
   build:
 
     runs-on: ubuntu-latest
     needs: context
-    if: needs.context.outputs.shouldBuild == 'true'
     services:
       registry:
         image: zero88/gh-registry:latest
