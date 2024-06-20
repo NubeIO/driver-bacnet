@@ -35,6 +35,8 @@ extern "C" {
 
   int yaml_config_msv_max(void);
 
+  unsigned int yaml_config_persistent_load_duration(void);
+
   unsigned int yaml_config_main_proc_delay(void);
 
   char *yaml_config_mqtt_broker_ip(void);

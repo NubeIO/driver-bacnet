@@ -223,11 +223,13 @@ int main(int argc, char *argv[])
 {
     BACNET_ADDRESS src = { 0 }; /* address where message came from */
     uint16_t pdu_len = 0;
-    unsigned timeout = 1; /* milliseconds */
+    unsigned int timeout = 1; /* milliseconds */
+    unsigned int main_proc_delay;
     time_t last_seconds = 0;
     time_t last_sweep_seconds = 0;
     time_t current_seconds = 0;
-    time_t main_proc_delay_start_tt = 0;
+    time_t persistent_load_start_tt = 0;
+    time_t main_proc_delay_tt;
     uint32_t elapsed_seconds = 0;
     uint32_t elapsed_milliseconds = 0;
     uint32_t address_binding_tmr = 0;
@@ -354,7 +356,7 @@ int main(int argc, char *argv[])
 
     /* initialize persistent storage */
     if (!yaml_config_mqtt_disable_persistence()) {
-      main_proc_delay_start_tt = time(NULL);
+      persistent_load_start_tt = time(NULL);
       printf("Starting persistent storage restoration ...\n");
       for (; running ;) {
         /* mqtt broker */
@@ -362,21 +364,35 @@ int main(int argc, char *argv[])
           mqtt_check_reconnect();
         }
 
-        /* input */
         current_seconds = time(NULL);
 
-        /* if persistent restore is enabled wait until the delay is done */
-        if ((current_seconds < (main_proc_delay_start_tt + yaml_config_main_proc_delay())) ||
+        /* if persistent restore is enabled wait until load duration is done or queue is not empty */
+        if ((current_seconds < (persistent_load_start_tt + yaml_config_persistent_load_duration())) ||
           (mqtt_msg_queue_size() > 0)) {
           mqtt_msg_pop_and_process();
-          usleep(100000);
+          usleep(1000);
           continue;
         } else {
           break;
         }
       }
 
-      printf("Persistent storage restoration done.");
+      printf("Persistent storage restoration done.\n");
+
+      main_proc_delay = yaml_config_main_proc_delay();
+      if (main_proc_delay > 0) {
+        printf("Delaying for %d sec before the main loop ...\n", main_proc_delay);
+        main_proc_delay_tt = time(NULL) + main_proc_delay;
+        for (; running ;) {
+          current_seconds = time(NULL);
+          if (current_seconds < main_proc_delay_tt) {
+            usleep(100000);
+            continue;
+          } else {
+            break;
+          }
+        }
+      }
     }
 
     /* loop forever */
