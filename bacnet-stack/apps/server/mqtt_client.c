@@ -224,7 +224,6 @@ void encode_object_list_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_
 
 void init_bacnet_client_request_list(void);
 void shutdown_bacnet_client_request_list(void);
-int is_bacnet_client_request_present(uint8_t invoke_id);
 llist_obj_data *get_bacnet_client_request_obj_data(uint8_t invoke_id, llist_obj_data *buf);
 int add_bacnet_client_request(uint8_t invoke_id, llist_obj_data *obj_data);
 int del_bacnet_client_request(uint8_t invoke_id);
@@ -389,6 +388,7 @@ bool is_object_property_supported(int object_type, int property_id);
 /* MQTT sub-system lock */
 static pthread_mutex_t mqtt_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t mqtt_msg_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t rw_request_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* crude request list locking mechanism */
 static int request_list_locked = false;
@@ -422,6 +422,9 @@ mqtt_msg_cb *mqtt_msg_pop(void);
 static mqtt_msg_queue_cb *mqtt_msg_head = NULL;
 static mqtt_msg_queue_cb *mqtt_msg_tail = NULL;
 static unsigned int mqtt_msg_size = 0;
+
+int rw_request_list_lock(void);
+int rw_request_list_unlock(void);
 
 static int enable_pics_filter_objects = true;
 
@@ -3456,6 +3459,7 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
   if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
     printf("-- Request with pending reply found!\n");
     del_bacnet_client_request(service_data->invoke_id);
+    printf("-- Request invoke_id: %d deleted\n", service_data->invoke_id);
   } else if ((pd_data = get_bacnet_client_point_disc_req(service_data->invoke_id, src))) {
     printf("-- Point Discovery request with pending reply found!\n");
     process_point_disc_resp(service_request, service_len, src, pd_data);
@@ -3720,6 +3724,8 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
     lock_request_list();
   }
 
+  rw_request_list_lock();
+
   ptr = bc_request_list_head;
   while (ptr != NULL) {
     if (ptr->data.invoke_id == invoke_id) {
@@ -3746,6 +3752,8 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
     prev = ptr;
     ptr = ptr->next;
   }
+
+  rw_request_list_unlock();
 
   unlock_request_list();
 
@@ -3796,6 +3804,8 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
     lock_request_list();
   }
 
+  rw_request_list_lock();
+
   ptr = bc_request_list_head;
   while (ptr != NULL) {
     if (ptr->data.invoke_id == invoke_id) {
@@ -3822,6 +3832,8 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
     prev = ptr;
     ptr = ptr->next;
   }
+
+  rw_request_list_unlock();
 
   unlock_request_list();
 
@@ -3870,6 +3882,8 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , reject_reason: %d\n",
     lock_request_list();
   }
 
+  rw_request_list_lock();
+
   ptr = bc_request_list_head;
   while (ptr != NULL) {
     if (ptr->data.invoke_id == invoke_id) {
@@ -3896,6 +3910,8 @@ printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , reject_reason: %d\n",
     prev = ptr;
     ptr = ptr->next;
   }
+
+  rw_request_list_unlock();
 
   unlock_request_list();
 
@@ -4642,8 +4658,14 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     request_invoke_id = Send_Read_Property_Request(opts->device_instance,
       opts->object_type, opts->object_instance, opts->property, opts->index);
     printf("read request_invoke_id: %d\n", request_invoke_id);
+    if (request_invoke_id <= 0) {
+      printf("***** ERROR SENDING READ PROPERTY REQUEST *****\n");
+      mqtt_publish_command_error("Error sending bacnet read message", opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+      return(0);
+    }
 
     add_bacnet_client_request(request_invoke_id, &obj_data);
+    printf("read request id added\n");
 
     if (opts->tag_flags & CMD_TAG_FLAG_SLOW_TEST) {
       usleep(1000000);
@@ -4786,8 +4808,14 @@ int process_bacnet_client_read_multiple_value_command (bacnet_client_cmd_opts *o
     &buffer[0], sizeof(buffer), opts->device_instance, rad);
 
   printf("read multiple request_invoke_id: %d\n", request_invoke_id);
+  if (request_invoke_id <= 0) {
+    printf("***** ERROR SENDING READ MULTIPLE PROPERTY REQUEST *****\n");
+    mqtt_publish_command_error("Error sending bacnet read multiple message", opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
+    return(0);
+  }
 
   add_bacnet_client_request(request_invoke_id, &obj_data);
+  printf("read multiple request id added\n");
 
   pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
   if (pdu_len) {
@@ -5258,17 +5286,23 @@ static int send_write_request(llist_obj_data *obj_data, BACNET_APPLICATION_DATA_
     obj_data->dont_publish_on_success = true;
   }
 
-    printf("- queuing request_invoke_id %d for reply\n", request_invoke_id);
-    add_bacnet_client_request(request_invoke_id, obj_data);
+  if (request_invoke_id <= 0) {
+    printf("***** ERROR SENDING WRITE PROPERTY REQUEST *****\n");
+    mqtt_publish_command_error("Error sending bacnet write message", opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+    return(0);
+  }
 
-    if (opts->timeout > 0) {
-      timeout = opts->timeout;
-    }
+  printf("- queuing request_invoke_id %d for reply\n", request_invoke_id);
+  add_bacnet_client_request(request_invoke_id, obj_data);
 
-    pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
-    if (pdu_len) {
-      npdu_handler(&src, &Rx_Buf[0], pdu_len);
-    }
+  if (opts->timeout > 0) {
+    timeout = opts->timeout;
+  }
+
+  pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
+  if (pdu_len) {
+    npdu_handler(&src, &Rx_Buf[0], pdu_len);
+  }
 
   return(0);
 }
@@ -5697,6 +5731,12 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       obj_data.priority,
       opts->index);
     printf("write request_invoke_id: %d\n", request_invoke_id);
+
+    if (request_invoke_id <= 0) {
+      printf("***** ERROR SENDING WRITE PROPERTY REQUEST *****\n");
+      mqtt_publish_command_error("Error sending bacnet write message", opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+      return(0);
+    }
 
     add_bacnet_client_request(request_invoke_id, &obj_data);
 
@@ -6142,34 +6182,19 @@ void init_bacnet_client_request_list(void)
  */
 void shutdown_bacnet_client_request_list(void)
 {
-  llist_cb *tmp, *ptr = bc_request_list_head;
+  llist_cb *tmp, *ptr;
+
+  rw_request_list_lock();
+
+  ptr = bc_request_list_head;
 
   while (ptr != NULL) {
     tmp = ptr;
     ptr = ptr->next;
     free(tmp);
   }
-}
 
-
-/*
- * Check if bacnet client request is present.
- */
-int is_bacnet_client_request_present(uint8_t invoke_id)
-{
-  llist_cb *ptr = bc_request_list_head;
-  int present = false;
-
-  while (ptr != NULL) {
-    if (ptr->data.invoke_id == invoke_id) {
-      present = true;
-      break;
-    }
-
-    ptr = ptr->next;
-  }
-
-  return(present);
+  rw_request_list_unlock();
 }
 
 
@@ -6178,9 +6203,12 @@ int is_bacnet_client_request_present(uint8_t invoke_id)
  */
 llist_obj_data *get_bacnet_client_request_obj_data(uint8_t invoke_id, llist_obj_data *buf)
 {
-  llist_cb *ptr = bc_request_list_head;
+  llist_cb *ptr;
   int len;
 
+  rw_request_list_lock();
+
+  ptr = bc_request_list_head;
   while (ptr != NULL) {
     if (ptr->data.invoke_id == invoke_id) {
       memcpy(buf, &ptr->data.obj_data, sizeof(llist_obj_data));
@@ -6190,11 +6218,14 @@ llist_obj_data *get_bacnet_client_request_obj_data(uint8_t invoke_id, llist_obj_
         buf->rpm_objects = malloc(len);
         memcpy(buf->rpm_objects, ptr->data.obj_data.rpm_objects, len);
       }
+      rw_request_list_unlock();
       return(&ptr->data.obj_data);
     }
     
     ptr = ptr->next;
   }
+
+  rw_request_list_unlock();
 
   return(NULL);
 }
@@ -6225,12 +6256,16 @@ int add_bacnet_client_request(uint8_t invoke_id, llist_obj_data *obj_data)
   ptr->timestamp = time(NULL);
   ptr->next = NULL;
 
+  rw_request_list_lock();
+
   if (!bc_request_list_head) {
     bc_request_list_head = bc_request_list_tail = ptr;
   } else {
     bc_request_list_tail->next = ptr;
     bc_request_list_tail = ptr;
   }
+
+  rw_request_list_unlock();
 
   return(0);
 }
@@ -6242,8 +6277,11 @@ int add_bacnet_client_request(uint8_t invoke_id, llist_obj_data *obj_data)
 int del_bacnet_client_request(uint8_t invoke_id)
 {
   llist_cb *prev = NULL;
-  llist_cb *ptr = bc_request_list_head;
+  llist_cb *ptr;
 
+  rw_request_list_lock();
+
+  ptr = bc_request_list_head;
   while (ptr != NULL) {
     if (ptr->data.invoke_id == invoke_id) {
       break;
@@ -6269,6 +6307,8 @@ int del_bacnet_client_request(uint8_t invoke_id)
     }
     free(ptr);
   }
+
+  rw_request_list_unlock();
 
   return(0);
 }
@@ -6340,11 +6380,15 @@ void sweep_bacnet_client_aged_requests(void)
     lock_request_list();
   }
 
+  rw_request_list_lock();
+
   ptr = bc_request_list_head;
 
   while (ptr != NULL) {
     if ((cur_tt - ptr->timestamp) >= BACNET_CLIENT_REQUEST_TTL) {
       printf("- Aged request found: %d\n", ptr->data.invoke_id);
+
+      tsm_free_invoke_id(ptr->data.invoke_id);
 
       sprintf(err_msg, "No response from target device");
       init_cmd_opts_from_list_cb(&opts, &ptr->data.obj_data);
@@ -6374,6 +6418,8 @@ void sweep_bacnet_client_aged_requests(void)
     prev = ptr;
     ptr = ptr->next;
   }
+
+  rw_request_list_unlock();
 
   unlock_request_list();
 }
@@ -6599,6 +6645,8 @@ void sweep_bacnet_client_point_disc_requests(void)
   while (ptr != NULL) {
     if ((ptr->timestamp + ptr->data.timeout) < cur_tt) {
       printf("- Point discovery Aged request found: %d\n", ptr->request_id);
+
+      tsm_free_invoke_id(ptr->request_id);
 
       tmp = ptr;
       if (ptr == bc_point_disc_head) {
@@ -6890,6 +6938,13 @@ int mqtt_client_init(void)
   rc = pthread_mutex_init(&mqtt_msg_queue_mutex, &mutex_attr);
   if (rc != 0) {
     printf("Error creating MQTT Message Queue mutex!\n");
+    return(1);
+  }
+
+  pthread_mutexattr_init(&mutex_attr);
+  rc = pthread_mutex_init(&rw_request_list_mutex, &mutex_attr);
+  if (rc != 0) {
+    printf("Error creating Read/Write Request List mutex!\n");
     return(1);
   }
 
@@ -10311,6 +10366,12 @@ int process_bacnet_client_point_discovery_command(bacnet_client_cmd_opts *opts)
     timeout = opts->timeout = BACNET_CLIENT_POINT_DISC_TIMEOUT;
   }
 
+  if (request_invoke_id <= 0) {
+    printf("***** ERROR SENDING READ PROPERTY REQUEST FOR PROP_OBJECT_LIST *****\n");
+    mqtt_publish_command_error("Error sending bacnet read message for PROP_OBJECT_LIST", opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+    return(0);
+  }
+
   add_bacnet_client_point_disc(request_invoke_id, &dest, opts);
 
   pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
@@ -10386,6 +10447,28 @@ int mqtt_msg_queue_unlock(void)
   int rc;
 
   rc = pthread_mutex_unlock(&mqtt_msg_queue_mutex);
+
+  return(rc);
+}
+
+
+/* Lock Read/Write request list mutex */
+int rw_request_list_lock(void)
+{
+  int rc;
+
+  rc = pthread_mutex_lock(&rw_request_list_mutex);
+
+  return(rc);
+}
+
+
+/* Unlock Read/Write requeset list mutex */
+int rw_request_list_unlock(void)
+{
+  int rc;
+
+  rc = pthread_mutex_unlock(&rw_request_list_mutex);
 
   return(rc);
 }

@@ -370,7 +370,7 @@ int main(int argc, char *argv[])
         if ((current_seconds < (persistent_load_start_tt + yaml_config_persistent_load_duration())) ||
           (mqtt_msg_queue_size() > 0)) {
           mqtt_msg_pop_and_process();
-          usleep(1000);
+          usleep(10000);
           continue;
         } else {
           break;
