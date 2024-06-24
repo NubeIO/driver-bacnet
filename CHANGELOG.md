@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## [v1.0.1](https://github.com/NubeIO/bacnet-server-c/tree/v1.0.1) (2024-06-24)
+
+- Issue-121: Fix for the bug when driver bacnet responds with an error to all MQTT read/write commands
+- Prerequisites:
+  - ROS >= 1.0.0
+
 ## [v1.0.0](https://github.com/NubeIO/bacnet-server-c/tree/v1.0.0) (2024-05-28)
 
 - Complete persistent storage initialization before main loop.
