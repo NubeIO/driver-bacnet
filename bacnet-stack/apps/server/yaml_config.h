@@ -35,10 +35,6 @@ extern "C" {
 
   int yaml_config_msv_max(void);
 
-  unsigned int yaml_config_persistent_load_duration(void);
-
-  unsigned int yaml_config_main_proc_delay(void);
-
   char *yaml_config_mqtt_broker_ip(void);
 
   int yaml_config_mqtt_broker_port(void);
@@ -54,8 +50,6 @@ extern "C" {
   int yaml_config_mqtt_connect_retry_limit(void);
 
   int yaml_config_mqtt_connect_retry_interval(void);
-
-  int yaml_config_mqtt_disable_persistence(void);
 
   int yaml_config_mqtt_old_pri_array_format(void);
 

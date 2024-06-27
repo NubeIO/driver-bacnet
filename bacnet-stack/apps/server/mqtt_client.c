@@ -159,17 +159,11 @@ extern void get_bv_priority_array(uint32_t object_instance, BACNET_BINARY_PV *pa
 int tokenize_topic(char *topic, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
 void dump_topic_tokens(int n_topic_tokens, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
 int process_ai_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
-int set_ai_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value);
 int process_ao_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
-int set_ao_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field);
 int process_av_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
-int set_av_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field);
 int process_bi_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
-int set_bi_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value);
 int process_bo_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
-int set_bo_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field);
 int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
-int set_bv_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field);
 void mqtt_connection_lost(void *context, char *cause);
 int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_message *message);
 int mqtt_connect_to_broker(void);
@@ -283,10 +277,6 @@ void init_request_tokens(void);
 
 int extract_char_string(char *buf, int buf_len, BACNET_APPLICATION_DATA_VALUE *value);
 
-int get_persistent_object_point_count(const char *obj_name);
-int restore_persistent_values(void* context);
-int is_restore_persistent_done(void);
-
 
 /* globals */
 static int mqtt_debug = false;
@@ -393,10 +383,6 @@ static pthread_mutex_t rw_request_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* crude request list locking mechanism */
 static int request_list_locked = false;
 int pics_request_locked = false;
-
-/* persistent restore */
-static int restore_persistent_done = false;
-
 
 #define MQTT_MSG_CMD            1
 #define MQTT_MSG_UNKNOWN        10
@@ -664,39 +650,6 @@ int process_ai_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 
 
 /*
- * Set Analog Input (AI) property persistent value.
- */
-int set_ai_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value)
-{
-  BACNET_CHARACTER_STRING bacnet_string;
-  char *prop_name = topic_tokens[3];
-
-  if (mqtt_debug) {
-    printf("Setting AI property persistent value: %s/%d\n", prop_name, index);
-  }
-
-  if (!strcasecmp(prop_name, "name")) {
-    characterstring_init_ansi(&bacnet_string, value);
-    Analog_Input_Set_Object_Name(index, &bacnet_string, NULL, true);
-  } else if (!strcasecmp(prop_name, "pv")) {
-    float f;
-    char *endptr;
-
-    f = strtof(value, &endptr);
-    Analog_Input_Present_Value_Set(index, f, NULL, true);
-  } else {
-    if (mqtt_debug) {
-      printf("MQTT Invalid persistent Property for Analog Input (AI): [%s]\n", prop_name);
-    }
-
-    return(1);
-  }
-
-  return(0);
-}
-
-
-/*
  * Process Analog Output (AO) write.
  */
 int process_ao_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid)
@@ -760,60 +713,6 @@ int process_ao_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
   }
 
   return(0);
-}
-
-
-/*
- * Process Analog Output (AO) property persistent value.
- */
-int set_ao_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field)
-{
-  BACNET_CHARACTER_STRING bacnet_string;
-  float f;
-  char array_value_buf[MAX_JSON_VALUE_LENGTH];
-  char *prop_name = topic_tokens[3];
-  char *endptr;
-  int rc = 1;
-
-  if (mqtt_debug) {
-    printf("Setting AO property persistent value: %s/%d\n", prop_name, index);
-  }
-
-  if (!strcasecmp(prop_name, "name")) {
-    characterstring_init_ansi(&bacnet_string, value);
-    Analog_Output_Set_Object_Name(index, &bacnet_string, NULL, true);
-  } else if (!strcasecmp(prop_name, "pv")) {
-    f = (!strcasecmp(value, "null")) ? 255 :  strtof(value, &endptr);
-    Analog_Output_Present_Value_Set(index, f, BACNET_MAX_PRIORITY, NULL, true);
-  } else if (!strcasecmp(prop_name, "pri")) {
-    json_object *obj;
-    int arr_len = json_object_array_length(json_field);
-    for (int i = 0; i < arr_len; i++) {
-      obj = json_object_array_get_idx(json_field, i);
-      if (!obj) {
-        continue;
-      }
-
-      strncpy(array_value_buf, json_object_get_string(obj), sizeof(array_value_buf) - 1);
-      if (mqtt_debug) {
-        printf("- index[%d] : [%s]\n", i, array_value_buf);
-      }
-
-      f = (!strcasecmp(array_value_buf, "null")) ? 255 :  strtof(array_value_buf, &endptr);
-      Analog_Output_Priority_Array_Set2(index, f, (i + 1));
-    }
-  } else {
-    if (mqtt_debug) {
-      printf("MQTT Invalid persistent Property for Analog Output (AO): [%s]\n", prop_name);
-    }
-
-    goto EXIT;
-  }
-
-  rc = 0;
-  EXIT:
-
-  return(rc);
 }
 
 
@@ -885,60 +784,6 @@ int process_av_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 
 
 /*
- * Process Analog Value (AV) property persistent value.
- */
-int set_av_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field)
-{
-  BACNET_CHARACTER_STRING bacnet_string;
-  float f;
-  char array_value_buf[MAX_JSON_VALUE_LENGTH];
-  char *prop_name = topic_tokens[3];
-  char *endptr;
-  int rc = 1;
-
-  if (mqtt_debug) {
-    printf("Setting AV property persistent value: %s/%d\n", prop_name, index);
-  }
-
-  if (!strcasecmp(prop_name, "name")) {
-    characterstring_init_ansi(&bacnet_string, value);
-    Analog_Value_Set_Object_Name(index, &bacnet_string, NULL, true);
-  } else if (!strcasecmp(prop_name, "pv")) {
-    f = (!strcasecmp(value, "null")) ? 255 :  strtof(value, &endptr);
-    Analog_Value_Present_Value_Set(index, f, BACNET_MAX_PRIORITY, NULL, true);
-  } else if (!strcasecmp(prop_name, "pri")) {
-    json_object *obj;
-    int arr_len = json_object_array_length(json_field);
-    for (int i = 0; i < arr_len; i++) {
-      obj = json_object_array_get_idx(json_field, i);
-      if (!obj) {
-        continue;
-      }
-
-      strncpy(array_value_buf, json_object_get_string(obj), sizeof(array_value_buf) - 1);
-      if (mqtt_debug) {
-        printf("- index[%d] : [%s]\n", i, array_value_buf);
-      }
-
-      f = (!strcasecmp(array_value_buf, "null")) ? 255 :  strtof(array_value_buf, &endptr);
-      Analog_Value_Priority_Array_Set2(index, f, (i + 1));
-    }
-  } else {
-    if (mqtt_debug) {
-      printf("MQTT Invalid persistent Property for Analog Output (AO): [%s]\n", prop_name);
-    }
-
-    goto EXIT;
-  }
-
-  rc = 0;
-  EXIT:
-
-  return(rc);
-}
-
-
-/*
  * Process Binary Input (AI) write.
  */
 int process_bi_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid)
@@ -961,38 +806,6 @@ int process_bi_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 
     return(1);
   }
-
-  return(0);
-}
-
-
-/*    
- * Process Binary Input (AI) property persistent value.
- */   
-int set_bi_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value)
-{
-  BACNET_CHARACTER_STRING bacnet_string;
-  char *prop_name = topic_tokens[3];
-
-  if (mqtt_debug) {
-    printf("Setting BI property persistent value: %s/%d\n", prop_name, index);
-  }
-
-  if (!strcasecmp(prop_name, "name")) {
-    characterstring_init_ansi(&bacnet_string, value);
-    Binary_Input_Set_Object_Name(index, &bacnet_string, NULL, true);
-  } else if (!strcasecmp(prop_name, "pv")) {
-    BACNET_BINARY_PV pv;
-    int i_val = atoi(value);
-    pv = (i_val == 0) ? 0 : 1;
-    Binary_Input_Present_Value_Set(index, pv, NULL, true);
-  } else {
-    if (mqtt_debug) {
-      printf("MQTT Invalid persistent Property for Binary Input (BI): [%s]\n", prop_name);
-    }
-
-    return(1);
-  }   
 
   return(0);
 }
@@ -1066,62 +879,6 @@ int process_bo_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 
 
 /*
- * Process Binary Output (AO) property persistent value.
- */
-int set_bo_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field)
-{
-  BACNET_CHARACTER_STRING bacnet_string;
-  BACNET_BINARY_PV pv;
-  char array_value_buf[MAX_JSON_VALUE_LENGTH];
-  char *prop_name = topic_tokens[3];
-  int i_val;
-  int rc = 1;
- 
-  if (mqtt_debug) {
-    printf("Setting BO property persistent value: %s/%d\n", prop_name, index);
-  }     
- 
-  if (!strcasecmp(prop_name, "name")) {
-    characterstring_init_ansi(&bacnet_string, value);
-    Binary_Output_Set_Object_Name(index, &bacnet_string, NULL, true);
-  } else if (!strcasecmp(prop_name, "pv")) {
-    i_val = atoi(value);
-    pv = (!strcasecmp(value, "null")) ? 255 : (i_val == 0) ? 0 : 1;
-    Binary_Output_Present_Value_Set(index, pv, BACNET_MAX_PRIORITY, NULL, true);
-  } else if (!strcasecmp(prop_name, "pri")) { 
-    json_object *obj;
-    int arr_len = json_object_array_length(json_field);
-    for (int i = 0; i < arr_len; i++) {
-      obj = json_object_array_get_idx(json_field, i);
-      if (!obj) {
-        continue;
-      }
-
-      strncpy(array_value_buf, json_object_get_string(obj), sizeof(array_value_buf) - 1);
-      if (mqtt_debug) {
-        printf("- index[%d] : [%s]\n", i, array_value_buf);
-      }
-
-      i_val = atoi(array_value_buf);
-      pv = (!strcasecmp(array_value_buf, "null")) ? 255 : (i_val == 0) ? 0 : 1;
-      Binary_Output_Priority_Array_Set2(index, pv, (i + 1));
-    }
-  } else {
-    if (mqtt_debug) {
-      printf("MQTT Invalid persistent Property for Binary Output (AO): [%s]\n", prop_name);
-    }
-
-    goto EXIT;
-  }
-
-  rc = 0;
-  EXIT:
-
-  return(rc);
-}
-
-
-/*
  * Process Binary Value (BV) write.
  */
 int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid)
@@ -1185,62 +942,6 @@ int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
   }
 
   return(0);
-}
-
-
-/*
- * Process Binary Value (BV) property persistent value.
- */
-int set_bv_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field)
-{
-  BACNET_CHARACTER_STRING bacnet_string;
-  BACNET_BINARY_PV pv;
-  char array_value_buf[MAX_JSON_VALUE_LENGTH];
-  char *prop_name = topic_tokens[3];
-  int i_val;
-  int rc = 1;
-
-  if (mqtt_debug) {
-    printf("Setting BV property persistent value: %s/%d\n", prop_name, index);
-  }
-
-  if (!strcasecmp(prop_name, "name")) {
-    characterstring_init_ansi(&bacnet_string, value);
-    Binary_Value_Set_Object_Name(index, &bacnet_string, NULL, true);
-  } else if (!strcasecmp(prop_name, "pv")) {
-    i_val = atoi(value);
-    pv = (!strcasecmp(value, "null")) ? 255 : (i_val == 0) ? 0 : 1;
-    Binary_Value_Present_Value_Set(index, pv, BACNET_MAX_PRIORITY, NULL, true);
-  } else if (!strcasecmp(prop_name, "pri")) {
-    json_object *obj;
-    int arr_len = json_object_array_length(json_field);
-    for (int i = 0; i < arr_len; i++) {
-      obj = json_object_array_get_idx(json_field, i);
-      if (!obj) {
-        continue;
-      }
-
-      strncpy(array_value_buf, json_object_get_string(obj), sizeof(array_value_buf) - 1);
-      if (mqtt_debug) {
-        printf("- index[%d] : [%s]\n", i, array_value_buf);
-      }
-
-      i_val = atoi(array_value_buf);
-      pv = (!strcasecmp(array_value_buf, "null")) ? 255 : (i_val == 0) ? 0 : 1;
-      Binary_Value_Priority_Array_Set2(index, pv, (i + 1));
-    }
-  } else {
-    if (mqtt_debug) {
-      printf("MQTT Invalid persistent Property for Binary Value (BV): [%s]\n", prop_name);
-    }
-
-    goto EXIT;
-  }
-
-  rc = 0;
-  EXIT:
-
-  return(rc);
 }
 
 
@@ -6071,10 +5772,6 @@ void mqtt_on_connect(void* context, MQTTAsync_successData* response)
 
   mqtt_client_connected = true;
 
-  if (!yaml_config_mqtt_disable_persistence() && !is_restore_persistent_done()) {
-    restore_persistent_values(context);
-  }
-
   if (yaml_config_mqtt_write_via_subscribe()) {
     printf("MQTT write via subscribe enabled\n");
     rc = mqtt_subscribe_to_topics(context);
@@ -7497,7 +7194,7 @@ int mqtt_publish_topic(int object_type, int object_instance, int property_id, in
   opts.context = mqtt_client;
 
   pubmsg.qos = DEFAULT_PUB_QOS;
-  pubmsg.retained = (yaml_config_mqtt_disable_persistence()) ? 0 : 1;
+  pubmsg.retained = 0;
   rc = MQTTAsync_sendMessage(mqtt_client, topic, &pubmsg, &opts);
   if (mqtt_debug) {
     if (rc != MQTTASYNC_SUCCESS) {
@@ -10530,30 +10227,6 @@ int mqtt_msg_pop_and_process(void)
 
     strncpy(prop_value, json_object_get_string(json_field), sizeof(prop_value) - 1);
 
-    if (!yaml_config_mqtt_disable_persistence() && (!strcasecmp(mqtt_msg->topic_tokens[3], "name") ||
-      !strcasecmp(mqtt_msg->topic_tokens[3], "pv") ||
-      !strcasecmp(mqtt_msg->topic_tokens[3], "pri"))) {
-      if (!strcasecmp(mqtt_msg->topic_tokens[1], "ai")) {
-        set_ai_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value);
-      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "ao")) {
-        set_ao_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value, json_field);
-      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "av")) {
-        set_av_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value, json_field);
-      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "bi")) {
-        set_bi_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value);
-      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "bo")) {
-        set_bo_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value, json_field);
-      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "bv")) {
-        set_bv_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value, json_field);
-      } else {
-        if (mqtt_debug) {
-          printf("MQTT Unknown persistent Topic Object: [%s]\n", mqtt_msg->topic_tokens[1]);
-        }
-      }
-
-      goto EXIT;
-    }
-
     if (strcasecmp(mqtt_msg->topic_tokens[3], "write")) {
       if (mqtt_debug) {
         printf("MQTT Invalid Topic Command: [%s]\n", mqtt_msg->topic_tokens[3]);
@@ -10614,129 +10287,5 @@ int mqtt_msg_pop_and_process(void)
   }
 
   return(0);
-}
-
-
-/*
- * Get persistent object point count.
- */
-int get_persistent_object_point_count(const char *obj_name)
-{
-  int ret = 0;
-
-  if (!strcmp(obj_name, "ai")) {
-    ret = yaml_config_ai_max();
-  } else if (!strcmp(obj_name, "ao")) {
-    ret = yaml_config_ao_max();
-  } else if (!strcmp(obj_name, "av")) {
-    ret = yaml_config_av_max();
-  } else if (!strcmp(obj_name, "bi")) {
-    ret = yaml_config_bi_max();
-  } else if (!strcmp(obj_name, "bo")) {
-    ret = yaml_config_bo_max();
-  } else if (!strcmp(obj_name, "bv")) {
-    ret = yaml_config_bv_max();
-  }
-
-  return(ret);
-}
-
-
-/*
- * Restore persistent values.
- */
-int restore_persistent_values(void* context)
-{
-  MQTTAsync client = (MQTTAsync)context;
-  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
-  int rc;
-  int pc;
-  char topic[MAX_TOPIC_VALUE_LENGTH];
-  const char *objects[] = {
-    "ai",
-    "ao",
-    "av",
-    "bi",
-    "bo",
-    "bv",
-    NULL
-  };
-  const char *props[] = {
-    "name",
-    "pv",
-    "pri",
-    NULL
-  };
-
-  if (mqtt_debug) {
-    printf("Initializing object property values from persistent store.\n");
-  }
-
-  /* subscribe topics */
-  for (int i = 0; objects[i] != NULL; i++) {
-    if (mqtt_debug) {
-      printf("- Subscribing to persistent object[%d] = [%s]\n", i, objects[i]);
-    }
-
-    pc = get_persistent_object_point_count(objects[i]);
-    if (mqtt_debug) {
-      printf("- Point object count: %d\n", pc);
-    }
-
-    for (int ii = 1; ii <= pc; ii++) {
-      for (int iii = 0; props[iii] != NULL; iii++) {
-        snprintf(topic, sizeof(topic), "bacnet/%s/%d/%s", objects[i], ii, props[iii]);
-        opts.onSuccess = mqtt_on_subscribe;
-        opts.onFailure = mqtt_on_subscribe_failure;
-        opts.context = client;
-        rc = MQTTAsync_subscribe(mqtt_client, topic, 0, &opts);
-        if (rc != MQTTASYNC_SUCCESS) {
-          if (mqtt_debug) {
-            printf("- WARNING: Failed to subscribe: %s\n", MQTTAsync_strerror(rc));
-          }
-        }
-      }
-    }
-  }
-
-  /* unsubscribe topics */
-  for (int i = 0; objects[i] != NULL; i++) {
-    if (mqtt_debug) {
-      printf("- Unsubscribing to persistent object[%d] = [%s]\n", i, objects[i]);
-    }
-
-    pc = get_persistent_object_point_count(objects[i]);
-    if (mqtt_debug) {
-      printf("- Point object count: %d\n", pc);
-    }
-
-    if (!pc) {
-      continue;
-    }
-
-    for (int iii = 0; props[iii] != NULL; iii++) {
-      snprintf(topic, sizeof(topic), "bacnet/%s/+/%s", objects[i], props[iii]);
-      printf("-- Unsubscribing to topic: [%s]\n", topic);
-
-      rc = MQTTAsync_unsubscribe(mqtt_client, topic, NULL);
-      if (rc != MQTTASYNC_SUCCESS) {
-        if (mqtt_debug) {
-          printf("- WARNING: Failed to unsubscribe: %s\n", MQTTAsync_strerror(rc));
-        }
-      }
-    }
-  }
-
-  restore_persistent_done = true;
-
-  return(0);
-}
-
-/*
- * Check if restore persistent values is done.
- */
-int is_restore_persistent_done(void)
-{
-  return(restore_persistent_done);
 }
 

@@ -24,7 +24,6 @@ struct _mqtt {
   char *retry_enable;
   unsigned int retry_limit;
   unsigned int retry_interval;
-  char *disable_persistence;
   char *old_pri_array_format;
 };
 
@@ -57,8 +56,6 @@ struct _bacnet_config {
   char *msi_max;
   char *mso_max;
   char *msv_max;
-  unsigned int persistent_load_duration;
-  unsigned int main_proc_delay;
   struct _mqtt *mqtt;
   char **objects;
   unsigned int n_objects;
@@ -113,10 +110,6 @@ static const cyaml_schema_field_t mqtt_fields_schema[] = {
   CYAML_FIELD_UINT(
     "retry_interval", CYAML_FLAG_OPTIONAL,
     struct _mqtt, retry_interval),
-
-  CYAML_FIELD_STRING_PTR(
-    "disable_persistence", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
-    struct _mqtt, disable_persistence, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_STRING_PTR(
     "old_pri_array_format", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
@@ -203,14 +196,6 @@ static const cyaml_schema_field_t config_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
     "msv_max", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, msv_max, 0, CYAML_UNLIMITED),
-
-  CYAML_FIELD_UINT(
-    "persistent_load_duration", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, persistent_load_duration),
-
-  CYAML_FIELD_UINT(
-    "main_proc_delay", CYAML_FLAG_DEFAULT | CYAML_FLAG_OPTIONAL,
-    struct _bacnet_config, main_proc_delay),
 
   CYAML_FIELD_MAPPING_PTR(
     "mqtt", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
@@ -311,14 +296,6 @@ void load_default_settings(void)
       strcpy(bacnet_config->msv_max, "20");
     }
 
-    if (!bacnet_config->persistent_load_duration) {
-      bacnet_config->persistent_load_duration = 15;
-    }
-
-    if (!bacnet_config->main_proc_delay) {
-      bacnet_config->main_proc_delay = 0;
-    }
-
     if (!bacnet_config->mqtt) {
       bacnet_config->mqtt = malloc(sizeof(struct _mqtt));
       memset(bacnet_config->mqtt, 0, sizeof(struct _mqtt));
@@ -353,11 +330,6 @@ void load_default_settings(void)
     if (!bacnet_config->mqtt->retry_enable) {
       bacnet_config->mqtt->retry_enable = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
       strcpy(bacnet_config->mqtt->retry_enable, "true");
-    }
-
-    if (!bacnet_config->mqtt->disable_persistence) {
-      bacnet_config->mqtt->disable_persistence = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
-      strcpy(bacnet_config->mqtt->disable_persistence, "false");
     }
 
     if (!bacnet_config->mqtt->old_pri_array_format) {
@@ -508,8 +480,6 @@ void yaml_config_dump(void)
   printf("YAML Config: msi_max: %s\n", bacnet_config->msi_max);
   printf("YAML Config: mso_max: %s\n", bacnet_config->mso_max);
   printf("YAML Config: msv_max: %s\n", bacnet_config->msv_max);
-  printf("YAML Config: persistent_load_duration: %d\n", bacnet_config->persistent_load_duration);
-  printf("YAML Config: main_proc_delay: %d\n", bacnet_config->main_proc_delay);
   if (bacnet_config->mqtt) {
     printf("YAML Config: mqtt->broker_ip: %s\n", (bacnet_config->mqtt->broker_ip) ?
       bacnet_config->mqtt->broker_ip : "null");
@@ -524,8 +494,6 @@ void yaml_config_dump(void)
       bacnet_config->mqtt->retry_enable : "null");
     printf("YAML Config: mqtt->retry_limit: %d\n", bacnet_config->mqtt->retry_limit);
     printf("YAML Config: mqtt->retry_interval: %d\n", bacnet_config->mqtt->retry_interval);
-    printf("YAML Config: mqtt->disable_persistence: %s\n", (bacnet_config->mqtt->disable_persistence) ?
-      bacnet_config->mqtt->disable_persistence : "null");
     printf("YAML Config: mqtt->old_pri_array_format: %s\n", (bacnet_config->mqtt->old_pri_array_format) ?
       bacnet_config->mqtt->old_pri_array_format: "null");
   }
@@ -692,24 +660,6 @@ int yaml_config_msv_max(void)
 
 
 /*
- * Get persistent load duration
- */
-unsigned int yaml_config_persistent_load_duration(void)
-{
-  return(bacnet_config->persistent_load_duration);
-}
-
-
-/*
- * Get Main process delay.
- */
-unsigned int yaml_config_main_proc_delay(void)
-{
-  return(bacnet_config->main_proc_delay);
-}
-
-
-/*
  * Get MQTT Broker IP.
  */
 char *yaml_config_mqtt_broker_ip(void)
@@ -786,16 +736,6 @@ int yaml_config_mqtt_connect_retry_limit(void)
 int yaml_config_mqtt_connect_retry_interval(void)
 {
   return(bacnet_config->mqtt->retry_interval);
-}
-
-
-/*
- * Get MQTT disable persistence flag.
- */
-int yaml_config_mqtt_disable_persistence(void)
-{
-  return ((bacnet_config->mqtt && bacnet_config->mqtt->disable_persistence &&
-    !strcmp(bacnet_config->mqtt->disable_persistence, "true")) ? true : false);
 }
 
 
