@@ -79,7 +79,7 @@ void handler_write_property(uint8_t *service_request,
     npdu_encode_npdu_data(&npdu_data, false, MESSAGE_PRIORITY_NORMAL);
     pdu_len = npdu_encode_pdu(
         &Handler_Transmit_Buffer[0], src, &my_address, &npdu_data);
-#if PRINT_ENABLED
+#if PRINT_ENABLED_X
     fprintf(stderr, "WP: Received Request!\n");
 #endif
     if (service_data->segmented_message) {
@@ -95,7 +95,7 @@ void handler_write_property(uint8_t *service_request,
     if (bcontinue) {
         /* decode the service request only */
         len = wp_decode_service_request(service_request, service_len, &wp_data);
-#if PRINT_ENABLED
+#if PRINT_ENABLED_X
         if (len > 0)
             fprintf(stderr,
                 "WP: type=%lu instance=%lu property=%lu priority=%lu "
@@ -121,7 +121,7 @@ void handler_write_property(uint8_t *service_request,
             if (Device_Write_Property(&wp_data)) {
                 len = encode_simple_ack(&Handler_Transmit_Buffer[pdu_len],
                     service_data->invoke_id, SERVICE_CONFIRMED_WRITE_PROPERTY);
-#if PRINT_ENABLED
+#if PRINT_ENABLED_X
                 fprintf(stderr, "WP: Sending Simple Ack!\n");
 #endif
             } else {
