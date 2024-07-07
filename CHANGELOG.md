@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## [v1.0.2-rc.1](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2-rc.1) (2024-07-07)
+- Re-align debugging lines. Disabled by default.
+- Prerequisites:
+  - ROS >= 1.0.0
+
 ## [v1.0.1](https://github.com/NubeIO/bacnet-server-c/tree/v1.0.1) (2024-06-24)
 
 - Issue-121: Fix for the bug when driver bacnet responds with an error to all MQTT read/write commands

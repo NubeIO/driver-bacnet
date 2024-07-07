@@ -1314,12 +1314,16 @@ int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
   }
 
   if (opts->device_instance_min > BACNET_MAX_INSTANCE) {
-    printf("Mininum Device-Instance exceeded limit!\n");
+    if (mqtt_debug) {
+      printf("Mininum Device-Instance exceeded limit!\n");
+    }
     return(1);
   }
 
   if (opts->device_instance_max > BACNET_MAX_INSTANCE) {
-    printf("Maximum Device-Instance exceeded limit!\n");
+    if (mqtt_debug) {
+      printf("Maximum Device-Instance exceeded limit!\n");
+    }
     return(1);
   }
 
@@ -1344,13 +1348,17 @@ int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
 
 void mqtt_on_send_success(void* context, MQTTAsync_successData* response)
 {
-  printf("Message with token value %d delivery confirmed\n", response->token);
+  if (mqtt_debug) {
+    printf("Message with token value %d delivery confirmed\n", response->token);
+  }
 }
 
 
 void mqtt_on_send_failure(void* context, MQTTAsync_failureData* response)
 {
-  printf("Message send failed token %d error code %d\n", response->token, response->code);
+  if (mqtt_debug) {
+    printf("Message send failed token %d error code %d\n", response->token, response->code);
+  }
 }
 
 
@@ -2999,8 +3007,10 @@ int publish_bacnet_client_whois_result(llist_whois_cb *cb)
   sprintf(topic, "bacnet/cmd_result/whois");
   encode_whois_result(cb, topic_value, sizeof(topic_value));
 
-  printf("- write value result topic: %s\n", topic);
-  printf("- write value result topic value: %s\n", topic_value);
+  if (mqtt_debug) {
+    printf("- write value result topic: %s\n", topic);
+    printf("- write value result topic value: %s\n", topic_value);
+  }
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -3053,8 +3063,10 @@ int publish_whois_device(char *topic, char *topic_value)
   int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
   int rc, i;
 
-  printf("- write value result topic: %s\n", topic);
-  printf("- write value result topic value: %s\n", topic_value);
+  if (mqtt_debug) {
+    printf("- write value result topic: %s\n", topic);
+    printf("- write value result topic value: %s\n", topic_value);
+  }
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -3107,7 +3119,9 @@ int publish_topic_value(char *topic, char *topic_value)
   int mqtt_retry_interval = yaml_config_mqtt_connect_retry_interval();
   int rc, i;
 
-  printf("- write value result topic: %s\n", topic);
+  if (mqtt_debug) {
+    printf("- write value result topic: %s\n", topic);
+  }
 
   if (yaml_config_mqtt_connect_retry() && mqtt_retry_limit > 0) {
     for (i = 0; i < mqtt_retry_limit && !mqtt_client_connected; i++) {
@@ -3377,8 +3391,10 @@ void process_point_disc_resp(uint8_t *service_request,
     rp_ack_print_data(&data);
   }
 
-  printf("data.object_type: %d\n", data.object_type);
-  printf("data.object_property: %d\n", data.object_property);
+  if (mqtt_debug) {
+    printf("data.object_type: %d\n", data.object_type);
+    printf("data.object_property: %d\n", data.object_property);
+  }
 
   if (data.object_type != OBJECT_DEVICE) {
     printf("Invalid object_type: %d\n", data.object_type);
@@ -3453,15 +3469,20 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
   llist_point_disc_cb *pd_data;
   int len = 0;
 
-  printf("- bacnet_client_read_value_handler() => %d\n", getpid());
-  printf("-- service_data->invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
+  if (mqtt_debug) {
+    printf("- bacnet_client_read_value_handler() => %d\n", getpid());
+    printf("-- service_data->invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
+  }
 
   if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
-    printf("-- Request with pending reply found!\n");
+    if (mqtt_debug) {
+      printf("-- Request with pending reply found!\n");
+    }
     del_bacnet_client_request(service_data->invoke_id);
-    printf("-- Request invoke_id: %d deleted\n", service_data->invoke_id);
   } else if ((pd_data = get_bacnet_client_point_disc_req(service_data->invoke_id, src))) {
-    printf("-- Point Discovery request with pending reply found!\n");
+    if (mqtt_debug) {
+      printf("-- Point Discovery request with pending reply found!\n");
+    }
     process_point_disc_resp(service_request, service_len, src, pd_data);
     return;
   } else if (address_match(&pics_Target_Address, src) &&
@@ -3485,7 +3506,9 @@ static void bacnet_client_read_value_handler(uint8_t *service_request,
     }
     return;
   } else {
-    printf("-- Request with pending reply NOT found! Discarding reply!\n");
+    if (mqtt_debug) {
+      printf("-- Request with pending reply NOT found! Discarding reply!\n");
+    }
     return;
   }
 
@@ -3509,14 +3532,20 @@ static void bacnet_client_write_value_handler(
 {
   llist_obj_data obj_data;
 
-  printf("- bacnet_client_write_value_handler() => %d\n", getpid());
-  printf("-- invoke_id: %d\n", invoke_id);
+  if (mqtt_debug) {
+    printf("- bacnet_client_write_value_handler() => %d\n", getpid());
+    printf("-- invoke_id: %d\n", invoke_id);
+  }
 
   if (get_bacnet_client_request_obj_data(invoke_id, &obj_data)) {
-    printf("-- Request with pending reply found!\n");
+    if (mqtt_debug) {
+      printf("-- Request with pending reply found!\n");
+    }
     del_bacnet_client_request(invoke_id);
   } else {
-    printf("-- Request with pending reply NOT found! Discarding reply!\n");
+    if (mqtt_debug) {
+      printf("-- Request with pending reply NOT found! Discarding reply!\n");
+    }
     return;
   }
 
@@ -3543,38 +3572,50 @@ static void bacnet_client_whois_handler(uint8_t *service_request, uint16_t servi
   (void)service_len;
   len = iam_decode_service_request(
     service_request, &device_id, &max_apdu, &segmentation, &vendor_id);
-  fprintf(stderr, "Received I-Am Request");
+  if (mqtt_debug) {
+    fprintf(stderr, "Received I-Am Request");
+  }
 
   if (len != -1) {
-    fprintf(stderr, " from %lu, MAC = ", (unsigned long)device_id);
-    if ((src->mac_len == 6) && (src->len == 0)) {
-      fprintf(stderr, "%u.%u.%u.%u %02X%02X\n", (unsigned)src->mac[0],
-        (unsigned)src->mac[1], (unsigned)src->mac[2],
-        (unsigned)src->mac[3], (unsigned)src->mac[4],
-        (unsigned)src->mac[5]);
-    } else {
-      for (i = 0; i < src->mac_len; i++) {
-        fprintf(stderr, "%02X", (unsigned)src->mac[i]);
-        if (i < (src->mac_len - 1)) {
-          fprintf(stderr, ":");
+    if (mqtt_debug) {
+      fprintf(stderr, " from %lu, MAC = ", (unsigned long)device_id);
+      if ((src->mac_len == 6) && (src->len == 0)) {
+        fprintf(stderr, "%u.%u.%u.%u %02X%02X\n", (unsigned)src->mac[0],
+          (unsigned)src->mac[1], (unsigned)src->mac[2],
+          (unsigned)src->mac[3], (unsigned)src->mac[4],
+          (unsigned)src->mac[5]);
+      } else {
+        for (i = 0; i < src->mac_len; i++) {
+          fprintf(stderr, "%02X", (unsigned)src->mac[i]);
+          if (i < (src->mac_len - 1)) {
+            fprintf(stderr, ":");
+          }
         }
+        fprintf(stderr, "\n");
       }
-      fprintf(stderr, "\n");
     }
 
     table = get_bacnet_client_first_whois_data();
     if (table) {
-      printf("- Adding Whois address ...\n");
+      if (mqtt_debug) {
+        printf("- Adding Whois address ...\n");
+      }
       whois_address_table_add(table, device_id, max_apdu, src);
     } else {
-      printf("- WARNING: No existing whois request found!\n");
+      if (mqtt_debug) {
+        printf("- WARNING: No existing whois request found!\n");
+      }
       if (len > 0) {
-        printf("- Adding address for PICS command\n");
+        if (mqtt_debug) {
+          printf("- Adding address for PICS command\n");
+        }
         address_add_binding(device_id, max_apdu, src);
       }
     }
   } else {
-    fprintf(stderr, ", but unable to decode it.\n");
+    if (mqtt_debug) {
+      fprintf(stderr, ", but unable to decode it.\n");
+    }
   }
 }
 
@@ -3596,12 +3637,16 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
   llist_obj_data obj_data;
   int len = 0;
 
-  printf("- bacnet_client_multiple_ack_handler()\n");
-  printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
+  if (mqtt_debug) {
+    printf("- bacnet_client_multiple_ack_handler()\n");
+    printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d\n", service_data->invoke_id, pics_Request_Invoke_ID);
+  }
 
   if (address_match(&pics_Target_Address, src) &&
     (service_data->invoke_id == pics_Request_Invoke_ID)) {
-    printf("-- Read PICS request start!\n");
+    if (mqtt_debug) {
+      printf("-- Read PICS request start!\n");
+    }
     rpm_data = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
     if (rpm_data) {
       len = rpm_ack_decode_service_request(
@@ -3616,15 +3661,21 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
       /* Will process and free the RPM data later */
     } else {
       if (len < 0) { /* Eg, failed due to no segmentation */
-        fprintf(stderr, "- Error_Detected\n");
+        if (mqtt_debug) {
+          fprintf(stderr, "- Error_Detected\n");
+        }
         Error_Detected = true;
       }
       rpm_data = rpm_data_free(rpm_data);
       free(rpm_data);
     }
-    printf("-- Read PICS request end!\n");
+    if (mqtt_debug) {
+      printf("-- Read PICS request end!\n");
+    }
   } else if (get_bacnet_client_request_obj_data(service_data->invoke_id, &obj_data)) {
-    printf("-- Read multiple Request with pending reply found!\n");
+    if (mqtt_debug) {
+      printf("-- Read multiple Request with pending reply found!\n");
+    }
     del_bacnet_client_request(service_data->invoke_id);
     rpm_data = calloc(1, sizeof(BACNET_READ_ACCESS_DATA));
     if (rpm_data) {
@@ -3643,7 +3694,9 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
         rpm_data = rpm_data_free(rpm_data);
       }
     } else {
-      fprintf(stderr, "RPM Ack Malformed! Freeing memory...\n");
+      if (mqtt_debug) {
+        fprintf(stderr, "RPM Ack Malformed! Freeing memory...\n");
+      }
       while (rpm_data) {
         rpm_property = rpm_data->listOfProperties;
         while (rpm_property) {
@@ -3667,7 +3720,9 @@ static void bacnet_client_multiple_ack_handler(uint8_t *service_request,
 
     publish_bacnet_client_read_multiple_value_result(&obj_data);
   } else {
-    printf("-- read multiple request with pending reply NOT found! Discarding reply!\n");
+    if (mqtt_debug) {
+      printf("-- read multiple request with pending reply NOT found! Discarding reply!\n");
+    }
     return;
   }
 }
@@ -3681,14 +3736,20 @@ static void bacnet_client_write_multiple_ack_handler(
 {
   llist_obj_data obj_data;
 
-  printf("- bacnet_client_write_multiple_ack_handler()\n");
-  printf("-- invoke_id: %d\n", invoke_id);
+  if (mqtt_debug) {
+    printf("- bacnet_client_write_multiple_ack_handler()\n");
+    printf("-- invoke_id: %d\n", invoke_id);
+  }
 
   if (get_bacnet_client_request_obj_data(invoke_id, &obj_data)) {
-    printf("-- Write multiple Request with pending reply found!\n");
+    if (mqtt_debug) {
+      printf("-- Write multiple Request with pending reply found!\n");
+    }
     del_bacnet_client_request(invoke_id);
   } else {
-    printf("-- Write multiple request with pending reply NOT found! Discarding reply!\n");
+    if (mqtt_debug) {
+      printf("-- Write multiple request with pending reply NOT found! Discarding reply!\n");
+    }
     return;
   }
 
@@ -3774,9 +3835,12 @@ static void bacnet_client_abort_handler(
   bacnet_client_cmd_opts opts;
 
   (void)server;
-printf("- bacnet_client_abort_handler()\n");
-printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
-  invoke_id, pics_Request_Invoke_ID, abort_reason);
+  if (mqtt_debug) {
+    printf("- bacnet_client_abort_handler()\n");
+    printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , abort_reason: %d\n",
+      invoke_id, pics_Request_Invoke_ID, abort_reason);
+  }
+
   if (address_match(&pics_Target_Address, src) &&
     (invoke_id == pics_Request_Invoke_ID)) {
 #if PRINT_ERRORS
@@ -3853,9 +3917,11 @@ static void bacnet_client_reject_handler(
   char err_msg[1024];
   bacnet_client_cmd_opts opts;
 
-printf("- bacnet_client_reject_handler()\n");
-printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , reject_reason: %d\n",
-  invoke_id, pics_Request_Invoke_ID, reject_reason);
+  if (mqtt_debug) {
+    printf("- bacnet_client_reject_handler()\n");
+    printf("-- invoke_id: %d , pics_Request_Invoke_ID: %d , reject_reason: %d\n",
+      invoke_id, pics_Request_Invoke_ID, reject_reason);
+  }
   if (address_match(&pics_Target_Address, src) &&
     (invoke_id == pics_Request_Invoke_ID)) {
 #if PRINT_ERRORS
@@ -4631,7 +4697,9 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     process_local_read_value_command(opts);
   } else { */
     if (opts->tag_flags & CMD_TAG_FLAG_SLOW_TEST) {
-      printf("** Slow test enabled!\n");
+      if (mqtt_debug) {
+        printf("** Slow test enabled!\n");
+      }
       usleep(1000000);
     }
 
@@ -4657,7 +4725,9 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
 
     request_invoke_id = Send_Read_Property_Request(opts->device_instance,
       opts->object_type, opts->object_instance, opts->property, opts->index);
-    printf("read request_invoke_id: %d\n", request_invoke_id);
+    if (mqtt_debug) {
+      printf("read request_invoke_id: %d\n", request_invoke_id);
+    }
     if (request_invoke_id <= 0) {
       printf("***** ERROR SENDING READ PROPERTY REQUEST *****\n");
       mqtt_publish_command_error("Error sending bacnet read message", opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
@@ -4665,7 +4735,6 @@ int process_bacnet_client_read_value_command(bacnet_client_cmd_opts *opts)
     }
 
     add_bacnet_client_request(request_invoke_id, &obj_data);
-    printf("read request id added\n");
 
     if (opts->tag_flags & CMD_TAG_FLAG_SLOW_TEST) {
       usleep(1000000);
@@ -4807,7 +4876,9 @@ int process_bacnet_client_read_multiple_value_command (bacnet_client_cmd_opts *o
   request_invoke_id = Send_Read_Property_Multiple_Request(
     &buffer[0], sizeof(buffer), opts->device_instance, rad);
 
-  printf("read multiple request_invoke_id: %d\n", request_invoke_id);
+  if (mqtt_debug) {
+    printf("read multiple request_invoke_id: %d\n", request_invoke_id);
+  }
   if (request_invoke_id <= 0) {
     printf("***** ERROR SENDING READ MULTIPLE PROPERTY REQUEST *****\n");
     mqtt_publish_command_error("Error sending bacnet read multiple message", opts, MQTT_READ_VALUE_CMD_RESULT_TOPIC);
@@ -4815,7 +4886,6 @@ int process_bacnet_client_read_multiple_value_command (bacnet_client_cmd_opts *o
   }
 
   add_bacnet_client_request(request_invoke_id, &obj_data);
-  printf("read multiple request id added\n");
 
   pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
   if (pdu_len) {
@@ -4979,7 +5049,9 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts)
       }
 
       if (opts->prio_array_len > 0) {
-        printf("- Writing AO priority array\n");
+        if (mqtt_debug) {
+          printf("- Writing AO priority array\n");
+        }
         for (i = 0; i < opts->prio_array_len; i++) {
           if (mqtt_debug) {
             printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
@@ -5020,7 +5092,9 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts)
       }
 
       if (opts->prio_array_len > 0) {
-        printf("- Writing AV priority array\n");
+        if (mqtt_debug) {
+          printf("- Writing AV priority array\n");
+        }
         for (i = 0; i < opts->prio_array_len; i++) {
           if (mqtt_debug) {
             printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
@@ -5088,7 +5162,9 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts)
       }
 
       if (opts->prio_array_len > 0) {
-        printf("- Writing BO priority array\n");
+        if (mqtt_debug) {
+          printf("- Writing BO priority array\n");
+        }
         for (i = 0; i < opts->prio_array_len; i++) {
           if (mqtt_debug) {
             printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
@@ -5129,7 +5205,9 @@ int process_local_write_value_command(bacnet_client_cmd_opts *opts)
       }
 
       if (opts->prio_array_len > 0) {
-        printf("- Writing BV priority array\n");
+        if (mqtt_debug) {
+          printf("- Writing BV priority array\n");
+        }
         for (i = 0; i < opts->prio_array_len; i++) {
           if (mqtt_debug) {
             printf("- [%d] index: [%d] , value: [%s]\n", i, opts->prio_array[i].index, opts->prio_array[i].value);
@@ -5292,7 +5370,9 @@ static int send_write_request(llist_obj_data *obj_data, BACNET_APPLICATION_DATA_
     return(0);
   }
 
-  printf("- queuing request_invoke_id %d for reply\n", request_invoke_id);
+  if (mqtt_debug) {
+    printf("- queuing request_invoke_id %d for reply\n", request_invoke_id);
+  }
   add_bacnet_client_request(request_invoke_id, obj_data);
 
   if (opts->timeout > 0) {
@@ -5420,7 +5500,9 @@ int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *o
       opts->rpm_objects[i].value,
       &wpm_property->value);
     if (ret) {
-      printf("- Error parsing RPM value: [%s]", opts->rpm_objects[i].value);
+      if (mqtt_debug) {
+        printf("- Error parsing RPM value: [%s]", opts->rpm_objects[i].value);
+      }
       snprintf(err_msg, sizeof(err_msg) - 1,
         "Error parsing RPM value: %s for object: %d , property: %d",
         opts->rpm_objects[i].value,
@@ -5440,7 +5522,9 @@ int process_bacnet_client_write_multiple_value_command(bacnet_client_cmd_opts *o
   if (!is_error) {
     request_invoke_id = Send_Write_Property_Multiple_Request(
       &buffer[0], sizeof(buffer), opts->device_instance, wad);
-    printf("write multiple request_invoke_id: %d\n", request_invoke_id);
+    if (mqtt_debug) {
+      printf("write multiple request_invoke_id: %d\n", request_invoke_id);
+    }
 
     add_bacnet_client_request(request_invoke_id, &obj_data);
 
@@ -5730,7 +5814,9 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       &value,
       obj_data.priority,
       opts->index);
-    printf("write request_invoke_id: %d\n", request_invoke_id);
+    if (mqtt_debug) {
+      printf("write request_invoke_id: %d\n", request_invoke_id);
+    }
 
     if (request_invoke_id <= 0) {
       printf("***** ERROR SENDING WRITE PROPERTY REQUEST *****\n");
@@ -5925,7 +6011,9 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
           } else if (!strcmp(kvp_key, "value")) {
             strncpy(rpm_cb->value, kvp_value, sizeof(rpm_cb->value) - 1);
           } else {
-            printf("- Unsupported KV pair: [%s] => [%s]\n", kvp_key, kvp_value);
+            if (mqtt_debug) {
+              printf("- Unsupported KV pair: [%s] => [%s]\n", kvp_key, kvp_value);
+            }
           }
 
           json_object_iter_next(&it);
@@ -5942,7 +6030,9 @@ int extract_json_fields_to_cmd_opts(json_object *json_root, bacnet_client_cmd_op
 
   for (i = 0; i < req_tokens_len; i++) {
     key = req_tokens[i];
-    printf("- checking key: [%s]\n", key);
+    if (mqtt_debug) {
+      printf("- checking key: [%s]\n", key);
+    }
     json_field = json_object_object_get(json_root, key);
     if (!json_field) {
       continue;
@@ -6292,7 +6382,9 @@ int del_bacnet_client_request(uint8_t invoke_id)
   }
 
   if (ptr) {
-    printf("- request with ID: %d found for deleting\n", ptr->data.invoke_id);
+    if (mqtt_debug) {
+      printf("- request with ID: %d found for deleting\n", ptr->data.invoke_id);
+    }
     if (ptr == bc_request_list_head) {
       bc_request_list_head = ptr->next;
     } else {
@@ -6386,7 +6478,9 @@ void sweep_bacnet_client_aged_requests(void)
 
   while (ptr != NULL) {
     if ((cur_tt - ptr->timestamp) >= BACNET_CLIENT_REQUEST_TTL) {
-      printf("- Aged request found: %d\n", ptr->data.invoke_id);
+      if (mqtt_debug) {
+        printf("- Aged request found: %d\n", ptr->data.invoke_id);
+      }
 
       tsm_free_invoke_id(ptr->data.invoke_id);
 
@@ -6519,7 +6613,9 @@ int add_bacnet_client_whois(BACNET_ADDRESS *dest, bacnet_client_cmd_opts *opts)
     bc_whois_tail = ptr;
   }
 
-  printf("- Added whois request: %d\n", ptr->request_id);
+  if (mqtt_debug) {
+    printf("- Added whois request: %d\n", ptr->request_id);
+  }
 
   return(0);
 }
@@ -6533,7 +6629,9 @@ int del_bacnet_client_first_whois_request(void)
   llist_whois_cb *ptr = bc_whois_head;
 
   if (ptr) {
-    printf("- whois request found!\n");
+    if (mqtt_debug) {
+      printf("- whois request found!\n");
+    }
     bc_whois_head = ptr->next;
     free(ptr);
   }
@@ -6594,7 +6692,9 @@ void sweep_bacnet_client_whois_requests(void)
 
   while (ptr != NULL) {
     if ((ptr->timestamp + ptr->data.timeout) < cur_tt) {
-      printf("- Whois Aged request found: %d\n", ptr->request_id);
+      if (mqtt_debug) {
+        printf("- Whois Aged request found: %d\n", ptr->request_id);
+      }
 
       tmp = ptr;
       if (ptr == bc_whois_head) {
@@ -6644,7 +6744,9 @@ void sweep_bacnet_client_point_disc_requests(void)
 
   while (ptr != NULL) {
     if ((ptr->timestamp + ptr->data.timeout) < cur_tt) {
-      printf("- Point discovery Aged request found: %d\n", ptr->request_id);
+      if (mqtt_debug) {
+        printf("- Point discovery Aged request found: %d\n", ptr->request_id);
+      }
 
       tsm_free_invoke_id(ptr->request_id);
 
@@ -6778,7 +6880,9 @@ int del_bacnet_client_pics(uint8_t invoke_id)
   }
 
   if (ptr) {
-    printf("- PICS request with ID: %d found for deleting\n", ptr->data.invoke_id);
+    if (mqtt_debug) {
+      printf("- PICS request with ID: %d found for deleting\n", ptr->data.invoke_id);
+    }
     if (ptr == bc_pics_head) {
       bc_pics_head = ptr->next;
     } else {
@@ -6963,7 +7067,9 @@ int mqtt_client_init(void)
  */
 void mqtt_on_subscribe(void* context, MQTTAsync_successData* response)
 {
-  printf("Subscribe succeeded\n");
+  if (mqtt_debug) {
+    printf("Subscribe succeeded\n");
+  }
 }
 
 
@@ -7129,7 +7235,9 @@ int mqtt_subscribe_to_topics(void* context)
 
 void mqtt_on_disconnect(void* context, MQTTAsync_successData* response)
 {
-  printf("- MQTT client disconnected!\n");
+  if (mqtt_debug) {
+    printf("- MQTT client disconnected!\n");
+  }
 }
 
 
@@ -10281,7 +10389,9 @@ int add_bacnet_client_point_disc(uint32_t request_id, BACNET_ADDRESS *dest, bacn
     bc_point_disc_tail = ptr;
   }
 
-  printf("- Added point discovery request: %d\n", ptr->request_id);
+  if (mqtt_debug) {
+    printf("- Added point discovery request: %d\n", ptr->request_id);
+  }
 
   return(0);
 }
@@ -10358,7 +10468,9 @@ int process_bacnet_client_point_discovery_command(bacnet_client_cmd_opts *opts)
   /* Get number of points */
   request_invoke_id = Send_Read_Property_Request(opts->device_instance,
     OBJECT_DEVICE, opts->device_instance, PROP_OBJECT_LIST, 0);
-  printf("point discovery request_invoke_id: %d\n", request_invoke_id);
+  if (mqtt_debug) {
+    printf("point discovery request_invoke_id: %d\n", request_invoke_id);
+  }
 
   if (opts->timeout > 0) {
     timeout = opts->timeout;
@@ -10395,7 +10507,9 @@ int get_bacnet_client_point_disc_points(llist_point_disc_cb *pd_ptr)
 
   request_invoke_id = Send_Read_Property_Request(pd_ptr->data.device_instance,
     OBJECT_DEVICE, pd_ptr->data.device_instance, PROP_OBJECT_LIST, BACNET_ARRAY_ALL);
-  printf("point discovery request_invoke_id: %d\n", request_invoke_id);
+  if (mqtt_debug) {
+    printf("point discovery request_invoke_id: %d\n", request_invoke_id);
+  }
   pd_ptr->request_id = request_invoke_id;
   pd_ptr->state = POINT_DISC_STATE_GET_POINTS_SENT;
 
@@ -10492,8 +10606,8 @@ int mqtt_msg_pop_and_process(void)
     goto EXIT;
   }
 
-  printf("\n** Processing MQTT Message\n");
   if (mqtt_debug) {
+    printf("\n** Processing MQTT Message\n");
     dump_topic_tokens(mqtt_msg->topic_tokens_length, mqtt_msg->topic_tokens);
     printf("- value  : [%s]\n", mqtt_msg->topic_value);
   }
@@ -10716,7 +10830,9 @@ int restore_persistent_values(void* context)
 
     for (int iii = 0; props[iii] != NULL; iii++) {
       snprintf(topic, sizeof(topic), "bacnet/%s/+/%s", objects[i], props[iii]);
-      printf("-- Unsubscribing to topic: [%s]\n", topic);
+      if (mqtt_debug) {
+        printf("-- Unsubscribing to topic: [%s]\n", topic);
+      }
 
       rc = MQTTAsync_unsubscribe(mqtt_client, topic, NULL);
       if (rc != MQTTASYNC_SUCCESS) {

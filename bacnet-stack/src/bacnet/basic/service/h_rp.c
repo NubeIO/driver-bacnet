@@ -165,7 +165,7 @@ void handler_read_property(uint8_t *service_request,
                     fprintf(stderr, "RP: Message too large.\n");
         #endif
                 } else {
-        #if PRINT_ENABLED
+        #if PRINT_ENABLED_X
                     fprintf(stderr, "RP: Sending Ack!\n");
         #endif
                     error = false;
