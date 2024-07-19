@@ -61,6 +61,13 @@ extern "C" {
         BACNET_READ_PROPERTY_DATA * rpdata);
 
     BACNET_STACK_EXPORT
+    bool Multistate_Input_Object_Name_Set(uint32_t object_instance,
+        BACNET_CHARACTER_STRING *char_string,
+        BACNET_ERROR_CLASS *error_class,
+        BACNET_ERROR_CODE *error_code,
+        char *uuid, int bacnet_client);
+
+    BACNET_STACK_EXPORT
     bool Multistate_Input_Write_Property(
         BACNET_WRITE_PROPERTY_DATA * wp_data);
 
@@ -84,7 +91,9 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Multistate_Input_Present_Value_Set(
         uint32_t object_instance,
-        uint32_t value);
+        uint32_t value,
+        char *uuid,
+        int bacnet_client);
 
     BACNET_STACK_EXPORT
     bool Multistate_Input_Change_Of_Value(

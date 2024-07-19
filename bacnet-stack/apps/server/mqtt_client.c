@@ -156,6 +156,38 @@ extern bool Binary_Value_Object_Name(
   uint32_t object_instance, BACNET_CHARACTER_STRING *object_name);
 extern void get_bv_priority_array(uint32_t object_instance, BACNET_BINARY_PV *pa, int pa_length);
 
+extern bool Multistate_Input_Object_Name_Set(uint32_t object_instance,
+  BACNET_CHARACTER_STRING *char_string,
+  BACNET_ERROR_CLASS *error_class,
+  BACNET_ERROR_CODE *error_code,
+  char *uuid, int bacnet_client);
+extern bool Multistate_Input_Present_Value_Set(
+  uint32_t object_instance,
+  uint32_t value,
+  char *uuid,
+  int bacnet_client);
+
+extern bool Multistate_Output_Object_Name_Set(uint32_t object_instance,
+  BACNET_CHARACTER_STRING *char_string,
+  BACNET_ERROR_CLASS *error_class,
+  BACNET_ERROR_CODE *error_code,
+  char *uuid, int bacnet_client);
+extern bool Multistate_Output_Present_Value_Set(
+  uint32_t instance,
+  unsigned value,
+  unsigned priority,
+  char *uuid, int bacnet_client);
+extern bool Multistate_Output_Priority_Array_Set2(
+  uint32_t object_instance, unsigned value, unsigned priority);
+
+extern bool Multistate_Value_Present_Value_Set(
+  uint32_t object_instance, uint32_t value, char *uuid, int bacnet_client);
+extern bool Multistate_Value_Object_Name_Set(uint32_t object_instance,
+  BACNET_CHARACTER_STRING *char_string,
+  BACNET_ERROR_CLASS *error_class,
+  BACNET_ERROR_CODE *error_code,
+  char *uuid, int bacnet_client);
+
 int tokenize_topic(char *topic, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
 void dump_topic_tokens(int n_topic_tokens, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH]);
 int process_ai_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
@@ -170,6 +202,9 @@ int process_bo_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TO
 int set_bo_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field);
 int process_bv_write(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, char *uuid);
 int set_bv_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field);
+int set_msi_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value);
+int set_mso_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field);
+int set_msv_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value);
 void mqtt_connection_lost(void *context, char *cause);
 int mqtt_msg_arrived(void *context, char *topic, int topic_len, MQTTAsync_message *message);
 int mqtt_connect_to_broker(void);
@@ -1244,6 +1279,131 @@ int set_bv_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKE
 }
 
 
+/*    
+ * Set MULTI STATE INPUT(MSI) property persistent value.
+ */
+int set_msi_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value)
+{
+  BACNET_CHARACTER_STRING bacnet_string;
+  char *prop_name = topic_tokens[3];
+  BACNET_ERROR_CLASS error_class;
+  BACNET_ERROR_CODE error_code;
+
+  if (mqtt_debug) {
+    printf("Setting MSI property persistent value: %s/%d\n", prop_name, index);
+  }
+
+  if (!strcasecmp(prop_name, "name")) {
+    characterstring_init_ansi(&bacnet_string, value);
+    Multistate_Input_Object_Name_Set(index, &bacnet_string, &error_class, &error_code, NULL, true);
+  } else if (!strcasecmp(prop_name, "pv")) {
+    int i_val;
+    i_val = atoi(value);
+    Multistate_Input_Present_Value_Set(index, i_val, NULL, true);
+  } else {
+    if (mqtt_debug) {
+      printf("MQTT Invalid persistent Property for Multistate Input (MSI): [%s]\n", prop_name);
+    }
+
+    return(1);
+  }
+
+  return(0);
+}
+
+
+/*
+ * Process MULTI STATE OUTPUT(MSO) property persistent value.
+ */
+int set_mso_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value, json_object *json_field)
+{
+  BACNET_CHARACTER_STRING bacnet_string;
+  int i_val;
+  char array_value_buf[MAX_JSON_VALUE_LENGTH];
+  char *prop_name = topic_tokens[3];
+  int rc = 1;
+  BACNET_ERROR_CLASS error_class;
+  BACNET_ERROR_CODE error_code;
+
+  if (mqtt_debug) {
+    printf("Setting MSO property persistent value: %s/%d\n", prop_name, index);
+  }
+
+  if (!strcasecmp(prop_name, "name")) {
+    characterstring_init_ansi(&bacnet_string, value);
+    Multistate_Output_Object_Name_Set(index, &bacnet_string, &error_class, &error_code, NULL, true);
+  } else if (!strcasecmp(prop_name, "pv")) {
+    i_val = (!strcasecmp(value, "null")) ? 255 : atoi(value);
+    Multistate_Output_Present_Value_Set(index, i_val, BACNET_MAX_PRIORITY, NULL, true);
+  } else if (!strcasecmp(prop_name, "pri")) {
+    json_object *obj;
+    int arr_len = json_object_array_length(json_field);
+    for (int i = 0; i < arr_len; i++) {
+      obj = json_object_array_get_idx(json_field, i);
+      if (!obj) {
+        continue;
+      }
+
+      strncpy(array_value_buf, json_object_get_string(obj), sizeof(array_value_buf) - 1);
+      if (mqtt_debug) {
+        printf("- index[%d] : [%s]\n", i, array_value_buf);
+      }
+
+      i_val = (!strcasecmp(array_value_buf, "null")) ? 255 : atoi(array_value_buf);
+      Multistate_Output_Priority_Array_Set2(index, i_val, (i + 1));
+    }
+  } else {
+    if (mqtt_debug) {
+      printf("MQTT Invalid persistent Property for Multistate Output (MSO): [%s]\n", prop_name);
+    }
+
+    goto EXIT;
+  }
+
+  rc = 0;
+  EXIT:
+
+  return(rc);
+}
+
+
+/*
+ * Process MULTI STATE VALUE(MSV) property persistent value.
+ */
+int set_msv_property_persistent_value(int index, char topic_tokens[MAX_TOPIC_TOKENS][MAX_TOPIC_TOKEN_LENGTH], char *value)
+{
+  BACNET_CHARACTER_STRING bacnet_string;
+  int i_val;
+  char *prop_name = topic_tokens[3];
+  int rc = 1;
+  BACNET_ERROR_CLASS error_class;
+  BACNET_ERROR_CODE error_code;
+
+  if (mqtt_debug) {
+    printf("Setting MSV property persistent value: %s/%d\n", prop_name, index);
+  }
+
+  if (!strcasecmp(prop_name, "name")) {
+    characterstring_init_ansi(&bacnet_string, value);
+    Multistate_Value_Object_Name_Set(index, &bacnet_string, &error_class, &error_code, NULL, true);
+  } else if (!strcasecmp(prop_name, "pv")) {
+    i_val = (!strcasecmp(value, "null")) ? 255 : atoi(value);
+    Multistate_Value_Present_Value_Set(index, i_val, NULL, true);
+  } else {
+    if (mqtt_debug) {
+      printf("MQTT Invalid persistent Property for Multistate Value (MSV): [%s]\n", prop_name);
+    }
+
+    goto EXIT;
+  }
+
+  rc = 0;
+  EXIT:
+
+  return(rc);
+}
+
+
 /*
  * Process Bacnet client Whois command.
  */
@@ -2180,12 +2340,20 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
     case OBJECT_MULTI_STATE_INPUT:
     case OBJECT_MULTI_STATE_OUTPUT:
     case OBJECT_MULTI_STATE_VALUE:
-      object_value.object_type = data->object_type;
-      object_value.object_instance = data->object_instance;
-      object_value.object_property = data->object_property;
-      object_value.array_index = data->array_index;
-      object_value.value = &value;
-      bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
+      switch(data->object_property) {
+        case PROP_PRIORITY_ARRAY:
+          encode_array_value_result(data, obj_data, tmp, sizeof(tmp) - 1);
+          break;
+
+        default:
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
+          break;
+      }
       break;
 
     default:
@@ -5314,6 +5482,7 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
     case OBJECT_MULTI_STATE_VALUE:
       switch (object_property) {
         case PROP_PRESENT_VALUE:
+        case PROP_PRIORITY_ARRAY:
           property_tag = (strcasecmp(str, "null")) ? BACNET_APPLICATION_TAG_UNSIGNED_INT: BACNET_APPLICATION_TAG_NULL;
           bacapp_parse_application_data(property_tag, str, value);
           break;
@@ -5704,7 +5873,6 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       break;
 
     case OBJECT_MULTI_STATE_INPUT:
-    case OBJECT_MULTI_STATE_OUTPUT:
     case OBJECT_MULTI_STATE_VALUE:
       if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE) {
         sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
@@ -5712,6 +5880,19 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
           printf("%s\n", err_msg);
         }
     
+        mqtt_publish_command_error(err_msg, opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+        return(1);
+      }
+      break;
+
+    case OBJECT_MULTI_STATE_OUTPUT:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE &&
+        opts->property != PROP_PRIORITY_ARRAY) {
+        sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
+        if (mqtt_debug) {
+          printf("%s\n", err_msg);
+        }
+
         mqtt_publish_command_error(err_msg, opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
         return(1);
       }
@@ -7317,6 +7498,18 @@ char *mqtt_create_topic(int object_type, int object_instance, int property_id, c
 
     case OBJECT_PROGRAM:
       object_type_str = "program";
+      break;
+
+    case OBJECT_MULTI_STATE_INPUT:
+      object_type_str = "msi";
+      break;
+
+    case OBJECT_MULTI_STATE_OUTPUT:
+      object_type_str = "mso";
+      break;
+
+    case OBJECT_MULTI_STATE_VALUE:
+      object_type_str = "msv";
       break;
 
     default:
@@ -10659,6 +10852,12 @@ int mqtt_msg_pop_and_process(void)
         set_bo_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value, json_field);
       } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "bv")) {
         set_bv_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value, json_field);
+      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "msi")) {
+        set_msi_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value);
+      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "mso")) {
+        set_mso_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value, json_field);
+      } else if (!strcasecmp(mqtt_msg->topic_tokens[1], "msv")) {
+        set_msv_property_persistent_value(address, mqtt_msg->topic_tokens, prop_value);
       } else {
         if (mqtt_debug) {
           printf("MQTT Unknown persistent Topic Object: [%s]\n", mqtt_msg->topic_tokens[1]);
@@ -10750,6 +10949,12 @@ int get_persistent_object_point_count(const char *obj_name)
     ret = yaml_config_bo_max();
   } else if (!strcmp(obj_name, "bv")) {
     ret = yaml_config_bv_max();
+  } else if (!strcmp(obj_name, "msi")) {
+    ret = yaml_config_msi_max();
+  } else if (!strcmp(obj_name, "mso")) {
+    ret = yaml_config_mso_max();
+  } else if (!strcmp(obj_name, "msv")) {
+    ret = yaml_config_msv_max();
   }
 
   return(ret);
@@ -10773,6 +10978,9 @@ int restore_persistent_values(void* context)
     "bi",
     "bo",
     "bv",
+    "msi",
+    "mso",
+    "msv",
     NULL
   };
   const char *props[] = {
@@ -10847,6 +11055,70 @@ int restore_persistent_values(void* context)
 
   return(0);
 }
+
+
+/*
+ * Unsubscribe persistent topics
+ */
+int unsubscribe_persistent_topics(void)
+{   
+  int rc;
+  int pc;
+  char topic[MAX_TOPIC_VALUE_LENGTH];
+  const char *objects[] = {
+    "ai",
+    "ao",
+    "av",
+    "bi",
+    "bo",
+    "bv",
+    "msi",
+    "mso",
+    "msv",
+    NULL
+  };
+  const char *props[] = {
+    "name",
+    "pv",
+    "pri",
+    NULL
+  };
+
+  if (mqtt_debug) {
+    printf("Unsubscribing persistent store topics.\n");
+  }
+
+  /* unsubscribe topics */
+  for (int i = 0; objects[i] != NULL; i++) {
+    if (mqtt_debug) {
+      printf("- Unsubscribing to persistent object[%d] = [%s]\n", i, objects[i]);
+    }
+
+    pc = get_persistent_object_point_count(objects[i]);
+    if (mqtt_debug) {
+      printf("- Point object count: %d\n", pc);
+    }
+
+    if (!pc) {
+      continue;
+    }
+
+    for (int ii = 1; ii <= pc; ii++) {
+      for (int iii = 0; props[iii] != NULL; iii++) {
+        snprintf(topic, sizeof(topic), "bacnet/%s/%d/%s", objects[i], ii, props[iii]);
+        rc = MQTTAsync_unsubscribe(mqtt_client, topic, NULL);
+        if (rc != MQTTASYNC_SUCCESS) {
+          if (mqtt_debug) {
+            printf("- WARNING: Failed to unsubscribe: %s\n", MQTTAsync_strerror(rc));
+          }
+        }
+      }
+    }
+  }
+
+  return(0);
+}
+
 
 /*
  * Check if restore persistent values is done.

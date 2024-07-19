@@ -378,6 +378,7 @@ int main(int argc, char *argv[])
       }
 
       printf("Persistent storage restoration done.\n");
+      unsubscribe_persistent_topics();
 
       main_proc_delay = yaml_config_main_proc_delay();
       if (main_proc_delay > 0) {

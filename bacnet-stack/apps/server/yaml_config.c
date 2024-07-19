@@ -298,17 +298,17 @@ void load_default_settings(void)
 
     if (!bacnet_config->msi_max) {
       bacnet_config->msi_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
-      strcpy(bacnet_config->msi_max, "20");
+      strcpy(bacnet_config->msi_max, "4");
     }
 
     if (!bacnet_config->mso_max) {
       bacnet_config->mso_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
-      strcpy(bacnet_config->mso_max, "20");
+      strcpy(bacnet_config->mso_max, "4");
     }
 
     if (!bacnet_config->msv_max) {
       bacnet_config->msv_max = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
-      strcpy(bacnet_config->msv_max, "20");
+      strcpy(bacnet_config->msv_max, "4");
     }
 
     if (!bacnet_config->persistent_load_duration) {

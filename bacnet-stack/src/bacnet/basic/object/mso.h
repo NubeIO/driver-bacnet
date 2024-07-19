@@ -61,6 +61,13 @@ extern "C" {
         BACNET_CHARACTER_STRING * object_name);
 
     BACNET_STACK_EXPORT
+    bool Multistate_Output_Object_Name_Set(uint32_t object_instance,
+        BACNET_CHARACTER_STRING *char_string,
+        BACNET_ERROR_CLASS *error_class,
+        BACNET_ERROR_CODE *error_code,
+        char *uuid, int bacnet_client);
+
+    BACNET_STACK_EXPORT
     void Multistate_Output_Init(
         void);
 
@@ -90,7 +97,8 @@ extern "C" {
     bool Multistate_Output_Present_Value_Set(
         uint32_t instance,
         unsigned value,
-        unsigned priority);
+        unsigned priority,
+        char *uuid, int bacnet_client);
     BACNET_STACK_EXPORT
     bool Multistate_Output_Present_Value_Relinquish(
         uint32_t instance,
@@ -125,6 +133,14 @@ extern "C" {
     char *Multistate_Output_State_Text(
         uint32_t object_instance,
         uint32_t state_index);
+
+    BACNET_STACK_EXPORT
+    void publish_mso_priority_array(
+        uint32_t object_instance,
+        char *uuid);
+    BACNET_STACK_EXPORT
+    bool Multistate_Output_Priority_Array_Set2(
+        uint32_t object_instance, unsigned value, unsigned priority);
 
 #ifdef __cplusplus
 }

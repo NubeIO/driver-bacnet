@@ -28,6 +28,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -35,31 +37,45 @@
 #include "bacnet/config.h" /* the custom stuff */
 #include "bacnet/rp.h"
 #include "bacnet/wp.h"
+#include "bacnet/basic/object/device.h"
 #include "bacnet/basic/object/msv.h"
 #include "bacnet/basic/services.h"
+#if defined(MQTT)
+#include "MQTTClient.h"
+#include "mqtt_client.h"
+#endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 /* number of demo objects */
 #ifndef MAX_MULTISTATE_VALUES
 #define MAX_MULTISTATE_VALUES 4
 #endif
 
+/* NULL part of the array */
+#define MULTISTATE_NULL (255)
+
 /* how many states? 1 to 254 states - 0 is not allowed. */
 #ifndef MULTISTATE_NUMBER_OF_STATES
 #define MULTISTATE_NUMBER_OF_STATES (254)
 #endif
 
+/* Run-time Multistate Value Instances */
+static int Multistate_Value_Instances = 0;
+
 /* Here is our Present Value */
-static uint8_t Present_Value[MAX_MULTISTATE_VALUES];
+static uint8_t *Present_Value = NULL;
 /* Writable out-of-service allows others to manipulate our Present Value */
-static bool Out_Of_Service[MAX_MULTISTATE_VALUES];
+static bool *Out_Of_Service = NULL;
 /* Change of Value flag */
-static bool Change_Of_Value[MAX_MULTISTATE_VALUES];
+static bool *Change_Of_Value = NULL;
 /* object name storage */
-static char Object_Name[MAX_MULTISTATE_VALUES][64];
+static char **Object_Name = NULL;
 /* object description storage */
-static char Object_Description[MAX_MULTISTATE_VALUES][64];
+static char **Object_Description = NULL;
 /* object state text storage */
-static char State_Text[MAX_MULTISTATE_VALUES][MULTISTATE_NUMBER_OF_STATES][64];
+static char ***State_Text = NULL;
 
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
@@ -90,12 +106,47 @@ void Multistate_Value_Property_Lists(
 void Multistate_Value_Init(void)
 {
     unsigned int i;
+    unsigned ii;
+    char *pEnv;
+    char **State_Text_a;
+
+#if defined(YAML_CONFIG)
+    Multistate_Value_Instances = yaml_config_msv_max();
+    if (Multistate_Value_Instances == 0) {
+#endif
+    pEnv = getenv("MSV");
+    if (pEnv) {
+        Multistate_Value_Instances = atoi(pEnv);
+    }
+#if defined(YAML_CONFIG)
+    }
+#endif
+
+    if (Multistate_Value_Instances > 0) {
+        Present_Value = malloc(Multistate_Value_Instances * sizeof(uint8_t));
+        Out_Of_Service = malloc(Multistate_Value_Instances * sizeof(bool));
+        memset(Out_Of_Service, 0, Multistate_Value_Instances * sizeof(bool));
+        Change_Of_Value = malloc(Multistate_Value_Instances * sizeof(bool));
+        memset(Change_Of_Value, 0, Multistate_Value_Instances * sizeof(bool));
+        Object_Name = malloc(Multistate_Value_Instances * sizeof(char *));
+        Object_Description = malloc(Multistate_Value_Instances * sizeof(char *));
+        State_Text = malloc(Multistate_Value_Instances * sizeof(char **));
+    }
 
     /* initialize all the analog output priority arrays to NULL */
-    for (i = 0; i < MAX_MULTISTATE_VALUES; i++) {
+    for (i = 0; i < Multistate_Value_Instances; i++) {
         Present_Value[i] = 1;
-        sprintf(&Object_Name[i][0], "MULTISTATE VALUE %u", i);
-        sprintf(&Object_Description[i][0], "MULTISTATE VALUE %u", i);
+        Object_Name[i] = malloc(64 * sizeof(char));
+        sprintf(&Object_Name[i][0], "MULTISTATE VALUE %u", i + 1);
+        Object_Description[i] = malloc(64 * sizeof(char));
+        sprintf(&Object_Description[i][0], "MULTISTATE VALUE %u", i + 1);
+        State_Text_a = malloc(MULTISTATE_NUMBER_OF_STATES * sizeof(char *));
+        for (ii = 0; ii < MULTISTATE_NUMBER_OF_STATES; ii++) {
+            State_Text_a[ii] = malloc(64 * sizeof(char));
+            memset(&State_Text_a[ii][0], 0, 64 * sizeof(char));
+        }
+
+        State_Text[i] = State_Text_a;
     }
 
     return;
@@ -106,9 +157,9 @@ void Multistate_Value_Init(void)
 /* that correlates to the correct instance number */
 unsigned Multistate_Value_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = MAX_MULTISTATE_VALUES;
+    unsigned index = Multistate_Value_Instances;
 
-    if (object_instance < MAX_MULTISTATE_VALUES) {
+    if (object_instance > 0 && object_instance <= Multistate_Value_Instances) {
         index = object_instance;
     }
 
@@ -127,15 +178,12 @@ uint32_t Multistate_Value_Index_To_Instance(unsigned index)
 /* more complex, and then count how many you have */
 unsigned Multistate_Value_Count(void)
 {
-    return MAX_MULTISTATE_VALUES;
+    return Multistate_Value_Instances;
 }
 
 bool Multistate_Value_Valid_Instance(uint32_t object_instance)
 {
-    unsigned index = 0; /* offset from instance lookup */
-
-    index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
+    if (object_instance > 0 && object_instance <= Multistate_Value_Instances) {
         return true;
     }
 
@@ -148,27 +196,38 @@ uint32_t Multistate_Value_Present_Value(uint32_t object_instance)
     unsigned index = 0; /* offset from instance lookup */
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        value = Present_Value[index];
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        value = Present_Value[index - 1];
     }
 
     return value;
 }
 
 bool Multistate_Value_Present_Value_Set(
-    uint32_t object_instance, uint32_t value)
+    uint32_t object_instance, uint32_t value, char *uuid, int bacnet_client)
 {
     bool status = false;
     unsigned index = 0; /* offset from instance lookup */
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
+    if (index > 0 && index <= Multistate_Value_Instances) {
         if ((value > 0) && (value <= MULTISTATE_NUMBER_OF_STATES)) {
-            if (Present_Value[index] != (uint8_t)value) {
-                Change_Of_Value[index] = true;
+            if (Present_Value[index - 1] != (uint8_t)value) {
+                Change_Of_Value[index - 1] = true;
             }
-            Present_Value[index] = (uint8_t)value;
+            Present_Value[index - 1] = (uint8_t)value;
             status = true;
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable() && !bacnet_client) {
+                if (value == MULTISTATE_NULL) {
+                  mqtt_publish_topic(OBJECT_MULTI_STATE_VALUE, object_instance, PROP_PRESENT_VALUE,
+                      MQTT_TOPIC_VALUE_STRING, "Null", uuid);
+                } else {
+                  mqtt_publish_topic(OBJECT_MULTI_STATE_VALUE, object_instance, PROP_PRESENT_VALUE,
+                      MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
+                }
+            }
+#endif /* defined(MQTT) */
         }
     }
 
@@ -181,8 +240,8 @@ bool Multistate_Value_Out_Of_Service(uint32_t object_instance)
     unsigned index = 0;
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        value = Out_Of_Service[index];
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        value = Out_Of_Service[index - 1];
     }
 
     return value;
@@ -193,11 +252,11 @@ void Multistate_Value_Out_Of_Service_Set(uint32_t object_instance, bool value)
     unsigned index = 0;
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        if (Out_Of_Service[index] != value) {
-            Change_Of_Value[index] = true;
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        if (Out_Of_Service[index - 1] != value) {
+            Change_Of_Value[index - 1] = true;
         }
-        Out_Of_Service[index] = value;
+        Out_Of_Service[index - 1] = value;
     }
 
     return;
@@ -209,8 +268,8 @@ char *Multistate_Value_Description(uint32_t object_instance)
     char *pName = NULL; /* return value */
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        pName = Object_Description[index];
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        pName = Object_Description[index - 1];
     }
 
     return pName;
@@ -223,18 +282,18 @@ bool Multistate_Value_Description_Set(uint32_t object_instance, char *new_name)
     bool status = false; /* return value */
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
+    if (index > 0 && index <= Multistate_Value_Instances) {
         status = true;
         if (new_name) {
-            for (i = 0; i < sizeof(Object_Description[index]); i++) {
-                Object_Description[index][i] = new_name[i];
+            for (i = 0; i < sizeof(Object_Description[index - 1]); i++) {
+                Object_Description[index - 1][i] = new_name[i];
                 if (new_name[i] == 0) {
                     break;
                 }
             }
         } else {
-            for (i = 0; i < sizeof(Object_Description[index]); i++) {
-                Object_Description[index][i] = 0;
+            for (i = 0; i < sizeof(Object_Description[index - 1]); i++) {
+                Object_Description[index - 1][i] = 0;
             }
         }
     }
@@ -249,8 +308,52 @@ bool Multistate_Value_Object_Name(
     bool status = false;
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        status = characterstring_init_ansi(object_name, Object_Name[index]);
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        status = characterstring_init_ansi(object_name, Object_Name[index - 1]);
+    }
+
+    return status;
+}
+
+bool Multistate_Value_Object_Name_Set(uint32_t object_instance,
+    BACNET_CHARACTER_STRING *char_string,
+    BACNET_ERROR_CLASS *error_class,
+    BACNET_ERROR_CODE *error_code,
+    char *uuid, int bacnet_client)
+{
+    unsigned index = 0; /* offset from instance lookup */
+    size_t length = 0;
+    uint8_t encoding = 0;
+    bool status = false; /* return value */
+    size_t obj_name_size = 64 * sizeof(char);
+
+    index = Multistate_Value_Instance_To_Index(object_instance);
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        length = characterstring_length(char_string);
+        if (length <= obj_name_size) {
+            encoding = characterstring_encoding(char_string);
+            if (encoding == CHARACTER_UTF8) {
+                status = characterstring_ansi_copy(Object_Name[index - 1],
+                    obj_name_size, char_string);
+                if (!status) {
+                    *error_class = ERROR_CLASS_PROPERTY;
+                    *error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                } else {
+#if defined(MQTT)
+                  if (yaml_config_mqtt_enable() && !bacnet_client) {
+                    mqtt_publish_topic(OBJECT_MULTI_STATE_VALUE, object_instance, PROP_OBJECT_NAME,
+                      MQTT_TOPIC_VALUE_BACNET_STRING, char_string, uuid);
+                  }
+#endif /* defined(MQTT) */
+                }
+            } else {
+                *error_class = ERROR_CLASS_PROPERTY;
+                *error_code = ERROR_CODE_CHARACTER_SET_NOT_SUPPORTED;
+            }
+        } else {
+            *error_class = ERROR_CLASS_PROPERTY;
+            *error_code = ERROR_CODE_NO_SPACE_TO_WRITE_PROPERTY;
+        }
     }
 
     return status;
@@ -264,19 +367,19 @@ bool Multistate_Value_Name_Set(uint32_t object_instance, char *new_name)
     bool status = false; /* return value */
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
+    if (index > 0 && index <= Multistate_Value_Instances) {
         status = true;
         /* FIXME: check to see if there is a matching name */
         if (new_name) {
-            for (i = 0; i < sizeof(Object_Name[index]); i++) {
-                Object_Name[index][i] = new_name[i];
+            for (i = 0; i < sizeof(Object_Name[index - 1]); i++) {
+                Object_Name[index - 1][i] = new_name[i];
                 if (new_name[i] == 0) {
                     break;
                 }
             }
         } else {
-            for (i = 0; i < sizeof(Object_Name[index]); i++) {
-                Object_Name[index][i] = 0;
+            for (i = 0; i < sizeof(Object_Name[index - 1]); i++) {
+                Object_Name[index - 1][i] = 0;
             }
         }
     }
@@ -291,10 +394,10 @@ char *Multistate_Value_State_Text(
     char *pName = NULL; /* return value */
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if ((index < MAX_MULTISTATE_VALUES) && (state_index > 0) &&
+    if ((index > 0 && index <= Multistate_Value_Instances) && (state_index > 0) &&
         (state_index <= MULTISTATE_NUMBER_OF_STATES)) {
         state_index--;
-        pName = State_Text[index][state_index];
+        pName = State_Text[index - 1][state_index];
     }
 
     return pName;
@@ -309,26 +412,25 @@ bool Multistate_Value_State_Text_Set(
     bool status = false; /* return value */
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if ((index < MAX_MULTISTATE_VALUES) && (state_index > 0) &&
+    if ((index > 0 && index <= Multistate_Value_Instances) && (state_index > 0) &&
         (state_index <= MULTISTATE_NUMBER_OF_STATES)) {
         state_index--;
         status = true;
         if (new_name) {
-            for (i = 0; i < sizeof(State_Text[index][state_index]); i++) {
-                State_Text[index][state_index][i] = new_name[i];
+            for (i = 0; i < sizeof(State_Text[index - 1][state_index]); i++) {
+                State_Text[index - 1][state_index][i] = new_name[i];
                 if (new_name[i] == 0) {
                     break;
                 }
             }
         } else {
-            for (i = 0; i < sizeof(State_Text[index][state_index]); i++) {
-                State_Text[index][state_index][i] = 0;
+            for (i = 0; i < sizeof(State_Text[index - 1][state_index]); i++) {
+                State_Text[index - 1][state_index][i] = 0;
             }
         }
     }
 
     return status;
-    ;
 }
 
 bool Multistate_Value_Change_Of_Value(uint32_t object_instance)
@@ -337,8 +439,8 @@ bool Multistate_Value_Change_Of_Value(uint32_t object_instance)
     unsigned index;
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        status = Change_Of_Value[index];
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        status = Change_Of_Value[index - 1];
     }
 
     return status;
@@ -349,8 +451,8 @@ void Multistate_Value_Change_Of_Value_Clear(uint32_t object_instance)
     unsigned index;
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        Change_Of_Value[index] = false;
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        Change_Of_Value[index - 1] = false;
     }
 
     return;
@@ -376,9 +478,9 @@ bool Multistate_Value_Encode_Value_List(
     unsigned index = 0;
 
     index = Multistate_Value_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_VALUES) {
-        present_value = Present_Value[index];
-        out_of_service = Out_Of_Service[index];
+    if (index > 0 && index <= Multistate_Value_Instances) {
+        present_value = Present_Value[index - 1];
+        out_of_service = Out_Of_Service[index - 1];
         status = cov_value_list_encode_enumerated(value_list, present_value,
             in_alarm, fault, overridden, out_of_service);
     }
@@ -517,6 +619,8 @@ bool Multistate_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
     bool status = false; /* return value */
     int len = 0;
     BACNET_APPLICATION_DATA_VALUE value;
+    BACNET_OBJECT_TYPE object_type = OBJECT_NONE;
+    uint32_t object_instance = 0;
 
     /* decode the some of the request */
     len = bacapp_decode_application_data(
@@ -542,7 +646,7 @@ bool Multistate_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 BACNET_APPLICATION_TAG_UNSIGNED_INT);
             if (status) {
                 status = Multistate_Value_Present_Value_Set(
-                    wp_data->object_instance, value.type.Unsigned_Int);
+                    wp_data->object_instance, value.type.Unsigned_Int, NULL, false);
                 if (!status) {
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
@@ -557,8 +661,30 @@ bool Multistate_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     wp_data->object_instance, value.type.Boolean);
             }
             break;
-        case PROP_OBJECT_IDENTIFIER:
         case PROP_OBJECT_NAME:
+            status = write_property_type_valid(wp_data, &value,
+                BACNET_APPLICATION_TAG_CHARACTER_STRING);
+            if (status) {
+                /* All the object names in a device must be unique */
+                if (Device_Valid_Object_Name(&value.type.Character_String,
+                        &object_type, &object_instance)) {
+                    if ((object_type == wp_data->object_type) &&
+                        (object_instance == wp_data->object_instance)) {
+                        /* writing same name to same object */
+                        status = true;
+                    } else {
+                        status = false;
+                        wp_data->error_class = ERROR_CLASS_PROPERTY;
+                        wp_data->error_code = ERROR_CODE_DUPLICATE_NAME;
+                    }
+                } else {
+                    status = Multistate_Value_Object_Name_Set(
+                        wp_data->object_instance, &value.type.Character_String,
+                        &wp_data->error_class, &wp_data->error_code, NULL, false);
+                }
+            }
+            break;
+        case PROP_OBJECT_IDENTIFIER:
         case PROP_OBJECT_TYPE:
         case PROP_STATUS_FLAGS:
         case PROP_EVENT_STATE:

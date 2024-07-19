@@ -28,6 +28,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
@@ -38,6 +40,13 @@
 #include "bacnet/basic/object/device.h"
 #include "bacnet/basic/object/ms-input.h"
 #include "bacnet/basic/services.h"
+#if defined(MQTT)
+#include "MQTTClient.h"
+#include "mqtt_client.h"
+#endif /* defined(MQTT) */
+#if defined(YAML_CONFIG)
+#include "yaml_config.h"
+#endif /* defined(YAML_CONFIG) */
 
 /* number of demo objects */
 #ifndef MAX_MULTISTATE_INPUTS
@@ -49,13 +58,16 @@
 #define MULTISTATE_NUMBER_OF_STATES (254)
 #endif
 
+/* Run-time Multistate Input Instances */
+static int Multistate_Input_Instances = 0;
+
 /* Here is our Present Value */
-static uint8_t Present_Value[MAX_MULTISTATE_INPUTS];
+static uint8_t *Present_Value = NULL;
 /* Writable out-of-service allows others to manipulate our Present Value */
-static bool Out_Of_Service[MAX_MULTISTATE_INPUTS];
-static char Object_Name[MAX_MULTISTATE_INPUTS][64];
-static char Object_Description[MAX_MULTISTATE_INPUTS][64];
-static char State_Text[MAX_MULTISTATE_INPUTS][MULTISTATE_NUMBER_OF_STATES][64];
+static bool *Out_Of_Service = NULL;
+static char **Object_Name = NULL;
+static char **Object_Description = NULL;
+static char ***State_Text = NULL;
 
 /* These three arrays are used by the ReadPropertyMultiple handler */
 static const int Properties_Required[] = { PROP_OBJECT_IDENTIFIER,
@@ -86,12 +98,45 @@ void Multistate_Input_Property_Lists(
 void Multistate_Input_Init(void)
 {
     unsigned i;
+    unsigned ii;
+    char *pEnv;
+    char **State_Text_a;
+
+#if defined(YAML_CONFIG)
+    Multistate_Input_Instances = yaml_config_msi_max();
+    if (Multistate_Input_Instances == 0) {
+#endif
+    pEnv = getenv("MSI");
+    if (pEnv) {
+        Multistate_Input_Instances = atoi(pEnv);
+    }
+#if defined(YAML_CONFIG)
+    }
+#endif
+
+    if (Multistate_Input_Instances > 0) {
+        Present_Value = malloc(Multistate_Input_Instances * sizeof(uint8_t));
+        Out_Of_Service = malloc(Multistate_Input_Instances * sizeof(bool));
+        memset(Out_Of_Service, 0, Multistate_Input_Instances * sizeof(bool));
+        Object_Name = malloc(Multistate_Input_Instances * sizeof(char *));
+        Object_Description = malloc(Multistate_Input_Instances * sizeof(char *));
+        State_Text = malloc(Multistate_Input_Instances * sizeof(char **));
+    }
 
     /* initialize all the analog output priority arrays to NULL */
-    for (i = 0; i < MAX_MULTISTATE_INPUTS; i++) {
+    for (i = 0; i < Multistate_Input_Instances; i++) {
         Present_Value[i] = 1;
-        sprintf(&Object_Name[i][0], "MULTISTATE INPUT %u", i);
-        sprintf(&Object_Description[i][0], "MULTISTATE INPUT %u", i);
+        Object_Name[i] = malloc(64 * sizeof(char));
+        sprintf(&Object_Name[i][0], "MULTISTATE INPUT %u", i + 1);
+        Object_Description[i] = malloc(64 * sizeof(char));
+        sprintf(&Object_Description[i][0], "MULTISTATE INPUT %u", i + 1);
+        State_Text_a = malloc(MULTISTATE_NUMBER_OF_STATES * sizeof(char *));
+        for (ii = 0; ii < MULTISTATE_NUMBER_OF_STATES; ii++) {
+          State_Text_a[ii] = malloc(64 * sizeof(char));
+          memset(&State_Text_a[ii][0], 0, 64 * sizeof(char));
+        }
+
+        State_Text[i] = State_Text_a;
     }
 
     return;
@@ -102,9 +147,9 @@ void Multistate_Input_Init(void)
 /* that correlates to the correct instance number */
 unsigned Multistate_Input_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = MAX_MULTISTATE_INPUTS;
+    unsigned index = 0;
 
-    if (object_instance < MAX_MULTISTATE_INPUTS) {
+    if (object_instance > 0 && object_instance <= Multistate_Input_Instances) {
         index = object_instance;
     }
 
@@ -123,7 +168,7 @@ uint32_t Multistate_Input_Index_To_Instance(unsigned index)
 /* more complex, and then count how many you have */
 unsigned Multistate_Input_Count(void)
 {
-    return MAX_MULTISTATE_INPUTS;
+    return (Multistate_Input_Instances);
 }
 
 bool Multistate_Input_Valid_Instance(uint32_t object_instance)
@@ -131,7 +176,7 @@ bool Multistate_Input_Valid_Instance(uint32_t object_instance)
     unsigned index = 0; /* offset from instance lookup */
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
+    if (index > 0 && index <= Multistate_Input_Instances) {
         return true;
     }
 
@@ -149,24 +194,30 @@ uint32_t Multistate_Input_Present_Value(uint32_t object_instance)
     unsigned index = 0; /* offset from instance lookup */
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
-        value = Present_Value[index];
+    if (index > 0 && index <= Multistate_Input_Instances) {
+        value = Present_Value[index - 1];
     }
 
     return value;
 }
 
 bool Multistate_Input_Present_Value_Set(
-    uint32_t object_instance, uint32_t value)
+    uint32_t object_instance, uint32_t value, char *uuid, int bacnet_client)
 {
     bool status = false;
     unsigned index = 0; /* offset from instance lookup */
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
+    if (index > 0 && index <= Multistate_Input_Instances) {
         if ((value > 0) && (value <= MULTISTATE_NUMBER_OF_STATES)) {
-            Present_Value[index] = (uint8_t)value;
+            Present_Value[index - 1] = (uint8_t)value;
             status = true;
+#if defined(MQTT)
+            if (yaml_config_mqtt_enable() && !bacnet_client) {
+                mqtt_publish_topic(OBJECT_MULTI_STATE_INPUT, object_instance, PROP_PRESENT_VALUE,
+                    MQTT_TOPIC_VALUE_INTEGER, &value, uuid);
+            }
+#endif /* defined(MQTT) */
         }
     }
 
@@ -179,8 +230,8 @@ bool Multistate_Input_Out_Of_Service(uint32_t object_instance)
     unsigned index = 0;
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
-        value = Out_Of_Service[index];
+    if (index > 0 && index <= Multistate_Input_Instances) {
+        value = Out_Of_Service[index - 1];
     }
 
     return value;
@@ -191,8 +242,8 @@ void Multistate_Input_Out_Of_Service_Set(uint32_t object_instance, bool value)
     unsigned index = 0;
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
-        Out_Of_Service[index] = value;
+    if (index > 0 && index <= Multistate_Input_Instances) {
+        Out_Of_Service[index - 1] = value;
     }
 
     return;
@@ -204,8 +255,8 @@ char *Multistate_Input_Description(uint32_t object_instance)
     char *pName = NULL; /* return value */
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
-        pName = Object_Description[index];
+    if (index > 0 && index <= Multistate_Input_Instances) {
+        pName = Object_Description[index - 1];
     }
 
     return pName;
@@ -216,20 +267,21 @@ bool Multistate_Input_Description_Set(uint32_t object_instance, char *new_name)
     unsigned index = 0; /* offset from instance lookup */
     size_t i = 0; /* loop counter */
     bool status = false; /* return value */
+    size_t obj_desc_size = 64 * sizeof(char);
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
+    if (index > 0 && index <= Multistate_Input_Instances) {
         status = true;
         if (new_name) {
-            for (i = 0; i < sizeof(Object_Description[index]); i++) {
-                Object_Description[index][i] = new_name[i];
+            for (i = 0; i < obj_desc_size; i++) {
+                Object_Description[index - 1][i] = new_name[i];
                 if (new_name[i] == 0) {
                     break;
                 }
             }
         } else {
-            for (i = 0; i < sizeof(Object_Description[index]); i++) {
-                Object_Description[index][i] = 0;
+            for (i = 0; i < obj_desc_size; i++) {
+                Object_Description[index - 1][i] = 0;
             }
         }
     }
@@ -246,15 +298,16 @@ static bool Multistate_Input_Description_Write(uint32_t object_instance,
     size_t length = 0;
     uint8_t encoding = 0;
     bool status = false; /* return value */
+    size_t obj_desc_size = 64 * sizeof(char);
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
+    if (index > 0 && index <= Multistate_Input_Instances) {
         length = characterstring_length(char_string);
-        if (length <= sizeof(Object_Description[index])) {
+        if (length <= obj_desc_size) {
             encoding = characterstring_encoding(char_string);
             if (encoding == CHARACTER_UTF8) {
-                status = characterstring_ansi_copy(Object_Description[index],
-                    sizeof(Object_Description[index]), char_string);
+                status = characterstring_ansi_copy(Object_Description[index - 1],
+                    obj_desc_size, char_string);
                 if (!status) {
                     *error_class = ERROR_CLASS_PROPERTY;
                     *error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
@@ -279,8 +332,8 @@ bool Multistate_Input_Object_Name(
     bool status = false;
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
-        status = characterstring_init_ansi(object_name, Object_Name[index]);
+    if (index > 0 && index <= Multistate_Input_Instances) {
+        status = characterstring_init_ansi(object_name, Object_Name[index - 1]);
     }
 
     return status;
@@ -292,21 +345,22 @@ bool Multistate_Input_Name_Set(uint32_t object_instance, char *new_name)
     unsigned index = 0; /* offset from instance lookup */
     size_t i = 0; /* loop counter */
     bool status = false; /* return value */
+    size_t obj_name_size = 64 * sizeof(char);
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
+    if (index > 0 && index <= Multistate_Input_Instances) {
         status = true;
         /* FIXME: check to see if there is a matching name */
         if (new_name) {
-            for (i = 0; i < sizeof(Object_Name[index]); i++) {
-                Object_Name[index][i] = new_name[i];
+            for (i = 0; i < obj_name_size; i++) {
+                Object_Name[index - 1][i] = new_name[i];
                 if (new_name[i] == 0) {
                     break;
                 }
             }
         } else {
-            for (i = 0; i < sizeof(Object_Name[index]); i++) {
-                Object_Name[index][i] = 0;
+            for (i = 0; i < obj_name_size; i++) {
+                Object_Name[index - 1][i] = 0;
             }
         }
     }
@@ -314,27 +368,36 @@ bool Multistate_Input_Name_Set(uint32_t object_instance, char *new_name)
     return status;
 }
 
-static bool Multistate_Input_Object_Name_Write(uint32_t object_instance,
+bool Multistate_Input_Object_Name_Set(uint32_t object_instance,
     BACNET_CHARACTER_STRING *char_string,
     BACNET_ERROR_CLASS *error_class,
-    BACNET_ERROR_CODE *error_code)
+    BACNET_ERROR_CODE *error_code,
+    char *uuid, int bacnet_client)
 {
     unsigned index = 0; /* offset from instance lookup */
     size_t length = 0;
     uint8_t encoding = 0;
     bool status = false; /* return value */
+    size_t obj_name_size = 64 * sizeof(char);
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if (index < MAX_MULTISTATE_INPUTS) {
+    if (index > 0 && index <= Multistate_Input_Instances) {
         length = characterstring_length(char_string);
-        if (length <= sizeof(Object_Name[index])) {
+        if (length <= obj_name_size) {
             encoding = characterstring_encoding(char_string);
             if (encoding == CHARACTER_UTF8) {
-                status = characterstring_ansi_copy(Object_Name[index],
-                    sizeof(Object_Name[index]), char_string);
+                status = characterstring_ansi_copy(Object_Name[index - 1],
+                    obj_name_size, char_string);
                 if (!status) {
                     *error_class = ERROR_CLASS_PROPERTY;
                     *error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
+                } else {
+#if defined(MQTT)
+                  if (yaml_config_mqtt_enable() && !bacnet_client) {
+                    mqtt_publish_topic(OBJECT_MULTI_STATE_INPUT, object_instance, PROP_OBJECT_NAME,
+                      MQTT_TOPIC_VALUE_BACNET_STRING, char_string, uuid);
+                  }
+#endif /* defined(MQTT) */
                 }
             } else {
                 *error_class = ERROR_CLASS_PROPERTY;
@@ -356,10 +419,10 @@ char *Multistate_Input_State_Text(
     char *pName = NULL; /* return value */
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if ((index < MAX_MULTISTATE_INPUTS) && (state_index > 0) &&
+    if ((index > 0 && index <= Multistate_Input_Instances) && (state_index > 0) &&
         (state_index <= MULTISTATE_NUMBER_OF_STATES)) {
         state_index--;
-        pName = State_Text[index][state_index];
+        pName = State_Text[index - 1][state_index];
     }
 
     return pName;
@@ -372,22 +435,23 @@ bool Multistate_Input_State_Text_Set(
     unsigned index = 0; /* offset from instance lookup */
     size_t i = 0; /* loop counter */
     bool status = false; /* return value */
+    size_t state_text_size = 64 * sizeof(char);
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if ((index < MAX_MULTISTATE_INPUTS) && (state_index > 0) &&
+    if ((index > 0 && index <= Multistate_Input_Instances) && (state_index > 0) &&
         (state_index <= MULTISTATE_NUMBER_OF_STATES)) {
         state_index--;
         status = true;
         if (new_name) {
-            for (i = 0; i < sizeof(State_Text[index][state_index]); i++) {
-                State_Text[index][state_index][i] = new_name[i];
+            for (i = 0; i < state_text_size; i++) {
+                State_Text[index - 1][state_index][i] = new_name[i];
                 if (new_name[i] == 0) {
                     break;
                 }
             }
         } else {
-            for (i = 0; i < sizeof(State_Text[index][state_index]); i++) {
-                State_Text[index][state_index][i] = 0;
+            for (i = 0; i < state_text_size; i++) {
+                State_Text[index - 1][state_index][i] = 0;
             }
         }
     }
@@ -406,18 +470,19 @@ static bool Multistate_Input_State_Text_Write(uint32_t object_instance,
     size_t length = 0;
     uint8_t encoding = 0;
     bool status = false; /* return value */
+    size_t state_text_size = 64 * sizeof(char);
 
     index = Multistate_Input_Instance_To_Index(object_instance);
-    if ((index < MAX_MULTISTATE_INPUTS) && (state_index > 0) &&
+    if ((index > 0 && index < Multistate_Input_Instances) && (state_index > 0) &&
         (state_index <= Multistate_Input_Max_States(object_instance))) {
         state_index--;
         length = characterstring_length(char_string);
-        if (length <= sizeof(State_Text[index][state_index])) {
+        if (length <= state_text_size) {
             encoding = characterstring_encoding(char_string);
             if (encoding == CHARACTER_UTF8) {
                 status =
-                    characterstring_ansi_copy(State_Text[index][state_index],
-                        sizeof(State_Text[index][state_index]), char_string);
+                    characterstring_ansi_copy(State_Text[index - 1][state_index],
+                        state_text_size, char_string);
                 if (!status) {
                     *error_class = ERROR_CLASS_PROPERTY;
                     *error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
@@ -619,9 +684,9 @@ bool Multistate_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                         wp_data->error_code = ERROR_CODE_DUPLICATE_NAME;
                     }
                 } else {
-                    status = Multistate_Input_Object_Name_Write(
+                    status = Multistate_Input_Object_Name_Set(
                         wp_data->object_instance, &value.type.Character_String,
-                        &wp_data->error_class, &wp_data->error_code);
+                        &wp_data->error_class, &wp_data->error_code, NULL, false);
                 }
             }
             break;
@@ -639,7 +704,7 @@ bool Multistate_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                 BACNET_APPLICATION_TAG_UNSIGNED_INT);
             if (status) {
                 status = Multistate_Input_Present_Value_Set(
-                    wp_data->object_instance, value.type.Unsigned_Int);
+                    wp_data->object_instance, value.type.Unsigned_Int, NULL, false);
                 if (!status) {
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
