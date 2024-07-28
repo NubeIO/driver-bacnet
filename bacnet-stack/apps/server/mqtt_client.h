@@ -246,6 +246,8 @@ int mqtt_msg_length(void);
 unsigned int mqtt_msg_queue_size(void);
 int mqtt_msg_pop_and_process(void);
 
+int unsubscribe_persistent_topics(void);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
