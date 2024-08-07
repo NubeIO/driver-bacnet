@@ -3987,9 +3987,12 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
   unlock_request_list();
 
   if (tmp) {
-    init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
-    sprintf(err_msg, "%s", bactext_error_code_name((int)error_code));
-    mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    if (!tmp->data.obj_data.dont_publish_on_success) {
+      init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
+      sprintf(err_msg, "%s", bactext_error_code_name((int)error_code));
+      mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    }
+
     free(tmp);
   }
 }
@@ -4070,9 +4073,12 @@ static void bacnet_client_abort_handler(
   unlock_request_list();
 
   if (tmp) {
-    init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
-    snprintf(err_msg, sizeof(err_msg) - 1, "%s", bactext_abort_reason_name(abort_reason));
-    mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    if (!tmp->data.obj_data.dont_publish_on_success) {
+      init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
+      snprintf(err_msg, sizeof(err_msg) - 1, "%s", bactext_abort_reason_name(abort_reason));
+      mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    }
+
     free(tmp);
   }
 }
@@ -4150,9 +4156,12 @@ static void bacnet_client_reject_handler(
   unlock_request_list();
 
   if (tmp) {
-    init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
-    snprintf(err_msg, sizeof(err_msg) - 1, "%s", bactext_reject_reason_name(reject_reason));
-    mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    if (!tmp->data.obj_data.dont_publish_on_success) {
+      init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
+      snprintf(err_msg, sizeof(err_msg) - 1, "%s", bactext_reject_reason_name(reject_reason));
+      mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
+    }
+
     free(tmp);
   }
 }
@@ -5941,6 +5950,7 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
         obj_data.object_property = opts->property;
         obj_data.priority = opts->prio_array[i].index;
         obj_data.index = BACNET_ARRAY_ALL;
+        obj_data.topic_id = MQTT_WRITE_VALUE_CMD_RESULT_TOPIC;
 
         if ((i + 1) == opts->prio_array_len) {
           send_reply = true;
