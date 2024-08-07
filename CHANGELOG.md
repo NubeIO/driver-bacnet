@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## [v1.0.2-rc.3](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2-rc.3) (2024-08-08)
+- Fixed duplicate MQTT publish message on write
+- Prerequisites:
+  - ROS >= 1.0.0
+
 ## [v1.0.2-rc.2](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2-rc.2) (2024-07-19)
 - Support for Multistate objects similar to Analog and Binary objects.
 - Fixed incorrect JSON format when ready Multistate Output priority array.
