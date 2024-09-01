@@ -22,6 +22,22 @@ on your pc
 g=/home/user/code/bacnet s=config.yml ./app-amd64 
 ```
 
+Environment Variables
+--
+1. MQTT_DEBUG - Set to true to emit MQTT requests and responses debugging lines
+2. YAML_CONFIG_DEBUG - Set to true to emit YAML config debugging lines
+3. BACNET_IP_DEBUG - Set to true to emit IP address/port and BACnet message headers debugging lines
+4. BACNET_IFACE - Set the interface the bacnet server will bind into. Override the setting in the configuration file.
+5. BACNET_IP_PORT - Set the listening port of the bacnet server. Override the default value (47808) and the setting in the configuration file.
+6. MQTT_BROKER_IP - Set the MQTT broker IP address. Override the setting in the configuration file.
+7. MQTT_CLIENT_ID - Set MQTT client ID to a specific value. The default value is "\<hostname\>-mqtt-cid". Where <i>hostname</i> is the hostname of the device.
+
+For example:
+```
+MQTT_DEBUG=true YAML_CONFIG_DEBUG=true g=/data/bacnet-server-c s=config.yml ./app
+```
+
+
 Updating BACnet Object Property Values Via MQTT
 --
 The values of the following object properties can be updated via MQTT publish command:
@@ -85,6 +101,121 @@ Reset all priority slots of analog object (ao) at instance (address) 1
 topic: bacnet/ao/1/write/pri/16/all
 json payload: {"value" : "null", "uuid" : "123456"}
 ```
+
+
+Bacnet Master
+--
+The driver bacnet when acting as a master will receive MQTT commands for another device and sends results over MQTT.
+
+The target device is specified using the <i>mac</i> attribute in the MQTT request payload. The value must be an IP address and port pair like below.
+```
+{"objectType":"1","objectInstance":"1","property":"87","deviceInstance":"5678","mac":"10.104.0.11:47900"}
+```
+
+The driver bacnet supports the following 5 commands:
+1. read_value
+2. write_value
+3. whois
+4. point_discovery
+5. point_list
+
+
+Read Value Command
+--
+The <i>read_value</i> command is used to retrieve the value of an object property.
+
+<b>Request</b><br/>
+Example 1: Fetch the point value of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd/read_value
+JSON paylod: {"objectType":"1","objectInstance":"1","property":"85","deviceInstance":"1234","mac":"10.104.0.11:47808", "dnet": "0", "dadr": "0", "txn_source": "ff", "txn_number": "23b00e85d1fb-test", "timeout": 2}
+```
+
+Example 2: Fetch the priority array values of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd/read_value
+JSON payload: {"objectType":"1","objectInstance":"1","property":"87","deviceInstance":"1234","mac":"10.104.0.11:47808", "dnet": "0", "dadr": "0", "txn_source": "ff", "txn_number": "23b00e85d1fb-test", "timeout": 2}
+```
+Example 3: Fetch the priority array value @3 of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd/read_value
+JSON payload: {"objectType":"1","objectInstance":"1","property":"87","deviceInstance":"1234","mac":"10.104.0.11:47808", "dnet": "0", "dadr": "0", "txn_source": "ff", "txn_number": "23b00e85d1fb-test", "timeout": 2, "index":"3"}
+```
+
+<br/><b>Response</b><br/>
+Example 1: Fetch the point value of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd_result/read_value/ao/1/pv
+JSON payload: { "value" : "101.000000" , "deviceInstance" : "1234" , "dnet" : "0" , "dadr" : "0" , "mac" : "10.104.0.11:47808" , "txn_source" : "ff", "txn_number" : "23b00e85d1fb-test"}
+```
+Example 2: Fetch the priority array values of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd_result/read_value/ao/1/pri
+JSON payload: { "value" : ["101.000000","201.000000","300.000000","Null","Null","Null","Null","Null","Null","Null","Null","Null","Null","Null","Null","30.000000"] , "deviceInstance" : "1234" , "dnet" : "0" , "dadr" : "0" , "mac" : "10.104.0.11:47808" , "txn_source" : "ff", "txn_number" : "23b00e85d1fb-test"}
+```
+Example 3: Fetch the priority array value @3 of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd_result/read_value/ao/1/pri
+JSON payload: { "value" : "300.000000" , "deviceInstance" : "1234" , "dnet" : "0" , "dadr" : "0" , "mac" : "10.104.0.11:47808" , "index" : "3" , "txn_source" : "ff", "txn_number" : "23b00e85d1fb-test"}
+```
+
+Write Value Command
+--
+The <i>write_value</i> command is used to update the value of an object property.
+
+<b>Request</b><br/>
+Example 1: Update the point value of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd/write_value
+JSON paylod: {"objectType":"1","objectInstance":"1","property":"85","deviceInstance":"1234","mac":"10.104.0.11:47808", "dnet": "0", "dadr": "0", "txn_source": "ff", "txn_number": "23b00e85d1fb-test", "timeout": 2, "value":"123"}
+```
+Example 2: Update the value of priority array @1 of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd/write_value
+JSON paylod: {"objectType":"1","objectInstance":"1","property":"85","deviceInstance":"1234","mac":"10.104.0.11:47808", "dnet": "0", "dadr": "0", "txn_source": "ff", "txn_number": "23b00e85d1fb-test", "timeout": 2, "value":"111", "priority":"1"}
+```
+Example 3: Update the values of priority array @1,@2 and @3 of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd/write_value
+JSON paylod: {"objectType":"1","objectInstance":"1","property":"85","deviceInstance":"1234","mac":"10.104.0.11:47808", "dnet": "0", "dadr": "0", "txn_source": "ff", "txn_number": "23b00e85d1fb-test", "timeout": 2, "priorityArray":{"_1":"101", "_2":"201", "_3":"301"}}
+```
+Example 4: Reset the values of priority array @1 and @16 of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd/write_value
+JSON paylod: {"objectType":"1","objectInstance":"1","property":"85","deviceInstance":"1234","mac":"10.104.0.11:47808", "dnet": "0", "dadr": "0", "txn_source": "ff", "txn_number": "23b00e85d1fb-test", "timeout": 2, "priorityArray":{"_1":"null", "_3":"null"}}
+```
+<br/><b>Response</b><br/>
+The payload from the request message is sent in the response. When there is an error, the attribute <i>error</i> is set in the response payload.
+
+Example 1: Update the point value of analog-output object @1 of device 1234
+```
+Command topic: bacnet/cmd_result/write_value/ao/1/pv
+JSON payload: { "value" : "123" , "deviceInstance" : "1234" , "dnet" : "0" , "dadr" : "0" , "mac" : "10.104.0.11:47808" , "txn_source" : "ff", "txn_number" : "23b00e85d1fb-test"}
+```
+Example 2: Error updating the point value of analog-output object @1000 of device 1234
+```
+Command topic: bacnet/cmd_result/write_value/ao/1000/pv
+JSON payload: { "error" : "unknown-object" , "objectType" : "1" , "objectInstance" : "1000" , "property" : "85" , "priority" : "0" , "deviceInstance" : "1234" , "mac" : "10.104.0.11:47808" , "dadr" : "0" , "dnet" : "0" , "value" : "123" , "txn_source" : "ff" , "txn_number" : "23b00e85d1fb-test" }
+```
+
+Whois Command
+---
+The <i>whois</i> command is used to discover the devices on the network.
+
+<b>Request</b><br/>
+Example 1: Get the list of devices on the network.
+```
+Command topic: bacnet/cmd/whois
+JSON payload: {}
+```
+<b>Response</b><br/>
+Example 1: Get the list of devices on the network.
+```
+Command topic: bacnet/cmd_result/whois
+JSON payload: { "value" : [ {"device_id" : "17", "mac_address" : "192.168.15.17:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "0", "mac_address" : "192.168.15.222:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "5132", "mac_address" : "192.168.15.132:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "245", "mac_address" : "192.168.15.245:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "1", "mac_address" : "192.168.15.140:47808", "snet" : "0", "sadr" : "00", "apdu" : "480"} ] }
+```
+
+
 
 
 MQTT Library
