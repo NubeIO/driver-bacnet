@@ -215,7 +215,23 @@ Command topic: bacnet/cmd_result/whois
 JSON payload: { "value" : [ {"device_id" : "17", "mac_address" : "192.168.15.17:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "0", "mac_address" : "192.168.15.222:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "5132", "mac_address" : "192.168.15.132:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "245", "mac_address" : "192.168.15.245:47808", "snet" : "0", "sadr" : "00", "apdu" : "1476"}, {"device_id" : "1", "mac_address" : "192.168.15.140:47808", "snet" : "0", "sadr" : "00", "apdu" : "480"} ] }
 ```
 
+point_discovery Command
+---
+The <i>point_discovery</i> command is used to retrieve the list of points (object instances) of a device.
 
+<b>Request</b><br/>
+Example 1: Get the list of points of a device.
+```
+Command topic: bacnet/cmd/point_discovery
+JSON payload: {"deviceInstance":"5678","mac":"10.104.0.11:47900"}
+```
+<b>Response</b><br/>
+Example 1: Get the list of points of a device.
+```
+Command topic: bacnet/cmd_result/point_discovery
+JSON payload: {"deviceInstance" : "5678", "mac" : "10.104.0.11:47900", "value" : {"objects" : ["ai-1","ai-2","ao-1","ao-2","av-1","av-2","av-3","av-4","av-5","av-6","bi-1","bi-2","bi-3","bi-4","bo-1","bo-2","bv-1","bv-2","bv-3","bv-4","bv-5","msi-1","msi-2","msi-3","msi-4","mso-1","mso-2","mso-3","mso-4","msv-1","msv-2","msv-3","msv-4"], "count" : "33"}}
+
+```
 
 
 MQTT Library
