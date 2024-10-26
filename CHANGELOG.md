@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## [v1.0.2-rc.4](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2-rc.4) (2024-10-26)
+- Support for reading device PROP_ALL (8) property.
+- Prerequisites:
+  - ROS >= 1.0.0
+
 ## [v1.0.2-rc.3](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2-rc.3) (2024-08-08)
 - Fixed duplicate MQTT publish message on write
 - Prerequisites:
