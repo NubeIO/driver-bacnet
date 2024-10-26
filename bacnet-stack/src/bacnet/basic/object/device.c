@@ -1263,8 +1263,13 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                     found = Device_Object_List_Identifier(
                         i, &object_type, &instance);
                     if (found) {
-                        len = encode_application_object_id(
-                            &apdu[apdu_len], object_type, instance + 1);
+                        if (object_type == OBJECT_DEVICE) {
+                          len = encode_application_object_id(
+                              &apdu[apdu_len], object_type, instance);
+                        } else {
+                          len = encode_application_object_id(
+                              &apdu[apdu_len], object_type, instance + 1);
+                        }
                         apdu_len += len;
                         /* assume next one is the same size as this one */
                         /* can we all fit into the APDU? Don't check for last
@@ -1288,8 +1293,13 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                 found = Device_Object_List_Identifier(
                     rpdata->array_index, &object_type, &instance);
                 if (found) {
-                    apdu_len = encode_application_object_id(
-                        &apdu[0], object_type, instance + 1);
+                    if (object_type == OBJECT_DEVICE) {
+                      apdu_len = encode_application_object_id(
+                           &apdu[0], object_type, instance);
+                    } else {
+                      apdu_len = encode_application_object_id(
+                           &apdu[0], object_type, instance + 1);
+                    }
                 } else {
                     rpdata->error_class = ERROR_CLASS_PROPERTY;
                     rpdata->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
