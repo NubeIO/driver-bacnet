@@ -443,6 +443,7 @@ void Device_Property_Lists(
    into the read-property encoding. */
 
 static uint32_t Object_Instance_Number = 1234;
+static BACNET_CHARACTER_STRING My_All_Prop_Value;
 static BACNET_CHARACTER_STRING My_Object_Name;
 static BACNET_DEVICE_STATUS System_Status = STATUS_OPERATIONAL;
 static char *Vendor_Name = BACNET_VENDOR_NAME;
@@ -1144,6 +1145,10 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
     apdu = rpdata->application_data;
     apdu_max = rpdata->application_data_len;
     switch (rpdata->object_property) {
+        case PROP_ALL:
+            apdu_len =
+                encode_application_character_string(&apdu[0], &My_All_Prop_Value);
+            break;
         case PROP_OBJECT_IDENTIFIER:
             apdu_len = encode_application_object_id(
                 &apdu[0], OBJECT_DEVICE, Object_Instance_Number);
@@ -1877,8 +1882,14 @@ bool Device_Value_List_Supported(BACNET_OBJECT_TYPE object_type)
  */
 void Device_Init(object_functions_t *object_table)
 {
+    char buf[1024] = {0};
     struct object_functions *pObject = NULL;
     characterstring_init_ansi(&My_Object_Name, "SimpleServer");
+    snprintf(buf, sizeof(buf) - 1, "BACnet Server Demo\n"
+        "BACnet Stack Version %s\n"
+        "BACnet Device ID: %u\n"
+        "Max APDU: %d", BACNET_VERSION_TEXT, Device_Object_Instance_Number(), MAX_APDU);
+    characterstring_init_ansi(&My_All_Prop_Value, buf);
 
     datetime_init();
     if (object_table) {
