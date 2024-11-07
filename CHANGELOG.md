@@ -1,5 +1,12 @@
 # CHANGELOG
 
+
+
+## [v1.0.2](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2) (2024-11-08)
+- Fixed device ID returned from reading property list.
+- Prerequisites:
+  - ROS >= 1.0.0
+
 ## [v1.0.2-rc.4](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2-rc.4) (2024-10-26)
 - Fixed device ID returned from reading property list.
 - Prerequisites:
