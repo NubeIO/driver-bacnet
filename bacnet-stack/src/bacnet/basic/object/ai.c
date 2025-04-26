@@ -40,13 +40,9 @@
 #include "bacnet/proplist.h"
 #include "bacnet/timestamp.h"
 #include "bacnet/basic/object/ai.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #if PRINT_ENABLED
 #include <stdio.h>
@@ -106,18 +102,22 @@ void Analog_Input_Init(void)
 #if defined(INTRINSIC_REPORTING)
     unsigned j;
 #endif
+    point_cb *points = NULL;
 
-#if defined(YAML_CONFIG)
-    Analog_Input_Instances = yaml_config_ai_max();
+    if (yaml_use_point_list_enable()) {
+      points = yaml_get_points_by_name("ai", &Analog_Input_Instances);
+    } else {
+      Analog_Input_Instances = yaml_config_ai_max();
+    }
+
     if (Analog_Input_Instances == 0) {
-#endif
-    pEnv = getenv("AI");
-    if (pEnv) {
+      pEnv = getenv("AI");
+      if (pEnv) {
         Analog_Input_Instances = atoi(pEnv);
+      }
     }
-#if defined(YAML_CONFIG)
-    }
-#endif
+
+    printf("- Analog_Input_Instances: %d\n", Analog_Input_Instances);
 
     if (Analog_Input_Instances> 0) {
         AI_Descr = malloc(Analog_Input_Instances * sizeof(ANALOG_INPUT_DESCR));
@@ -125,9 +125,17 @@ void Analog_Input_Init(void)
     }
 
     for (i = 0; i < Analog_Input_Instances; i++) {
+        if (points) {
+          characterstring_init_ansi(&Analog_Input_Instance_Names[i], points[i].name);
+          bactext_engineering_unit_index(points[i].units, (unsigned int*)&AI_Descr[i].Units);
+        } else {
+          sprintf(buf, "AI_%d_SPARE", i + 1);
+          characterstring_init_ansi(&Analog_Input_Instance_Names[i], buf);
+          AI_Descr[i].Units = UNITS_NO_UNITS;
+        }
+
         AI_Descr[i].Present_Value = 0.0f;
         AI_Descr[i].Out_Of_Service = false;
-        AI_Descr[i].Units = UNITS_NO_UNITS;
         AI_Descr[i].Reliability = RELIABILITY_NO_FAULT_DETECTED;
         AI_Descr[i].Prior_Value = 0.0f;
         AI_Descr[i].COV_Increment = 1.0f;
@@ -152,9 +160,10 @@ void Analog_Input_Init(void)
         handler_get_alarm_summary_set(
             OBJECT_ANALOG_INPUT, Analog_Input_Alarm_Summary);
 #endif
+    }
 
-       sprintf(buf, "AI_%d_SPARE", i + 1);
-       characterstring_init_ansi(&Analog_Input_Instance_Names[i], buf);
+    if (points) {
+      free(points);
     }
 }
 

@@ -39,13 +39,9 @@
 #include "bacnet/config.h" /* the custom stuff */
 #include "bacnet/basic/object/bi.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_BINARY_INPUTS
 #define MAX_BINARY_INPUTS 5
@@ -125,21 +121,23 @@ void Binary_Input_Init(void)
     char *pEnv;
     static bool initialized = false;
     unsigned i;
+    point_cb *points = NULL;
 
     if (!initialized) {
         initialized = true;
 
-#if defined(YAML_CONFIG)
-        Binary_Input_Instances = yaml_config_bi_max();
+        if (yaml_use_point_list_enable()) {
+          points = yaml_get_points_by_name("bi", &Binary_Input_Instances);
+        } else {
+          Binary_Input_Instances = yaml_config_bi_max();
+        }
+
         if (Binary_Input_Instances == 0) {
-#endif
-        pEnv = getenv("BI");
-        if (pEnv) {
+          pEnv = getenv("BI");
+          if (pEnv) {
             Binary_Input_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
 
         /* initialize all the values */
         if (Binary_Input_Instances > 0) {
@@ -150,8 +148,12 @@ void Binary_Input_Init(void)
 
             Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Input_Instances; i++) {
-                sprintf(buf, "BI_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
+                if (points) {
+                  characterstring_init_ansi(&Binary_Input_Instance_Names[i], points[i].name);
+                } else {
+                  sprintf(buf, "BI_%d_SPARE", i + 1);
+                  characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
+                }
             }
         }
 
@@ -159,6 +161,10 @@ void Binary_Input_Init(void)
             Present_Value[i] = BINARY_INACTIVE;
             Out_Of_Service[i] = false;
         }
+    }
+
+    if (points) {
+      free(points);
     }
 
     return;
