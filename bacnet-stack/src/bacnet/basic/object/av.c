@@ -129,8 +129,8 @@ void Analog_Value_Init(void)
 #endif
 
     if (Analog_Value_Instances > 0) {
-        AV_Descr = malloc(Analog_Value_Instances * sizeof(ANALOG_VALUE_DESCR));
-        Analog_Value_Instance_Names = malloc(Analog_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
+        AV_Descr = calloc(Analog_Value_Instances, sizeof(ANALOG_VALUE_DESCR));
+        Analog_Value_Instance_Names = calloc(Analog_Value_Instances, sizeof(BACNET_CHARACTER_STRING));
     }
 
     for (i = 0; i < Analog_Value_Instances; i++) {

@@ -120,8 +120,8 @@ void Analog_Input_Init(void)
 #endif
 
     if (Analog_Input_Instances> 0) {
-        AI_Descr = malloc(Analog_Input_Instances * sizeof(ANALOG_INPUT_DESCR));
-        Analog_Input_Instance_Names = malloc(Analog_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
+        AI_Descr = calloc(Analog_Input_Instances, sizeof(ANALOG_INPUT_DESCR));
+        Analog_Input_Instance_Names = calloc(Analog_Input_Instances, sizeof(BACNET_CHARACTER_STRING));
     }
 
     for (i = 0; i < Analog_Input_Instances; i++) {

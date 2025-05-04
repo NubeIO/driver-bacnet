@@ -117,9 +117,9 @@ void Binary_Output_Init(void)
 
         /* initialize all the analog output priority arrays to NULL */
         if (Binary_Output_Instances > 0) {
-            Binary_Output_Level = malloc(Binary_Output_Instances * sizeof(BACNET_BINARY_PV*));
+            Binary_Output_Level = calloc(Binary_Output_Instances, sizeof(BACNET_BINARY_PV*));
             for (i = 0; i < Binary_Output_Instances; i++) {
-                Binary_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
+                Binary_Output_Level[i] = calloc(BACNET_MAX_PRIORITY, sizeof(BACNET_BINARY_PV));
             }
 
             for (i = 0; i < Binary_Output_Instances; i++) {
@@ -128,14 +128,14 @@ void Binary_Output_Init(void)
                 }
             }
 
-            Out_Of_Service = malloc(Binary_Output_Instances * sizeof(bool));
-            Binary_Output_Instance_Names = malloc(Binary_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Out_Of_Service = calloc(Binary_Output_Instances, sizeof(bool));
+            Binary_Output_Instance_Names = calloc(Binary_Output_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Output_Instances; i++) {
                 sprintf(buf, "BO_%d_SPARE", i + 1);
                 characterstring_init_ansi(&Binary_Output_Instance_Names[i], buf);
             }
 
-            Binary_Output_Relinquish_Defaults = malloc(Binary_Output_Instances * sizeof(BACNET_BINARY_PV));
+            Binary_Output_Relinquish_Defaults = calloc(Binary_Output_Instances, sizeof(BACNET_BINARY_PV));
             for (i = 0; i < Binary_Output_Instances; i++) {
                 Binary_Output_Relinquish_Defaults[i] = RELINQUISH_DEFAULT;
             }

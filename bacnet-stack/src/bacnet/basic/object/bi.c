@@ -143,12 +143,12 @@ void Binary_Input_Init(void)
 
         /* initialize all the values */
         if (Binary_Input_Instances > 0) {
-            Present_Value = malloc(Binary_Input_Instances * sizeof(BACNET_BINARY_PV));
-            Out_Of_Service = malloc(Binary_Input_Instances * sizeof(bool));
-            Change_Of_Value = malloc(Binary_Input_Instances * sizeof(bool));
-            Polarity = malloc(Binary_Input_Instances * sizeof(BACNET_POLARITY));
+            Present_Value = calloc(Binary_Input_Instances, sizeof(BACNET_BINARY_PV));
+            Out_Of_Service = calloc(Binary_Input_Instances, sizeof(bool));
+            Change_Of_Value = calloc(Binary_Input_Instances, sizeof(bool));
+            Polarity = calloc(Binary_Input_Instances, sizeof(BACNET_POLARITY));
 
-            Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Binary_Input_Instance_Names = calloc(Binary_Input_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Input_Instances; i++) {
                 sprintf(buf, "BI_%d_SPARE", i + 1);
                 characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
