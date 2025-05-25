@@ -6,24 +6,24 @@ This is a fork of [Bacnet](https://github.com/bacnet-stack/bacnet-stack). This i
 
 # driver-bacnet local build
 
-# install devel tools
+### install devel tools
 ```
 apt update -qq && apt install build-essential net-tools git libssl-dev cmake -y
 ```
-# create work dir
+### create work dir
 ```
 mkdir -p <work_dir> && cd <work_dir>
 ```
-# install mqtt lib
+### install mqtt lib
 ```
 git clone https://github.com/eclipse/paho.mqtt.c paho.mqtt.c && cd paho.mqtt.c && cmake -DPAHO_BUILD_STATIC=TRUE && make install
 ```
-# install json lib
+### install json lib
 ```
 cd <work_dir>
 git clone https://github.com/json-c/json-c json-c && cd json-c && mkdir json-c-build && cmake ../json-c && make && make install
 ```
-# install yaml-dev and cyaml lib
+### install yaml-dev and cyaml lib
 ```
 apt-get install libyaml-dev -y
 cd <work_dir>
@@ -31,12 +31,12 @@ git clone https://github.com/tlsa/libcyaml.git && cd libcyaml && make install VA
 find / -name libyaml.a -print -exec cp -fR {} /usr/lib
 ```
 
-# compile driver-bacnet
+### compile driver-bacnet
 ```
 cd <work_dir>
 git clone git@github.com:NubeIO/driver-bacnet.git && cd driver-bacnet/bacnet-stack && make clean all
 ```
-# run driver-bacnet , specify the folder of the config file in "g" env variable
+### run driver-bacnet , specify the folder of the config file in "g" env variable
 ```
 g=/data/bacnet-server-driver s=config.yml ./bin/bacserv
 ```
