@@ -26,6 +26,9 @@
 #include <stdint.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "bacnet/config.h"
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
@@ -84,6 +87,7 @@ uint8_t Send_Read_Property_Request_Address(BACNET_ADDRESS *dest,
     if (invoke_id) {
         /* encode the NPDU portion of the packet */
         datalink_get_my_address(&my_address);
+printf("- my_address: %s\n", inet_ntoa(*((struct in_addr *)&my_address.mac[0])));
         npdu_encode_npdu_data(&npdu_data, true, MESSAGE_PRIORITY_NORMAL);
         pdu_len = npdu_encode_pdu(
             &Handler_Transmit_Buffer[0], dest, &my_address, &npdu_data);

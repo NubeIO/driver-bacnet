@@ -781,13 +781,24 @@ bool bip_init(char *ifname)
     struct sockaddr_in sin;
     int sockopt = 0;
     int sock_fd = -1;
+    struct in_addr addr;
+    int is_address;
 
-    if (ifname) {
-        strncpy(BIP_Interface_Name, ifname, sizeof(BIP_Interface_Name));
-        bip_set_interface(ifname);
+    is_address = inet_aton(ifname, &addr);
+    if (is_address) {
+        fprintf(stderr, "BIP: ifname (%s) is a valid IP address\n", ifname);
+        BIP_Address.s_addr = addr.s_addr;
     } else {
-        bip_set_interface(ifname_default());
+        fprintf(stderr, "BIP: ifname (%s) is not a valid IP address\n", ifname);
+
+        if (ifname) {
+            strncpy(BIP_Interface_Name, ifname, sizeof(BIP_Interface_Name));
+            bip_set_interface(ifname);
+        } else {
+            bip_set_interface(ifname_default());
+        }
     }
+
     if (BIP_Address.s_addr == 0) {
         fprintf(stderr, "BIP: Failed to get an IP address from %s!\n",
             BIP_Interface_Name);
@@ -819,12 +830,18 @@ bool bip_init(char *ifname)
         return false;
     }
     /* Bind to the proper interface to send without default gateway */
-    setsockopt(sock_fd, SOL_SOCKET, SO_BINDTODEVICE, BIP_Interface_Name,
-        sizeof(BIP_Interface_Name));
+    if (!is_address) {
+        setsockopt(sock_fd, SOL_SOCKET, SO_BINDTODEVICE, BIP_Interface_Name,
+            sizeof(BIP_Interface_Name));
+    }
 
     /* bind the socket to the local port number and IP address */
     sin.sin_family = AF_INET;
-    sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (is_address) {
+        sin.sin_addr.s_addr = BIP_Address.s_addr;
+    } else {
+        sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    }
     sin.sin_port = BIP_Port;
     memset(&(sin.sin_zero), '\0', sizeof(sin.sin_zero));
     status =
