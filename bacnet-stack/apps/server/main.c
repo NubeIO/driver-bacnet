@@ -291,7 +291,10 @@ int main(int argc, char *argv[])
 #endif /* defined(BAC_UCI) */
 
 #if defined(YAML_CONFIG)
-    yaml_config_init();
+    if (yaml_config_init()) {
+      return 1;
+    }
+
     val_uint32 = strtoul(yaml_config_service_id(), NULL, 10);
     if (val_uint32 > 0) {
         Device_Set_Object_Instance_Number(val_uint32);

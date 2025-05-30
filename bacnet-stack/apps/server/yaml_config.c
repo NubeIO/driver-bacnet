@@ -10,9 +10,9 @@
 #include "yaml_config.h"
 
 #include "bacnet/basic/object/device.h"
+#include "bacnet/bactext.h"
 
 #define DEFAULT_YAML_CONFIG         "/data/bacnet-server-driver/config/config.yml"
-#define MAX_YAML_STR_VALUE_LENGTH   51
 
 /* mqtt struct */
 struct _mqtt {
@@ -65,6 +65,9 @@ struct _bacnet_config {
   char **properties;
   unsigned n_properties;
   struct _bacnet_client *bacnet_client;
+  char *use_points_list;
+  unsigned int n_points;
+  struct _point *points;
 };
 
 /* forward decls */
@@ -151,6 +154,27 @@ static const cyaml_schema_field_t bacnet_client_fields_schema[] = {
   CYAML_FIELD_END
 };
 
+static const cyaml_schema_field_t point_fields_schema[] = {
+  CYAML_FIELD_STRING_PTR(
+    "point", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _point, label, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "name", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _point, name, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_STRING_PTR(
+    "units", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _point, units, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_END
+};
+
+static const cyaml_schema_value_t point_schema = {
+  CYAML_VALUE_MAPPING(CYAML_FLAG_DEFAULT,
+    struct _point, point_fields_schema),
+};
+
 static const cyaml_schema_field_t config_fields_schema[] = {
   CYAML_FIELD_STRING_PTR(
     "server_name", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
@@ -229,6 +253,15 @@ static const cyaml_schema_field_t config_fields_schema[] = {
   CYAML_FIELD_MAPPING_PTR(
     "bacnet_client", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
     struct _bacnet_config, bacnet_client, bacnet_client_fields_schema),
+
+  CYAML_FIELD_STRING_PTR(
+    "use_points_list", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, use_points_list, 0, CYAML_UNLIMITED),
+
+  CYAML_FIELD_SEQUENCE_COUNT(
+    "points", CYAML_FLAG_POINTER | CYAML_FLAG_OPTIONAL,
+    struct _bacnet_config, points, n_points,
+    &point_schema, 0, CYAML_UNLIMITED),
 
   CYAML_FIELD_END
 };
@@ -414,7 +447,77 @@ void load_default_settings(void)
       bacnet_config->bacnet_client->filter_objects = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
       strcpy(bacnet_config->bacnet_client->filter_objects, "true");
     }
+
+    if (!bacnet_config->use_points_list) {
+      bacnet_config->use_points_list = malloc(sizeof(char) * MAX_YAML_STR_VALUE_LENGTH);
+      strcpy(bacnet_config->use_points_list, "false");
+    }
   }
+}
+
+
+/*
+ * Check if recognized object name.
+ */
+static bool is_valid_object_name(const char *name)
+{
+  int i;
+  bool found = false;
+  char *object_names[] = {
+    "ai",
+    "ao",
+    "av",
+    "bi",
+    "bo",
+    "bv",
+    NULL
+  };
+
+  for (i = 0; object_names[i] != NULL; i++) {
+    if (!strcasecmp(object_names[i], name)) {
+      found = true;
+      break;
+    }
+  }
+
+  return(found);
+}
+
+
+/*
+ * Normalize config.
+ */
+static int normalize_config(void)
+{
+  char buf[1024] = {0};
+  char *ptr;
+  unsigned int i, idx;
+
+  if (bacnet_config->n_points > 0) {
+    for(i = 0; i < bacnet_config->n_points; i++) {
+      strncpy(buf, bacnet_config->points[i].label, sizeof(buf) - 1);
+      ptr = &buf[0];
+      if (!strsep(&ptr, "-")) {
+        printf("- Invalid Point name: [%s]\n", buf);
+        return(1);
+      }
+
+      if (!is_valid_object_name(buf)) {
+        printf("- Invalid Object name: [%s]\n", buf);
+        return(1);
+      }
+
+      strcpy(bacnet_config->points[i].object_name, buf);
+      bacnet_config->points[i].object_instance = atoi(ptr);
+
+      if (!bactext_engineering_unit_index(bacnet_config->points[i].units, &idx)) {
+        printf("- Invalid Units: [%s]\n", bacnet_config->points[i].units);
+        return(1);
+      }
+    }
+  }
+
+  return(0);
 }
 
 
@@ -448,7 +551,7 @@ int yaml_config_init(void)
     sprintf(config_file, "%s/config/", pEnv);
   } else {
     printf("Global configuration directory not specified. Exiting!\n");
-    exit(0);
+    return(1);
   }
 
   pEnv = getenv("s");
@@ -456,7 +559,7 @@ int yaml_config_init(void)
     sprintf(&config_file[strlen(config_file)], "%s", pEnv);
   } else {
     printf("Configuration file not specified. Exiting!\n");
-    exit(0);
+    return(1);
   }
 
   if (yaml_config_debug) {
@@ -465,17 +568,21 @@ int yaml_config_init(void)
 
   if (stat(config_file, &statbuf) < 0) {
     printf("Configuration file (%s) not found. Exiting!\n", config_file);
-    exit(0);
+    return(1);
   }
 
   err = cyaml_load_file(config_file, &yaml_config,
     &config_schema, (void **)&bacnet_config, NULL);
   if (err != CYAML_OK) {
     fprintf(stderr, "ERROR: %s\n", cyaml_strerror(err));
-    exit(1);
+    return(1);
   }
 
   load_default_settings();
+
+  if (normalize_config()) {
+    return(1);
+  }
 
   if (yaml_config_debug) {
     yaml_config_dump();
@@ -570,6 +677,21 @@ void yaml_config_dump(void)
 
     printf("YAML Config: bacnet_client->filter_objects: %s\n", (bacnet_config->bacnet_client->filter_objects) ?
       bacnet_config->bacnet_client->filter_objects: "null");
+  }
+
+  printf("YAML Config: use_points_list: %s\n", (bacnet_config->use_points_list) ?
+      bacnet_config->use_points_list : "null");
+
+  if (bacnet_config->n_points > 0) {
+    printf("YAML Config: Points\n");
+
+    for(i = 0; i < bacnet_config->n_points; i++) {
+      printf("[%d]: label => [%s]\n", i, bacnet_config->points[i].label);
+      printf("[%d]: name  => [%s]\n", i, bacnet_config->points[i].name);
+      printf("[%d]: units => [%s]\n", i, bacnet_config->points[i].units);
+      printf("[%d]: object_name     => [%s]\n", i, bacnet_config->points[i].object_name);
+      printf("[%d]: object_instance => %d\n", i, bacnet_config->points[i].object_instance);
+    }
   }
 }
 
@@ -957,4 +1079,48 @@ int yaml_config_cleanup(void)
 
   return(0);
 }
+
+
+
+/*
+ * Get use point list enable flag.
+ */
+int yaml_use_point_list_enable(void)
+{
+  return (!strcmp(bacnet_config->use_points_list, "true") ? true : false);
+}
+
+
+/*
+ * Get points length.
+ */
+point_cb *yaml_get_points_by_name(char *name, int *length)
+{
+  point_cb *points = NULL;
+  int i, ii, len;
+
+  for (i = 0, len = 0; i < bacnet_config->n_points; i++) {
+    if (!strcasecmp(bacnet_config->points[i].object_name, name)) {
+      len++;
+    }
+  }
+
+  if (len > 0) {
+    points = (point_cb*)malloc(sizeof(point_cb) * len);
+    if (!points) {
+      return(NULL);
+    }
+
+    *length = len;
+    for (i = 0, ii = 0; i < bacnet_config->n_points; i++) {
+      if (!strcasecmp(bacnet_config->points[i].object_name, name)) {
+        memcpy(&points[ii], &bacnet_config->points[i], sizeof(point_cb));
+        ii++;
+      }
+    }
+  }
+
+  return(points);
+}
+
 

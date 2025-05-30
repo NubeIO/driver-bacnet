@@ -39,13 +39,9 @@
 #include "bacnet/rp.h"
 #include "bacnet/basic/object/bv.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_BINARY_VALUES
 #define MAX_BINARY_VALUES 10
@@ -109,45 +105,55 @@ void Binary_Value_Init(void)
     char *pEnv;
     unsigned i, j;
     static bool initialized = false;
+    point_cb *points = NULL;
 
     if (!initialized) {
         initialized = true;
 
-#if defined(YAML_CONFIG)
-        Binary_Value_Instances = yaml_config_bv_max();
+        if (yaml_use_point_list_enable()) {
+          points = yaml_get_points_by_name("bv", &Binary_Value_Instances);
+        } else {
+          Binary_Value_Instances = yaml_config_bv_max();
+        }
+
         if (Binary_Value_Instances == 0) {
-#endif
-        pEnv = getenv("BV");
-        if (pEnv) {
+          pEnv = getenv("BV");
+          if (pEnv) {
             Binary_Value_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
 
         /* initialize all the analog output priority arrays to NULL */
         if (Binary_Value_Instances > 0) {
-            Binary_Value_Level = malloc(Binary_Value_Instances * sizeof(BACNET_BINARY_PV*));
+            Binary_Value_Level = calloc(Binary_Value_Instances, sizeof(BACNET_BINARY_PV*));
 
             for (i = 0; i < Binary_Value_Instances; i++) {
-                Binary_Value_Level [i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
+                Binary_Value_Level [i] = calloc(BACNET_MAX_PRIORITY, sizeof(BACNET_BINARY_PV));
                 for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
                     Binary_Value_Level[i][j] = BINARY_NULL;
                 }
             }
 
-            Out_Of_Service = malloc(Binary_Value_Instances * sizeof(bool));
-            Binary_Value_Instance_Names = malloc(Binary_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Out_Of_Service = calloc(Binary_Value_Instances, sizeof(bool));
+            Binary_Value_Instance_Names = calloc(Binary_Value_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Value_Instances; i++) {
-                sprintf(buf, "BV_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Binary_Value_Instance_Names[i], buf);
+                if (points) {
+                  characterstring_init_ansi(&Binary_Value_Instance_Names[i], points[i].name);
+                } else {
+                  sprintf(buf, "BV_%d_SPARE", i + 1);
+                  characterstring_init_ansi(&Binary_Value_Instance_Names[i], buf);
+                }
             }
 
-            Binary_Value_Relinquish_Defaults = malloc(Binary_Value_Instances * sizeof(BACNET_BINARY_PV));
+            Binary_Value_Relinquish_Defaults = calloc(Binary_Value_Instances, sizeof(BACNET_BINARY_PV));
             for (i = 0; i < Binary_Value_Instances; i++) {
                 Binary_Value_Relinquish_Defaults[i] = RELINQUISH_DEFAULT;
             }
         }
+    }
+
+    if (points) {
+      free(points);
     }
 
     return;
