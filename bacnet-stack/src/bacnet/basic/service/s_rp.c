@@ -26,6 +26,9 @@
 #include <stdint.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "bacnet/config.h"
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"

@@ -39,13 +39,9 @@
 #include "bacnet/wp.h"
 #include "bacnet/basic/object/bo.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_BINARY_OUTPUTS
 #define MAX_BINARY_OUTPUTS 4
@@ -99,27 +95,29 @@ void Binary_Output_Init(void)
     char *pEnv;
     unsigned i, j;
     static bool initialized = false;
+    point_cb *points = NULL;
 
     if (!initialized) {
         initialized = true;
 
-#if defined(YAML_CONFIG)
-        Binary_Output_Instances = yaml_config_bo_max();
+        if (yaml_use_point_list_enable()) {
+          points = yaml_get_points_by_name("bo", &Binary_Output_Instances);
+        } else {
+          Binary_Output_Instances = yaml_config_bo_max();
+        }
+
         if (Binary_Output_Instances == 0) {
-#endif
-        pEnv = getenv("BO");
-        if (pEnv) {
+          pEnv = getenv("BO");
+          if (pEnv) {
             Binary_Output_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
 
         /* initialize all the analog output priority arrays to NULL */
         if (Binary_Output_Instances > 0) {
-            Binary_Output_Level = malloc(Binary_Output_Instances * sizeof(BACNET_BINARY_PV*));
+            Binary_Output_Level = calloc(Binary_Output_Instances, sizeof(BACNET_BINARY_PV*));
             for (i = 0; i < Binary_Output_Instances; i++) {
-                Binary_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
+                Binary_Output_Level[i] = calloc(BACNET_MAX_PRIORITY, sizeof(BACNET_BINARY_PV));
             }
 
             for (i = 0; i < Binary_Output_Instances; i++) {
@@ -128,18 +126,26 @@ void Binary_Output_Init(void)
                 }
             }
 
-            Out_Of_Service = malloc(Binary_Output_Instances * sizeof(bool));
-            Binary_Output_Instance_Names = malloc(Binary_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Out_Of_Service = calloc(Binary_Output_Instances, sizeof(bool));
+            Binary_Output_Instance_Names = calloc(Binary_Output_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Output_Instances; i++) {
-                sprintf(buf, "BO_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Binary_Output_Instance_Names[i], buf);
+                if (points) {
+                  characterstring_init_ansi(&Binary_Output_Instance_Names[i], points[i].name);
+                } else {
+                  sprintf(buf, "BO_%d_SPARE", i + 1);
+                  characterstring_init_ansi(&Binary_Output_Instance_Names[i], buf);
+                }
             }
 
-            Binary_Output_Relinquish_Defaults = malloc(Binary_Output_Instances * sizeof(BACNET_BINARY_PV));
+            Binary_Output_Relinquish_Defaults = calloc(Binary_Output_Instances, sizeof(BACNET_BINARY_PV));
             for (i = 0; i < Binary_Output_Instances; i++) {
                 Binary_Output_Relinquish_Defaults[i] = RELINQUISH_DEFAULT;
             }
         }
+    }
+
+    if (points) {
+      free(points);
     }
 
     return;
