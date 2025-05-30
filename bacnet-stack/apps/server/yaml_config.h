@@ -1,6 +1,20 @@
 #ifndef YAML_CONFIG_H
 #define YAML_CONFIG_H
 
+#define MAX_YAML_STR_VALUE_LENGTH   51
+
+
+/* point */
+typedef struct _point {
+  char *label;
+  char *name;
+  char *units;
+  char object_name[MAX_YAML_STR_VALUE_LENGTH];
+  unsigned int object_type;
+  unsigned int object_instance;
+} point_cb;
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -82,6 +96,10 @@ extern "C" {
   int yaml_config_bacnet_client_filter_objects(void);
 
   int yaml_config_cleanup(void);
+
+  int yaml_use_point_list_enable(void);
+
+  point_cb *yaml_get_points_by_name(char *name, int *length);
 
 #ifdef __cplusplus
 }
