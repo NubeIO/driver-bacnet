@@ -38,13 +38,9 @@
 #include "bacnet/wp.h"
 #include "bacnet/basic/object/ao.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_ANALOG_OUTPUTS
 #define MAX_ANALOG_OUTPUTS 4
@@ -105,45 +101,55 @@ void Analog_Output_Init(void)
     char buf[51];
     char *pEnv;
     unsigned i, j;
+    point_cb *points = NULL;
 
     if (!Analog_Output_Initialized) {
         Analog_Output_Initialized = true;
 
-#if defined(YAML_CONFIG)
-        Analog_Output_Instances = yaml_config_ao_max();
+        if (yaml_use_point_list_enable()) {
+          points = yaml_get_points_by_name("ao", &Analog_Output_Instances);
+        } else {
+          Analog_Output_Instances = yaml_config_ao_max();
+        }
+
         if (Analog_Output_Instances == 0) {
-#endif
-        pEnv = getenv("AO");
-        if (pEnv) {
+          pEnv = getenv("AO");
+          if (pEnv) {
             Analog_Output_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
 
         /* initialize all the analog output priority arrays to NULL */
         if (Analog_Output_Instances > 0) {
-            Analog_Output_Level = malloc(Analog_Output_Instances * sizeof(float *));
+            Analog_Output_Level = calloc(Analog_Output_Instances, sizeof(float *));
 
             for (i = 0; i < Analog_Output_Instances; i++) {
-                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
+                Analog_Output_Level[i] = calloc(BACNET_MAX_PRIORITY, sizeof(float));
                 for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
                     Analog_Output_Level[i][j] = AO_LEVEL_NULL;
                 }
             }
 
-            Out_Of_Service = malloc(Analog_Output_Instances * sizeof(bool));
-            Analog_Output_Instance_Names = malloc(Analog_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Out_Of_Service = calloc(Analog_Output_Instances, sizeof(bool));
+            Analog_Output_Instance_Names = calloc(Analog_Output_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Analog_Output_Instances; i++) {
-                sprintf(buf, "AO_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
+                if (points) {
+                  characterstring_init_ansi(&Analog_Output_Instance_Names[i], points[i].name);
+                } else {
+                  sprintf(buf, "AO_%d_SPARE", i + 1);
+                  characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
+                }
             }
 
-            Analog_Output_Relinquish_Defaults = malloc(Analog_Output_Instances * sizeof(float));
+            Analog_Output_Relinquish_Defaults = calloc(Analog_Output_Instances, sizeof(float));
             for (i = 0; i < Analog_Output_Instances; i++) {
                 Analog_Output_Relinquish_Defaults[i] = AO_RELINQUISH_DEFAULT;
             }
         }
+    }
+
+    if (points) {
+      free(points);
     }
 
     return;

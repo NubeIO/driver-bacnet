@@ -61,6 +61,7 @@
 
 /* unix socket */
 static int BIP_Socket = -1;
+static int BIP_Broadcast_Socket = -1;
 
 /* NOTE: we store address and port in network byte order
    since BACnet/IP uses network byte order for all address byte arrays
@@ -101,6 +102,8 @@ static void debug_print_ipv4(const char *str,
  */
 int bip_get_socket(void)
 {
+printf("-- bip_get_socket()\n");
+exit(0);
     return BIP_Socket;
 }
 
@@ -341,11 +344,27 @@ uint16_t bip_receive(
     }
     FD_ZERO(&read_fds);
     FD_SET(BIP_Socket, &read_fds);
+
+    if (BIP_Broadcast_Socket >= 0) {
+      FD_SET(BIP_Broadcast_Socket, &read_fds);
+    }
+
     max = BIP_Socket;
+    if (BIP_Broadcast_Socket > max) {
+        max = BIP_Broadcast_Socket;
+    }
+
     /* see if there is a packet for us */
     if (select(max + 1, &read_fds, NULL, NULL, &select_timeout) > 0) {
-        received_bytes = recvfrom(max, (char *)&npdu[0], max_npdu, 0,
-            (struct sockaddr *)&sin, &sin_len);
+        if (FD_ISSET(BIP_Socket, &read_fds)) {
+            fprintf(stderr, "BIP: Reading from BIP_Socket\n");
+            received_bytes = recvfrom(BIP_Socket, (char *)&npdu[0], max_npdu, 0,
+                (struct sockaddr *)&sin, &sin_len);
+        } else if (FD_ISSET(BIP_Broadcast_Socket, &read_fds)) {
+            fprintf(stderr, "BIP: Reading from BIP_Broadcast_Socket\n");
+            received_bytes = recvfrom(BIP_Broadcast_Socket, (char *)&npdu[0], max_npdu, 0,
+                (struct sockaddr *)&sin, &sin_len);
+        }
     } else {
         return 0;
     }
@@ -781,13 +800,45 @@ bool bip_init(char *ifname)
     struct sockaddr_in sin;
     int sockopt = 0;
     int sock_fd = -1;
+    struct in_addr addr;
+    struct in_addr netmask = {0};
+    char ip_str[INET_ADDRSTRLEN];
+    char ip_ifname[INET_ADDRSTRLEN];
+    int prefix_len;
+    int is_address = false;
 
-    if (ifname) {
-        strncpy(BIP_Interface_Name, ifname, sizeof(BIP_Interface_Name));
-        bip_set_interface(ifname);
-    } else {
-        bip_set_interface(ifname_default());
+    if (sscanf(ifname, "%[^/]/%d/%[^/]", ip_str, &prefix_len, ip_ifname) == 3) {
+      fprintf(stderr, "BIP: ifname (%s) is a valid IP/Prefix address\n", ifname);
+      inet_aton(ip_str, &addr);
+      BIP_Address.s_addr = addr.s_addr;
+      netmask.s_addr = htonl((0xFFFFFFFF << (32 - prefix_len)) & 0xFFFFFFFF);
+      BIP_Broadcast_Addr.s_addr = (addr.s_addr & netmask.s_addr) | ~netmask.s_addr;
+      strncpy(BIP_Interface_Name, ip_ifname, sizeof(BIP_Interface_Name));
+      is_address = true;
+      fprintf(stderr, "BIP: Interface: %s\n", ip_ifname);
+      fprintf(stderr, "BIP: Address: %s\n", inet_ntoa(addr));
+      fprintf(stderr, "BIP: Netmask: %s\n",
+          inet_ntoa(netmask));
+      fprintf(stderr, "BIP: Broadcast Address: %s\n",
+          inet_ntoa(BIP_Broadcast_Addr));
+      fprintf(stderr, "BIP: UDP Port: 0x%04X [%hu]\n", ntohs(BIP_Port),
+          ntohs(BIP_Port));
+    } else if (inet_aton(ifname, &addr)) {
+      fprintf(stderr, "BIP: ifname (%s) is a valid IP address\n", ifname);
+      BIP_Address.s_addr = addr.s_addr;
+      BIP_Broadcast_Addr.s_addr = ~0;
+      is_address = true;
+    } else  {
+        fprintf(stderr, "BIP: ifname (%s) is not a valid IP address\n", ifname);
+
+        if (ifname) {
+            strncpy(BIP_Interface_Name, ifname, sizeof(BIP_Interface_Name));
+            bip_set_interface(ifname);
+        } else {
+            bip_set_interface(ifname_default());
+        }
     }
+
     if (BIP_Address.s_addr == 0) {
         fprintf(stderr, "BIP: Failed to get an IP address from %s!\n",
             BIP_Interface_Name);
@@ -797,7 +848,9 @@ bool bip_init(char *ifname)
     /* assumes that the driver has already been initialized */
     sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     BIP_Socket = sock_fd;
+    fprintf(stderr, "BIP: BIP_Socket: %d\n", BIP_Socket);
     if (sock_fd < 0) {
+        fprintf(stderr, "BIP: Failed to open UDP socket!\n");
         return false;
     }
     /* Allow us to use the same socket for sending and receiving */
@@ -806,6 +859,7 @@ bool bip_init(char *ifname)
     status = setsockopt(
         sock_fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt));
     if (status < 0) {
+        fprintf(stderr, "BIP: Unable to reuse socket for sending/receiving!\n");
         close(sock_fd);
         BIP_Socket = -1;
         return status;
@@ -814,17 +868,26 @@ bool bip_init(char *ifname)
     status = setsockopt(
         sock_fd, SOL_SOCKET, SO_BROADCAST, &sockopt, sizeof(sockopt));
     if (status < 0) {
+        fprintf(stderr, "BIP: Unable to set socket to send broadcase messages!\n");
         close(sock_fd);
         BIP_Socket = -1;
         return false;
     }
     /* Bind to the proper interface to send without default gateway */
-    setsockopt(sock_fd, SOL_SOCKET, SO_BINDTODEVICE, BIP_Interface_Name,
-        sizeof(BIP_Interface_Name));
+    if (strlen(BIP_Interface_Name) > 0) {
+        fprintf(stderr, "BIP: Binding to (%s) for sending without default gateway\n", BIP_Interface_Name);
+        setsockopt(sock_fd, SOL_SOCKET, SO_BINDTODEVICE, BIP_Interface_Name,
+            sizeof(BIP_Interface_Name));
+    }
 
     /* bind the socket to the local port number and IP address */
     sin.sin_family = AF_INET;
-    sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (is_address) {
+        // sin.sin_addr.s_addr = BIP_Broadcast_Addr.s_addr;
+        sin.sin_addr.s_addr = BIP_Address.s_addr;
+    } else {
+        sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    }
     sin.sin_port = BIP_Port;
     memset(&(sin.sin_zero), '\0', sizeof(sin.sin_zero));
     status =
@@ -834,6 +897,54 @@ bool bip_init(char *ifname)
         BIP_Socket = -1;
         return false;
     }
+
+    if (is_address) {
+        fprintf(stderr, "BIP: Binding to broadcast address (%s)\n", inet_ntoa(BIP_Broadcast_Addr));
+
+        sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        BIP_Broadcast_Socket = sock_fd;
+        fprintf(stderr, "BIP: BIP_Broadcast_Socket: %d\n", BIP_Broadcast_Socket);
+        if (sock_fd < 0) {
+            fprintf(stderr, "BIP: Failed to open UDP socket!\n");
+            return false;
+        }
+
+        status = setsockopt(
+            sock_fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt));
+        if (status < 0) {
+            fprintf(stderr, "BIP: Unable to reuse socket for sending/receiving!\n");
+            close(sock_fd);
+            BIP_Broadcast_Socket = -1;
+            return status;
+        }
+        /* allow us to send a broadcast */
+        status = setsockopt(
+            sock_fd, SOL_SOCKET, SO_BROADCAST, &sockopt, sizeof(sockopt));
+        if (status < 0) {
+            fprintf(stderr, "BIP: Unable to set socket to send broadcase messages!\n");
+            close(sock_fd);
+            BIP_Broadcast_Socket = -1;
+            return false;
+        }
+        /* Bind to the proper interface to send without default gateway */
+        fprintf(stderr, "BIP: Binding to (%s) for sending without default gateway\n", BIP_Interface_Name);
+        setsockopt(sock_fd, SOL_SOCKET, SO_BINDTODEVICE, BIP_Interface_Name,
+            sizeof(BIP_Interface_Name));
+
+        /* bind the socket to the local port number and IP address */
+        sin.sin_family = AF_INET;
+        sin.sin_addr.s_addr = BIP_Broadcast_Addr.s_addr;
+        sin.sin_port = BIP_Port;
+        memset(&(sin.sin_zero), '\0', sizeof(sin.sin_zero));
+        status =
+            bind(sock_fd, (const struct sockaddr *)&sin, sizeof(struct sockaddr));
+        if (status < 0) {
+            close(sock_fd);
+            BIP_Broadcast_Socket = -1;
+            return false;
+        }
+    }
+
     bvlc_init();
 
     return true;
