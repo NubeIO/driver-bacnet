@@ -40,13 +40,9 @@
 #include "bacnet/basic/object/device.h"
 #include "bacnet/basic/services.h"
 #include "bacnet/basic/object/av.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_ANALOG_VALUES
 #define MAX_ANALOG_VALUES 4
@@ -115,28 +111,40 @@ void Analog_Value_Init(void)
 #if defined(INTRINSIC_REPORTING)
     unsigned j;
 #endif
+    point_cb *points = NULL;
+    unsigned int obj_instance_id;
+    int n_points= 0;
 
-#if defined(YAML_CONFIG)
-    Analog_Value_Instances = yaml_config_av_max();
+    if (yaml_use_point_list_enable()) {
+      points = yaml_get_points_by_name("av", &n_points);
+      printf("- Analog Value Points Found: %d\n", n_points);
+      Analog_Value_Instances = yaml_get_points_max_object_instance_id(points, n_points);
+    } else {
+      Analog_Value_Instances = yaml_config_av_max();
+    }
+
     if (Analog_Value_Instances == 0) {
-#endif
-    pEnv = getenv("AV");
-    if (pEnv) {
+      pEnv = getenv("AV");
+      if (pEnv) {
         Analog_Value_Instances = atoi(pEnv);
+      }
     }
-#if defined(YAML_CONFIG)
-    }
-#endif
+
+    printf("- Analog_Value_Instances: %d\n", Analog_Value_Instances);
 
     if (Analog_Value_Instances > 0) {
-        AV_Descr = malloc(Analog_Value_Instances * sizeof(ANALOG_VALUE_DESCR));
-        Analog_Value_Instance_Names = malloc(Analog_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
+        AV_Descr = calloc(Analog_Value_Instances, sizeof(ANALOG_VALUE_DESCR));
+        Analog_Value_Instance_Names = calloc(Analog_Value_Instances, sizeof(BACNET_CHARACTER_STRING));
     }
 
     for (i = 0; i < Analog_Value_Instances; i++) {
         memset(&AV_Descr[i], 0x00, sizeof(ANALOG_VALUE_DESCR));
-        AV_Descr[i].Present_Value = 0.0;
+
+        sprintf(buf, "AV_%d_SPARE", i + 1);
+        characterstring_init_ansi(&Analog_Value_Instance_Names[i], buf);
         AV_Descr[i].Units = UNITS_NO_UNITS;
+
+        AV_Descr[i].Present_Value = 0.0;
         AV_Descr[i].Prior_Value = 0.0f;
         AV_Descr[i].COV_Increment = 1.0f;
         AV_Descr[i].Changed = false;
@@ -161,14 +169,21 @@ void Analog_Value_Init(void)
             OBJECT_ANALOG_VALUE, Analog_Value_Alarm_Summary);
 #endif
 
-        sprintf(buf, "AV_%d_SPARE", i + 1);
-        characterstring_init_ansi(&Analog_Value_Instance_Names[i], buf);
-
         for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
             AV_Descr[i].Present_Value_Level[j] = AV_LEVEL_NULL;
         }
 
         AV_Descr[i].Relinquish_Default = AV_RELINQUISH_DEFAULT;
+    }
+
+    if (points) {
+      for (i = 0; i < n_points; i++) {
+        obj_instance_id = points[i].object_instance - 1;
+        characterstring_init_ansi(&Analog_Value_Instance_Names[obj_instance_id], points[i].name);
+        bactext_engineering_unit_index(points[i].units, (unsigned int*)&AV_Descr[obj_instance_id].Units);
+      }
+
+      free(points);
     }
 }
 
