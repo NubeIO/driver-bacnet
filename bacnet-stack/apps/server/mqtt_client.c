@@ -1436,6 +1436,10 @@ int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
     }
   }
 
+  if (mqtt_debug) {
+    printf("global_broadcast: %d\n", global_broadcast);
+  }
+
   if (global_broadcast) {
     datalink_get_broadcast_address(&dest);
   } else {
@@ -1492,6 +1496,13 @@ int process_bacnet_client_whois_command(bacnet_client_cmd_opts *opts)
   }
 
   add_bacnet_client_whois(&dest, opts);
+
+  if (mqtt_debug) {
+    printf("Sending WHOIS to: %u.%u.%u.%u %02X%02X\n", (unsigned)dest.mac[0],
+      (unsigned)dest.mac[1], (unsigned)dest.mac[2],
+      (unsigned)dest.mac[3], (unsigned)dest.mac[4],
+      (unsigned)dest.mac[5]);
+  }
 
   Send_WhoIs_To_Network(
     &dest, opts->device_instance_min, opts->device_instance_max);
@@ -3990,6 +4001,11 @@ static void bacnet_client_error_handler(BACNET_ADDRESS *src,
     if (!tmp->data.obj_data.dont_publish_on_success) {
       init_cmd_opts_from_list_cb(&opts, &tmp->data.obj_data);
       sprintf(err_msg, "%s", bactext_error_code_name((int)error_code));
+      if ((!strcasecmp(err_msg, "unknown-object")) &&
+        tmp->data.obj_data.topic_id == MQTT_WRITE_VALUE_CMD_RESULT_TOPIC) {
+        sprintf(err_msg, "failed to write");
+      }
+
       mqtt_publish_command_error(err_msg, &opts, tmp->data.obj_data.topic_id);
     }
 
@@ -4691,7 +4707,7 @@ int mqtt_publish_command_error(char *err_msg, bacnet_client_cmd_opts *opts, int 
   mqtt_opts.onFailure = mqtt_on_send_failure;
   mqtt_opts.context = mqtt_client;
 
-  snprintf(topic_value, sizeof(topic_value), "{ \"error\" : \"%s\" ", err_msg);
+  snprintf(topic_value, sizeof(topic_value), "{ \"fault\" : \"true\", \"error\" : \"%s\" ", err_msg);
   snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value), ", \"objectType\" : \"%d\" ",
     opts->object_type);
   snprintf(&topic_value[strlen(topic_value)], sizeof(topic_value) - strlen(topic_value), ", \"objectInstance\" : \"%d\" ",

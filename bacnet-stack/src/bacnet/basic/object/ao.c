@@ -38,13 +38,9 @@
 #include "bacnet/wp.h"
 #include "bacnet/basic/object/ao.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_ANALOG_OUTPUTS
 #define MAX_ANALOG_OUTPUTS 4
@@ -105,45 +101,64 @@ void Analog_Output_Init(void)
     char buf[51];
     char *pEnv;
     unsigned i, j;
+    point_cb *points = NULL;
+    unsigned int obj_instance_id;
+    int n_points= 0;
 
     if (!Analog_Output_Initialized) {
         Analog_Output_Initialized = true;
 
-#if defined(YAML_CONFIG)
-        Analog_Output_Instances = yaml_config_ao_max();
+        if (yaml_use_point_list_enable()) {
+          points = yaml_get_points_by_name("ao", &n_points);
+          printf("- Analog Output Points Found: %d\n", n_points);
+          Analog_Output_Instances = yaml_get_points_max_object_instance_id(points, n_points);
+        }
+
         if (Analog_Output_Instances == 0) {
-#endif
-        pEnv = getenv("AO");
-        if (pEnv) {
+          Analog_Output_Instances = yaml_config_ao_max();
+        }
+
+        if (Analog_Output_Instances == 0) {
+          pEnv = getenv("AO");
+          if (pEnv) {
             Analog_Output_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
+
+        printf("- Analog_Output_Instances: %d\n", Analog_Output_Instances);
 
         /* initialize all the analog output priority arrays to NULL */
         if (Analog_Output_Instances > 0) {
-            Analog_Output_Level = malloc(Analog_Output_Instances * sizeof(float *));
+            Analog_Output_Level = calloc(Analog_Output_Instances, sizeof(float *));
 
             for (i = 0; i < Analog_Output_Instances; i++) {
-                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
+                Analog_Output_Level[i] = calloc(BACNET_MAX_PRIORITY, sizeof(float));
                 for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
                     Analog_Output_Level[i][j] = AO_LEVEL_NULL;
                 }
             }
 
-            Out_Of_Service = malloc(Analog_Output_Instances * sizeof(bool));
-            Analog_Output_Instance_Names = malloc(Analog_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Out_Of_Service = calloc(Analog_Output_Instances, sizeof(bool));
+            Analog_Output_Instance_Names = calloc(Analog_Output_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Analog_Output_Instances; i++) {
-                sprintf(buf, "AO_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
+              sprintf(buf, "AO_%d_SPARE", i + 1);
+              characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
             }
 
-            Analog_Output_Relinquish_Defaults = malloc(Analog_Output_Instances * sizeof(float));
+            Analog_Output_Relinquish_Defaults = calloc(Analog_Output_Instances, sizeof(float));
             for (i = 0; i < Analog_Output_Instances; i++) {
                 Analog_Output_Relinquish_Defaults[i] = AO_RELINQUISH_DEFAULT;
             }
         }
+    }
+
+    if (points) {
+      for (i = 0; i < n_points; i++) {
+        obj_instance_id = points[i].object_instance - 1;
+        characterstring_init_ansi(&Analog_Output_Instance_Names[obj_instance_id], points[i].name);
+      }
+
+      free(points);
     }
 
     return;

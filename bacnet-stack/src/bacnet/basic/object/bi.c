@@ -39,13 +39,9 @@
 #include "bacnet/config.h" /* the custom stuff */
 #include "bacnet/basic/object/bi.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
 
 #ifndef MAX_BINARY_INPUTS
 #define MAX_BINARY_INPUTS 5
@@ -125,30 +121,40 @@ void Binary_Input_Init(void)
     char *pEnv;
     static bool initialized = false;
     unsigned i;
+    point_cb *points = NULL;
+    unsigned int obj_instance_id;
+    int n_points= 0;
 
     if (!initialized) {
         initialized = true;
 
-#if defined(YAML_CONFIG)
-        Binary_Input_Instances = yaml_config_bi_max();
+        if (yaml_use_point_list_enable()) {
+          points = yaml_get_points_by_name("bi", &n_points);
+          printf("- Binary Input Points Found: %d\n", n_points);
+          Binary_Input_Instances = yaml_get_points_max_object_instance_id(points, n_points);
+        }
+
         if (Binary_Input_Instances == 0) {
-#endif
-        pEnv = getenv("BI");
-        if (pEnv) {
+          Binary_Input_Instances = yaml_config_bi_max();
+        }
+
+        if (Binary_Input_Instances == 0) {
+          pEnv = getenv("BI");
+          if (pEnv) {
             Binary_Input_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
+
+        printf("- Binary_Input_Instances: %d\n", Binary_Input_Instances);
 
         /* initialize all the values */
         if (Binary_Input_Instances > 0) {
-            Present_Value = malloc(Binary_Input_Instances * sizeof(BACNET_BINARY_PV));
-            Out_Of_Service = malloc(Binary_Input_Instances * sizeof(bool));
-            Change_Of_Value = malloc(Binary_Input_Instances * sizeof(bool));
-            Polarity = malloc(Binary_Input_Instances * sizeof(BACNET_POLARITY));
+            Present_Value = calloc(Binary_Input_Instances, sizeof(BACNET_BINARY_PV));
+            Out_Of_Service = calloc(Binary_Input_Instances, sizeof(bool));
+            Change_Of_Value = calloc(Binary_Input_Instances, sizeof(bool));
+            Polarity = calloc(Binary_Input_Instances, sizeof(BACNET_POLARITY));
 
-            Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Binary_Input_Instance_Names = calloc(Binary_Input_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Input_Instances; i++) {
                 sprintf(buf, "BI_%d_SPARE", i + 1);
                 characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
@@ -159,6 +165,15 @@ void Binary_Input_Init(void)
             Present_Value[i] = BINARY_INACTIVE;
             Out_Of_Service[i] = false;
         }
+    }
+
+    if (points) {
+      for (i = 0; i < n_points; i++) {
+        obj_instance_id = points[i].object_instance - 1;
+        characterstring_init_ansi(&Binary_Input_Instance_Names[obj_instance_id], points[i].name);
+      }
+
+      free(points);
     }
 
     return;
