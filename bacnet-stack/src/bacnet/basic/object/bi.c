@@ -39,13 +39,10 @@
 #include "bacnet/config.h" /* the custom stuff */
 #include "bacnet/basic/object/bi.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
+#include "instance_id.h"
 
 #ifndef MAX_BINARY_INPUTS
 #define MAX_BINARY_INPUTS 5
@@ -55,6 +52,9 @@
 
 /* Run-time Binary Input Instances */
 static int Binary_Input_Instances = 0;
+
+/* instance ids */
+static instance_id_cb *instance_ids = NULL;
 
 /* stores the current value */
 static BACNET_BINARY_PV *Present_Value = NULL;
@@ -97,7 +97,7 @@ void Binary_Input_Property_Lists(
 /* given instance exists */
 bool Binary_Input_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance > 0 && object_instance <= Binary_Input_Instances) {
+    if (object_instance > 0) {
         return true;
     }
 
@@ -116,6 +116,10 @@ unsigned Binary_Input_Count(void)
 /* that correlates to the correct index */
 uint32_t Binary_Input_Index_To_Instance(unsigned index)
 {
+    if (index <= Binary_Input_Instances) {
+        index = instance_ids[index].id;
+    }
+
     return index;
 }
 
@@ -125,33 +129,48 @@ void Binary_Input_Init(void)
     char *pEnv;
     static bool initialized = false;
     unsigned i;
+    point_cb *points = NULL;
+    int n_points= 0;
 
     if (!initialized) {
         initialized = true;
 
-#if defined(YAML_CONFIG)
-        Binary_Input_Instances = yaml_config_bi_max();
+        if (yaml_use_point_list_enable()) {
+            points = yaml_get_points_by_name("bi", &n_points);
+            printf("- Binary Input Points Found: %d\n", n_points);
+            Binary_Input_Instances = n_points;
+        } else {
+            Binary_Input_Instances = yaml_config_bi_max();
+        }
+
         if (Binary_Input_Instances == 0) {
-#endif
-        pEnv = getenv("BI");
-        if (pEnv) {
-            Binary_Input_Instances = atoi(pEnv);
+            pEnv = getenv("BI");
+            if (pEnv) {
+                Binary_Input_Instances = atoi(pEnv);
+            }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
+
+        printf("- Binary_Input_Instances: %d\n", Binary_Input_Instances);
 
         /* initialize all the values */
         if (Binary_Input_Instances > 0) {
-            Present_Value = malloc(Binary_Input_Instances * sizeof(BACNET_BINARY_PV));
-            Out_Of_Service = malloc(Binary_Input_Instances * sizeof(bool));
-            Change_Of_Value = malloc(Binary_Input_Instances * sizeof(bool));
-            Polarity = malloc(Binary_Input_Instances * sizeof(BACNET_POLARITY));
+            Present_Value = calloc(Binary_Input_Instances, sizeof(BACNET_BINARY_PV));
+            Out_Of_Service = calloc(Binary_Input_Instances, sizeof(bool));
+            Change_Of_Value = calloc(Binary_Input_Instances, sizeof(bool));
+            Polarity = calloc(Binary_Input_Instances, sizeof(BACNET_POLARITY));
+            instance_ids = calloc(Binary_Input_Instances, sizeof(instance_id_cb));
 
-            Binary_Input_Instance_Names = malloc(Binary_Input_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Binary_Input_Instance_Names = calloc(Binary_Input_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Binary_Input_Instances; i++) {
-                sprintf(buf, "BI_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
+                if (points) {
+                    instance_ids[i].id = points[i].object_instance;
+                    characterstring_init_ansi(&Binary_Input_Instance_Names[i], points[i].name);
+                } else {
+                    sprintf(buf, "BI_%d_SPARE", i + 1);
+                    characterstring_init_ansi(&Binary_Input_Instance_Names[i], buf);
+                }
+
+                instance_ids[i].local_id = i + 1;
             }
         }
 
@@ -159,6 +178,10 @@ void Binary_Input_Init(void)
             Present_Value[i] = BINARY_INACTIVE;
             Out_Of_Service[i] = false;
         }
+    }
+
+    if (points) {
+        free(points);
     }
 
     return;
@@ -169,10 +192,13 @@ void Binary_Input_Init(void)
 /* that correlates to the correct instance number */
 unsigned Binary_Input_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = Binary_Input_Instances;
+    int i;
+    unsigned index = 0;
 
-    if (object_instance > 0 && object_instance <= Binary_Input_Instances) {
-        index = object_instance;
+    for (i = 0; i < Binary_Input_Instances; i++) {
+        if (instance_ids[i].id == object_instance) {
+            index = instance_ids[i].local_id;
+        }
     }
 
     return index;
@@ -184,7 +210,7 @@ BACNET_BINARY_PV Binary_Input_Present_Value(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         value = Present_Value[index - 1];
         if (Polarity[index - 1] != POLARITY_NORMAL) {
             if (value == BINARY_INACTIVE) {
@@ -204,7 +230,7 @@ bool Binary_Input_Out_Of_Service(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         value = Out_Of_Service[index - 1];
     }
 
@@ -217,7 +243,7 @@ bool Binary_Input_Change_Of_Value(uint32_t object_instance)
     unsigned index;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         status = Change_Of_Value[index - 1];
     }
 
@@ -229,7 +255,7 @@ void Binary_Input_Change_Of_Value_Clear(uint32_t object_instance)
     unsigned index;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         Change_Of_Value[index - 1] = false;
     }
 
@@ -295,7 +321,7 @@ bool Binary_Input_Present_Value_Set(
     bool status = false;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         if (Polarity[index - 1] != POLARITY_NORMAL) {
             if (value == BINARY_INACTIVE) {
                 value = BINARY_ACTIVE;
@@ -324,7 +350,7 @@ void Binary_Input_Out_Of_Service_Set(uint32_t object_instance, bool value)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         if (Out_Of_Service[index - 1] != value) {
             Change_Of_Value[index - 1] = true;
         }
@@ -341,7 +367,7 @@ bool Binary_Input_Object_Name(
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         status = characterstring_copy(object_name, &Binary_Input_Instance_Names[index - 1]);
     }
 
@@ -355,7 +381,7 @@ bool Binary_Input_Set_Object_Name(
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         if (!characterstring_same(&Binary_Input_Instance_Names[index - 1], object_name)) {
             status = characterstring_copy(&Binary_Input_Instance_Names[index - 1], object_name);
         }
@@ -376,7 +402,7 @@ BACNET_POLARITY Binary_Input_Polarity(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         polarity = Polarity[index - 1];
     }
 
@@ -390,7 +416,7 @@ bool Binary_Input_Polarity_Set(
     unsigned index = 0;
 
     index = Binary_Input_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Input_Instances) {
+    if (index > 0) {
         Polarity[index - 1] = polarity;
     }
 
@@ -404,6 +430,7 @@ int Binary_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
     int apdu_len = 0; /* return value */
     BACNET_BIT_STRING bit_string;
     BACNET_CHARACTER_STRING char_string;
+    unsigned object_index;
     uint8_t *apdu = NULL;
     bool state = false;
 
@@ -411,6 +438,12 @@ int Binary_Input_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
         (rpdata->application_data_len == 0)) {
         return 0;
     }
+
+    object_index = Binary_Input_Instance_To_Index(rpdata->object_instance);
+    if (object_index <= 0) {
+        return BACNET_STATUS_ERROR;
+    }
+
     apdu = rpdata->application_data;
     switch (rpdata->object_property) {
         case PROP_OBJECT_IDENTIFIER:
@@ -477,6 +510,7 @@ bool Binary_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 {
     bool status = false; /* return value */
     int len = 0;
+    unsigned object_index;
     BACNET_APPLICATION_DATA_VALUE value;
 
     /* decode the some of the request */
@@ -495,6 +529,12 @@ bool Binary_Input_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         wp_data->error_code = ERROR_CODE_PROPERTY_IS_NOT_AN_ARRAY;
         return false;
     }
+
+    object_index = Binary_Input_Instance_To_Index(wp_data->object_instance);
+    if (object_index <= 0) {
+        return false;
+    }
+
     switch (wp_data->object_property) {
         case PROP_PRESENT_VALUE:
             status = write_property_type_valid(wp_data, &value,

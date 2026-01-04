@@ -39,13 +39,10 @@
 #include "bacnet/rp.h"
 #include "bacnet/basic/object/bv.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
+#include "instance_id.h"
 
 #ifndef MAX_BINARY_VALUES
 #define MAX_BINARY_VALUES 10
@@ -53,6 +50,9 @@
 
 /* Run-time Binary Value Instances */
 static int Binary_Value_Instances = 0;
+
+/* instance ids */
+static instance_id_cb *instance_ids = NULL;
 
 /* When all the priorities are level null, the present value returns */
 /* the Relinquish Default value */
@@ -109,45 +109,64 @@ void Binary_Value_Init(void)
     char *pEnv;
     unsigned i, j;
     static bool initialized = false;
+    point_cb *points = NULL;
+    int n_points= 0;
 
     if (!initialized) {
         initialized = true;
 
-#if defined(YAML_CONFIG)
-        Binary_Value_Instances = yaml_config_bv_max();
+        if (yaml_use_point_list_enable()) {
+            points = yaml_get_points_by_name("bv", &n_points);
+            printf("- Binary Value Points Found: %d\n", n_points);
+            Binary_Value_Instances = n_points;
+        } else {
+            Binary_Value_Instances = yaml_config_bv_max();
+        }
+
         if (Binary_Value_Instances == 0) {
-#endif
-        pEnv = getenv("BV");
-        if (pEnv) {
+          pEnv = getenv("BV");
+          if (pEnv) {
             Binary_Value_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
+
+        printf("- Binary_Value_Instances: %d\n", Binary_Value_Instances);
 
         /* initialize all the analog output priority arrays to NULL */
         if (Binary_Value_Instances > 0) {
-            Binary_Value_Level = malloc(Binary_Value_Instances * sizeof(BACNET_BINARY_PV*));
+            Binary_Value_Level = calloc(Binary_Value_Instances, sizeof(BACNET_BINARY_PV*));
 
             for (i = 0; i < Binary_Value_Instances; i++) {
-                Binary_Value_Level [i] = malloc(BACNET_MAX_PRIORITY * sizeof(BACNET_BINARY_PV));
+                Binary_Value_Level [i] = calloc(BACNET_MAX_PRIORITY, sizeof(BACNET_BINARY_PV));
                 for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
                     Binary_Value_Level[i][j] = BINARY_NULL;
                 }
             }
 
-            Out_Of_Service = malloc(Binary_Value_Instances * sizeof(bool));
-            Binary_Value_Instance_Names = malloc(Binary_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Out_Of_Service = calloc(Binary_Value_Instances, sizeof(bool));
+            Binary_Value_Instance_Names = calloc(Binary_Value_Instances, sizeof(BACNET_CHARACTER_STRING));
+            instance_ids = calloc(Binary_Value_Instances, sizeof(instance_id_cb));
             for (i = 0; i < Binary_Value_Instances; i++) {
-                sprintf(buf, "BV_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Binary_Value_Instance_Names[i], buf);
+                if (points) {
+                    instance_ids[i].id = points[i].object_instance;
+                    characterstring_init_ansi(&Binary_Value_Instance_Names[i], points[i].name);
+                } else {
+                    sprintf(buf, "BV_%d_SPARE", i + 1);
+                    characterstring_init_ansi(&Binary_Value_Instance_Names[i], buf);
+                }
+
+                instance_ids[i].local_id = i + 1;
             }
 
-            Binary_Value_Relinquish_Defaults = malloc(Binary_Value_Instances * sizeof(BACNET_BINARY_PV));
+            Binary_Value_Relinquish_Defaults = calloc(Binary_Value_Instances, sizeof(BACNET_BINARY_PV));
             for (i = 0; i < Binary_Value_Instances; i++) {
                 Binary_Value_Relinquish_Defaults[i] = RELINQUISH_DEFAULT;
             }
         }
+    }
+
+    if (points) {
+      free(points);
     }
 
     return;
@@ -164,7 +183,7 @@ void Binary_Value_Init(void)
  */
 bool Binary_Value_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance > 0 && object_instance <= Binary_Value_Instances) {
+    if (object_instance > 0) {
         return true;
     }
 
@@ -192,6 +211,10 @@ unsigned Binary_Value_Count(void)
  */
 uint32_t Binary_Value_Index_To_Instance(unsigned index)
 {
+    if (index <= Binary_Value_Instances) {
+        index = instance_ids[index].id;
+    }
+
     return index;
 }
 
@@ -206,10 +229,13 @@ uint32_t Binary_Value_Index_To_Instance(unsigned index)
  */
 unsigned Binary_Value_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = Binary_Value_Instances;
+    int i;
+    unsigned index = 0;
 
-    if (object_instance > 0 && object_instance <= Binary_Value_Instances) {
-        index = object_instance;
+    for (i = 0; i < Binary_Value_Instances; i++) {
+        if (instance_ids[i].id == object_instance) {
+            index = instance_ids[i].local_id;
+        }
     }
 
     return index;
@@ -229,7 +255,7 @@ BACNET_BINARY_PV Binary_Value_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         value = Binary_Value_Relinquish_Defaults[index - 1];
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Binary_Value_Level[index - 1][i] != BINARY_NULL) {
@@ -259,7 +285,7 @@ bool Binary_Value_Object_Name(
     unsigned index = 0;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         status = characterstring_copy(object_name, &Binary_Value_Instance_Names[index - 1]);
     }
 
@@ -273,7 +299,7 @@ bool Binary_Value_Set_Object_Name(
     unsigned index = 0;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 &&  index <= Binary_Value_Instances) {
+    if (index > 0) {
         if (!characterstring_same(&Binary_Value_Instance_Names[index - 1], object_name)) {
             status = characterstring_copy(&Binary_Value_Instance_Names[index - 1], object_name);
         }
@@ -294,7 +320,7 @@ BACNET_BINARY_PV Binary_Value_Relinquish_Default(uint32_t object_instance)
     unsigned index = 0;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         value = Binary_Value_Relinquish_Defaults[index - 1];
     }
 
@@ -314,7 +340,7 @@ bool Binary_Value_Out_Of_Service(uint32_t instance)
     bool oos_flag = false;
 
     index = Binary_Value_Instance_To_Index(instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         oos_flag = Out_Of_Service[index - 1];
     }
 
@@ -332,7 +358,7 @@ void Binary_Value_Out_Of_Service_Set(uint32_t instance, bool oos_flag)
     unsigned index = 0;
 
     index = Binary_Value_Instance_To_Index(instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         Out_Of_Service[index - 1] = oos_flag;
     }
 }
@@ -367,7 +393,7 @@ int Binary_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 
     /* Valid object index? */
     object_index = Binary_Value_Instance_To_Index(rpdata->object_instance);
-    if (object_index < 1 || object_index > Binary_Value_Instances) {
+    if (object_index < 1) {
         rpdata->error_class = ERROR_CLASS_OBJECT;
         rpdata->error_code = ERROR_CODE_UNKNOWN_OBJECT;
         return BACNET_STATUS_ERROR;
@@ -496,7 +522,7 @@ void publish_bv_priority_array(uint32_t object_instance, char *uuid)
     
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         strcpy(buf, "[");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             value = Binary_Value_Level[index - 1][i];
@@ -525,7 +551,7 @@ void get_bv_priority_array(uint32_t object_instance, BACNET_BINARY_PV *pa, int p
     unsigned max;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         max = (pa_length < BACNET_MAX_PRIORITY) ? pa_length : BACNET_MAX_PRIORITY;
         for (i = 0; i < max; i++) {
             pa[i] = Binary_Value_Level[index - 1][i];
@@ -540,7 +566,7 @@ bool Binary_Value_Present_Value_Set(
     bool status = false;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         Binary_Value_Level[index - 1][priority - 1] = value;
         status = true;
 #if defined(MQTT)
@@ -568,7 +594,7 @@ bool Binary_Value_Priority_Array_Set(
     bool status = false;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         Binary_Value_Level[index - 1][priority - 1] = value;
         status = true;
 #if defined(MQTT)
@@ -589,7 +615,7 @@ bool Binary_Value_Priority_Array_Set2(
     bool status = false;
 
     index = Binary_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Binary_Value_Instances) {
+    if (index > 0) {
         Binary_Value_Level[index - 1][priority - 1] = value;
         status = true;
     }
@@ -643,7 +669,7 @@ bool Binary_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 
     /* Valid object index? */
     object_index = Binary_Value_Instance_To_Index(wp_data->object_instance);
-    if (object_index < 1 || object_index > Binary_Value_Instances) {
+    if (object_index < 1) {
         wp_data->error_class = ERROR_CLASS_OBJECT;
         wp_data->error_code = ERROR_CODE_UNKNOWN_OBJECT;
         return false;

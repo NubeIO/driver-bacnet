@@ -204,6 +204,7 @@ static object_functions_t My_Object_Table[] = {
         NULL /* ReadRangeInfo */, NULL /* Iterator */, NULL /* Value_Lists */,
         NULL /* COV */, NULL /* COV Clear */, NULL /* Intrinsic Reporting */ },
 #endif
+#if 0
     { OBJECT_MULTI_STATE_INPUT, Multistate_Input_Init, Multistate_Input_Count,
         Multistate_Input_Index_To_Instance, Multistate_Input_Valid_Instance,
         Multistate_Input_Object_Name, Multistate_Input_Read_Property,
@@ -225,6 +226,7 @@ static object_functions_t My_Object_Table[] = {
         Multistate_Value_Encode_Value_List, Multistate_Value_Change_Of_Value,
         Multistate_Value_Change_Of_Value_Clear,
         NULL /* Intrinsic Reporting */ },
+#endif
 #if 0
     { OBJECT_TRENDLOG, Trend_Log_Init, Trend_Log_Count,
         Trend_Log_Index_To_Instance, Trend_Log_Valid_Instance,
@@ -1268,7 +1270,7 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                               &apdu[apdu_len], object_type, instance);
                         } else {
                           len = encode_application_object_id(
-                              &apdu[apdu_len], object_type, instance + 1);
+                              &apdu[apdu_len], object_type, instance);
                         }
                         apdu_len += len;
                         /* assume next one is the same size as this one */
@@ -1298,7 +1300,7 @@ int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata)
                            &apdu[0], object_type, instance);
                     } else {
                       apdu_len = encode_application_object_id(
-                           &apdu[0], object_type, instance + 1);
+                           &apdu[0], object_type, instance);
                     }
                 } else {
                     rpdata->error_class = ERROR_CLASS_PROPERTY;

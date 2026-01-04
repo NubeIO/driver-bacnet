@@ -38,13 +38,10 @@
 #include "bacnet/wp.h"
 #include "bacnet/basic/object/ao.h"
 #include "bacnet/basic/services.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
+#include "instance_id.h"
 
 #ifndef MAX_ANALOG_OUTPUTS
 #define MAX_ANALOG_OUTPUTS 4
@@ -52,6 +49,9 @@
 
 /* Run-time Analog Output Instances */
 static int Analog_Output_Instances = 0;
+
+/* instance ids */
+static instance_id_cb *instance_ids = NULL;
 
 /* we choose to have a NULL level in our system represented by */
 /* a particular value.  When the priorities are not in use, they */
@@ -105,45 +105,65 @@ void Analog_Output_Init(void)
     char buf[51];
     char *pEnv;
     unsigned i, j;
+    point_cb *points = NULL;
+    int n_points= 0;
 
     if (!Analog_Output_Initialized) {
         Analog_Output_Initialized = true;
 
-#if defined(YAML_CONFIG)
-        Analog_Output_Instances = yaml_config_ao_max();
+        if (yaml_use_point_list_enable()) {
+          points = yaml_get_points_by_name("ao", &n_points);
+          printf("- Analog Output Points Found: %d\n", n_points);
+          Analog_Output_Instances = n_points;
+        } else {
+          Analog_Output_Instances = yaml_config_ao_max();
+        }
+
         if (Analog_Output_Instances == 0) {
-#endif
-        pEnv = getenv("AO");
-        if (pEnv) {
+          pEnv = getenv("AO");
+          if (pEnv) {
             Analog_Output_Instances = atoi(pEnv);
+          }
         }
-#if defined(YAML_CONFIG)
-        }
-#endif
+
+        printf("- Analog_Output_Instances: %d\n", Analog_Output_Instances);
 
         /* initialize all the analog output priority arrays to NULL */
         if (Analog_Output_Instances > 0) {
-            Analog_Output_Level = malloc(Analog_Output_Instances * sizeof(float *));
+            Analog_Output_Level = calloc(Analog_Output_Instances, sizeof(float *));
+            instance_ids = calloc(Analog_Output_Instances, sizeof(instance_id_cb));
 
             for (i = 0; i < Analog_Output_Instances; i++) {
-                Analog_Output_Level[i] = malloc(BACNET_MAX_PRIORITY * sizeof(float));
+                Analog_Output_Level[i] = calloc(BACNET_MAX_PRIORITY, sizeof(float));
                 for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
                     Analog_Output_Level[i][j] = AO_LEVEL_NULL;
                 }
             }
 
-            Out_Of_Service = malloc(Analog_Output_Instances * sizeof(bool));
-            Analog_Output_Instance_Names = malloc(Analog_Output_Instances * sizeof(BACNET_CHARACTER_STRING));
+            Out_Of_Service = calloc(Analog_Output_Instances, sizeof(bool));
+            Analog_Output_Instance_Names = calloc(Analog_Output_Instances, sizeof(BACNET_CHARACTER_STRING));
             for (i = 0; i < Analog_Output_Instances; i++) {
-                sprintf(buf, "AO_%d_SPARE", i + 1);
-                characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
+                if (points) {
+                    instance_ids[i].id = points[i].object_instance;
+                    characterstring_init_ansi(&Analog_Output_Instance_Names[i], points[i].name);
+                } else {
+                    instance_ids[i].id = i + 1;
+                    sprintf(buf, "AO_%d_SPARE", i + 1);
+                    characterstring_init_ansi(&Analog_Output_Instance_Names[i], buf);
+                }
+
+                instance_ids[i].local_id = i + 1;
             }
 
-            Analog_Output_Relinquish_Defaults = malloc(Analog_Output_Instances * sizeof(float));
+            Analog_Output_Relinquish_Defaults = calloc(Analog_Output_Instances, sizeof(float));
             for (i = 0; i < Analog_Output_Instances; i++) {
                 Analog_Output_Relinquish_Defaults[i] = AO_RELINQUISH_DEFAULT;
             }
         }
+    }
+
+    if (points) {
+      free(points);
     }
 
     return;
@@ -154,7 +174,7 @@ void Analog_Output_Init(void)
 /* given instance exists */
 bool Analog_Output_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance > 0 && object_instance <= Analog_Output_Instances) {
+    if (object_instance > 0) {
         return true;
     }
 
@@ -173,6 +193,10 @@ unsigned Analog_Output_Count(void)
 /* that correlates to the correct index */
 uint32_t Analog_Output_Index_To_Instance(unsigned index)
 {
+    if (index <= Analog_Output_Instances) {
+        index = instance_ids[index].id;
+    }
+
     return index;
 }
 
@@ -181,10 +205,13 @@ uint32_t Analog_Output_Index_To_Instance(unsigned index)
 /* that correlates to the correct instance number */
 unsigned Analog_Output_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = Analog_Output_Instances;
+    int i;
+    unsigned index = 0;
 
-    if (object_instance > 0 && object_instance <= Analog_Output_Instances) {
-        index = object_instance;
+    for (i = 0; i < Analog_Output_Instances; i++) {
+        if (instance_ids[i].id == object_instance) {
+            index = instance_ids[i].local_id;
+        }
     }
 
     return index;
@@ -197,7 +224,7 @@ float Analog_Output_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         value = Analog_Output_Relinquish_Defaults[index - 1];
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Analog_Output_Level[index - 1][i] != AO_LEVEL_NULL) {
@@ -205,10 +232,6 @@ float Analog_Output_Present_Value(uint32_t object_instance)
                 break;
             }
         }
-    }
-
-    if (yaml_config_mqtt_debug()) {
-      printf("- Analog_Output_Present_Value[%d]: %f\n", index, value);
     }
 
     return value;
@@ -221,7 +244,7 @@ unsigned Analog_Output_Present_Value_Priority(uint32_t object_instance)
     unsigned priority = 0; /* return value */
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (Analog_Output_Level[index - 1][i] != AO_LEVEL_NULL) {
                 priority = i + 1;
@@ -240,7 +263,7 @@ bool Analog_Output_Present_Value_Set(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
             Analog_Output_Level[index - 1][priority - 1] = value;
@@ -278,7 +301,7 @@ bool Analog_Output_Priority_Array_Set(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
             Analog_Output_Level[index - 1][priority - 1] = value;
@@ -302,7 +325,7 @@ bool Analog_Output_Priority_Array_Set2(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
             Analog_Output_Level[index - 1][priority - 1] = value;
@@ -321,7 +344,7 @@ bool Analog_Output_Present_Value_Relinquish(
     bool status = false;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         if (priority && (priority <= BACNET_MAX_PRIORITY) &&
             (priority != 6 /* reserved */)) {
             Analog_Output_Level[index - 1][priority - 1] = AO_LEVEL_NULL;
@@ -354,7 +377,7 @@ bool Analog_Output_Object_Name(
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         status = characterstring_copy(object_name, &Analog_Output_Instance_Names[index - 1]);
     }
 
@@ -368,7 +391,7 @@ bool Analog_Output_Set_Object_Name(
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         if (!characterstring_same(&Analog_Output_Instance_Names[index - 1], object_name)) {
             status = characterstring_copy(&Analog_Output_Instance_Names[index - 1], object_name);
         }
@@ -389,7 +412,7 @@ bool Analog_Output_Out_Of_Service(uint32_t instance)
     bool oos_flag = false;
 
     index = Analog_Output_Instance_To_Index(instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         oos_flag = Out_Of_Service[index - 1];
     }
 
@@ -401,7 +424,7 @@ void Analog_Output_Out_Of_Service_Set(uint32_t instance, bool oos_flag)
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         Out_Of_Service[index - 1] = oos_flag;
     }
 }
@@ -412,7 +435,7 @@ float Analog_Output_Relinquish_Default(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         value = Analog_Output_Relinquish_Defaults[index - 1];
     }
 
@@ -436,6 +459,12 @@ int Analog_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
         (rpdata->application_data_len == 0)) {
         return 0;
     }
+
+    object_index = Analog_Output_Instance_To_Index(rpdata->object_instance);
+    if (object_index <= 0) {
+        return BACNET_STATUS_ERROR;
+    }
+
     apdu = rpdata->application_data;
     switch (rpdata->object_property) {
         case PROP_OBJECT_IDENTIFIER:
@@ -560,7 +589,7 @@ void publish_ao_priority_array(uint32_t object_instance, char *uuid)
 
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         strcpy(buf, "[");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             value = Analog_Output_Level[index - 1][i];
@@ -589,7 +618,7 @@ void get_ao_priority_array(uint32_t object_instance, float *pa, int pa_length)
     unsigned max;
 
     index = Analog_Output_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Output_Instances) {
+    if (index > 0) {
         max = (pa_length < BACNET_MAX_PRIORITY) ? pa_length : BACNET_MAX_PRIORITY;
         for (i = 0; i < max; i++) {
             pa[i] = Analog_Output_Level[index - 1][i];
@@ -622,6 +651,11 @@ bool Analog_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         wp_data->error_code = ERROR_CODE_PROPERTY_IS_NOT_AN_ARRAY;
         return false;
     }
+    object_index = Analog_Output_Instance_To_Index(wp_data->object_instance);
+    if (object_index <= 0) {
+        return false;
+    }
+
     switch (wp_data->object_property) {
         case PROP_PRESENT_VALUE:
             status = write_property_type_valid(wp_data, &value,

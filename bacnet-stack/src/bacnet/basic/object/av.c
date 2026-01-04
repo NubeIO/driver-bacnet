@@ -40,13 +40,10 @@
 #include "bacnet/basic/object/device.h"
 #include "bacnet/basic/services.h"
 #include "bacnet/basic/object/av.h"
-#if defined(MQTT)
 #include "MQTTClient.h"
 #include "mqtt_client.h"
-#endif /* defined(MQTT) */
-#if defined(YAML_CONFIG)
 #include "yaml_config.h"
-#endif /* defined(YAML_CONFIG) */
+#include "instance_id.h"
 
 #ifndef MAX_ANALOG_VALUES
 #define MAX_ANALOG_VALUES 4
@@ -56,6 +53,9 @@
 static int Analog_Value_Instances = 0;
 
 static ANALOG_VALUE_DESCR *AV_Descr = NULL;
+
+/* instance ids */
+static instance_id_cb *instance_ids = NULL;
 
 #define AV_LEVEL_NULL 255
 #define AV_RELINQUISH_DEFAULT 0
@@ -115,28 +115,49 @@ void Analog_Value_Init(void)
 #if defined(INTRINSIC_REPORTING)
     unsigned j;
 #endif
+    point_cb *points = NULL;
+    int n_points= 0;
 
-#if defined(YAML_CONFIG)
-    Analog_Value_Instances = yaml_config_av_max();
+    if (yaml_use_point_list_enable()) {
+      points = yaml_get_points_by_name("av", &n_points);
+      printf("- Analog Value Points Found: %d\n", n_points);
+      Analog_Value_Instances = n_points;
+    } else {
+      Analog_Value_Instances = yaml_config_av_max();
+    }
+
     if (Analog_Value_Instances == 0) {
-#endif
-    pEnv = getenv("AV");
-    if (pEnv) {
+      pEnv = getenv("AV");
+      if (pEnv) {
         Analog_Value_Instances = atoi(pEnv);
+      }
     }
-#if defined(YAML_CONFIG)
-    }
-#endif
+
+    printf("- Analog_Value_Instances: %d\n", Analog_Value_Instances);
 
     if (Analog_Value_Instances > 0) {
-        AV_Descr = malloc(Analog_Value_Instances * sizeof(ANALOG_VALUE_DESCR));
-        Analog_Value_Instance_Names = malloc(Analog_Value_Instances * sizeof(BACNET_CHARACTER_STRING));
+        AV_Descr = calloc(Analog_Value_Instances, sizeof(ANALOG_VALUE_DESCR));
+        Analog_Value_Instance_Names = calloc(Analog_Value_Instances, sizeof(BACNET_CHARACTER_STRING));
+        instance_ids = calloc(Analog_Value_Instances, sizeof(instance_id_cb));
     }
 
     for (i = 0; i < Analog_Value_Instances; i++) {
         memset(&AV_Descr[i], 0x00, sizeof(ANALOG_VALUE_DESCR));
+
+        if (points) {
+            instance_ids[i].id = points[i].object_instance;
+            characterstring_init_ansi(&Analog_Value_Instance_Names[i], points[i].name);
+            bactext_engineering_unit_index(points[i].units, (unsigned int*)&AV_Descr[i].Units);
+        } else {
+            instance_ids[i].id = i + 1;
+            sprintf(buf, "AV_%d_SPARE", i + 1);
+            characterstring_init_ansi(&Analog_Value_Instance_Names[i], buf);
+            AV_Descr[i].Units = UNITS_NO_UNITS;
+        }
+
+        instance_ids[i].local_id = i + 1;
+
         AV_Descr[i].Present_Value = 0.0;
-        AV_Descr[i].Units = UNITS_NO_UNITS;
         AV_Descr[i].Prior_Value = 0.0f;
         AV_Descr[i].COV_Increment = 1.0f;
         AV_Descr[i].Changed = false;
@@ -161,14 +182,15 @@ void Analog_Value_Init(void)
             OBJECT_ANALOG_VALUE, Analog_Value_Alarm_Summary);
 #endif
 
-        sprintf(buf, "AV_%d_SPARE", i + 1);
-        characterstring_init_ansi(&Analog_Value_Instance_Names[i], buf);
-
         for (j = 0; j < BACNET_MAX_PRIORITY; j++) {
             AV_Descr[i].Present_Value_Level[j] = AV_LEVEL_NULL;
         }
 
         AV_Descr[i].Relinquish_Default = AV_RELINQUISH_DEFAULT;
+    }
+
+    if (points) {
+      free(points);
     }
 }
 
@@ -183,7 +205,7 @@ void Analog_Value_Init(void)
  */
 bool Analog_Value_Valid_Instance(uint32_t object_instance)
 {
-    if (object_instance > 0 && object_instance <= Analog_Value_Instances) {
+    if (object_instance > 0) {
         return true;
     }
 
@@ -211,6 +233,10 @@ unsigned Analog_Value_Count(void)
  */
 uint32_t Analog_Value_Index_To_Instance(unsigned index)
 {
+    if (index <= Analog_Value_Instances) {
+        index = instance_ids[index].id;
+    }
+
     return index;
 }
 
@@ -225,10 +251,13 @@ uint32_t Analog_Value_Index_To_Instance(unsigned index)
  */
 unsigned Analog_Value_Instance_To_Index(uint32_t object_instance)
 {
-    unsigned index = Analog_Value_Instances;
+    int i;
+    unsigned index = 0;
 
-    if (object_instance > 0 && object_instance <= Analog_Value_Instances) {
-        index = object_instance;
+    for (i = 0; i < Analog_Value_Instances; i++) {
+        if (instance_ids[i].id == object_instance) {
+            index = instance_ids[i].local_id;
+        }
     }
 
     return index;
@@ -250,7 +279,7 @@ static void Analog_Value_COV_Detect(unsigned int index, float value)
     float cov_increment = 0.0;
     float cov_delta = 0.0;
 
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         prior_value = AV_Descr[index - 1].Prior_Value;
         cov_increment = AV_Descr[index - 1].COV_Increment;
         if (prior_value > value) {
@@ -282,7 +311,7 @@ bool Analog_Value_Present_Value_Set(
     bool status = false;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         if (priority && (priority <= BACNET_MAX_PRIORITY)) {
             Analog_Value_COV_Detect(index - 1, value);
             AV_Descr[index - 1].Present_Value_Level[priority - 1] = value;
@@ -312,7 +341,7 @@ bool Analog_Value_Priority_Array_Set(
     bool status = false;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         if (priority && (priority <= BACNET_MAX_PRIORITY)) {
             AV_Descr[index - 1].Present_Value_Level[priority - 1] = value;
             status = true;
@@ -334,7 +363,7 @@ bool Analog_Value_Priority_Array_Set2(
     bool status = false;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         if (priority && (priority <= BACNET_MAX_PRIORITY)) {
             AV_Descr[index -1].Present_Value_Level[priority - 1] = value;
             status = true;
@@ -358,7 +387,7 @@ float Analog_Value_Present_Value(uint32_t object_instance)
     unsigned i = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         value = AV_Descr[index].Relinquish_Default;
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             if (AV_Descr[index - 1].Present_Value_Level[i] != AV_LEVEL_NULL) {
@@ -366,10 +395,6 @@ float Analog_Value_Present_Value(uint32_t object_instance)
                 break;
             }
         }
-    }
-
-    if (yaml_config_mqtt_debug()) {
-      printf("- Analog_Value_Present_Value[%d]: %f\n", index, value);
     }
 
     return value;
@@ -392,7 +417,7 @@ bool Analog_Value_Object_Name(
     unsigned index = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         status = characterstring_copy(object_name, &Analog_Value_Instance_Names[index - 1]);
     }
 
@@ -406,7 +431,7 @@ bool Analog_Value_Set_Object_Name(
     unsigned index = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         if (!characterstring_same(&Analog_Value_Instance_Names[index - 1], object_name)) {
             status = characterstring_copy(&Analog_Value_Instance_Names[index - 1], object_name);
         }
@@ -435,7 +460,7 @@ unsigned Analog_Value_Event_State(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         state = AV_Descr[index - 1].Event_State;
     }
 #endif
@@ -457,7 +482,7 @@ bool Analog_Value_Change_Of_Value(uint32_t object_instance)
     bool changed = false;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         changed = AV_Descr[index - 1].Changed;
     }
 
@@ -474,7 +499,7 @@ void Analog_Value_Change_Of_Value_Clear(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         AV_Descr[index - 1].Changed = false;
     }
 }
@@ -542,7 +567,7 @@ float Analog_Value_COV_Increment(uint32_t object_instance)
     float value = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         value = AV_Descr[index - 1].COV_Increment;
     }
 
@@ -554,7 +579,7 @@ void Analog_Value_COV_Increment_Set(uint32_t object_instance, float value)
     unsigned index = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         AV_Descr[index - 1].COV_Increment = value;
         Analog_Value_COV_Detect(index - 1, Analog_Value_Present_Value(object_instance));
     }
@@ -566,7 +591,7 @@ bool Analog_Value_Out_Of_Service(uint32_t object_instance)
     bool value = false;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         value = AV_Descr[index - 1].Out_Of_Service;
     }
 
@@ -578,7 +603,7 @@ void Analog_Value_Out_Of_Service_Set(uint32_t object_instance, bool value)
     unsigned index = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         if (AV_Descr[index - 1].Out_Of_Service != value) {
             AV_Descr[index - 1].Changed = true;
         }
@@ -592,7 +617,7 @@ float Analog_Value_Relinquish_Default(uint32_t object_instance)
     unsigned index = 0;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         value = AV_Descr[index - 1].Relinquish_Default;
     }
 
@@ -633,7 +658,7 @@ int Analog_Value_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
     apdu = rpdata->application_data;
 
     object_index = Analog_Value_Instance_To_Index(rpdata->object_instance);
-    if (object_index < 1 || object_index > Analog_Value_Instances) {
+    if (object_index < 1) {
         rpdata->error_class = ERROR_CLASS_OBJECT;
         rpdata->error_code = ERROR_CODE_UNKNOWN_OBJECT;
         return BACNET_STATUS_ERROR;
@@ -905,7 +930,7 @@ void publish_av_priority_array(uint32_t object_instance, char *uuid)
     unsigned i;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         strcpy(buf, "[");
         for (i = 0; i < BACNET_MAX_PRIORITY; i++) {
             value = AV_Descr[index - 1].Present_Value_Level[i];
@@ -934,7 +959,7 @@ void get_av_priority_array(uint32_t object_instance, float *pa, int pa_length)
     unsigned max;
 
     index = Analog_Value_Instance_To_Index(object_instance);
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         max = (pa_length < BACNET_MAX_PRIORITY) ? pa_length : BACNET_MAX_PRIORITY;
         for (i = 0; i < max; i++) {
             pa[i] = AV_Descr[index - 1].Present_Value_Level[i];
@@ -987,7 +1012,7 @@ bool Analog_Value_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
 
     /* Valid object? */
     object_index = Analog_Value_Instance_To_Index(wp_data->object_instance);
-    if (object_index < 1 || object_index > Analog_Value_Instances) {
+    if (object_index < 1) {
         wp_data->error_class = ERROR_CLASS_OBJECT;
         wp_data->error_code = ERROR_CODE_UNKNOWN_OBJECT;
         return false;
@@ -1229,7 +1254,7 @@ void Analog_Value_Intrinsic_Reporting(uint32_t object_instance)
     bool SendNotify = false;
 
     object_index = Analog_Value_Instance_To_Index(object_instance);
-    if (object_index > 0 && object_index <= Analog_Value_Instances)
+    if (object_index > 0)
         CurrentAV = &AV_Descr[object_index - 1];
     else
         return;
@@ -1534,7 +1559,7 @@ int Analog_Value_Event_Information(
     int i;
 
     /* check index */
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         /* Event_State not equal to NORMAL */
         IsActiveEvent = (AV_Descr[index - 1].Event_State != EVENT_STATE_NORMAL);
 
@@ -1608,7 +1633,7 @@ int Analog_Value_Alarm_Ack(
     object_index = Analog_Value_Instance_To_Index(
         alarmack_data->eventObjectIdentifier.instance);
 
-    if (object_index > 0 && object_index <= Analog_Value_Instances)
+    if (object_index > 0)
         CurrentAV = &AV_Descr[object_index - 1];
     else {
         *error_code = ERROR_CODE_UNKNOWN_OBJECT;
@@ -1715,7 +1740,7 @@ int Analog_Value_Alarm_Summary(
     unsigned index, BACNET_GET_ALARM_SUMMARY_DATA *getalarm_data)
 {
     /* check index */
-    if (index > 0 && index <= Analog_Value_Instances) {
+    if (index > 0) {
         /* Event_State is not equal to NORMAL  and
            Notify_Type property value is ALARM */
         if ((AV_Descr[index - 1].Event_State != EVENT_STATE_NORMAL) &&

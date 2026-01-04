@@ -1,6 +1,22 @@
 # CHANGELOG
 
+## [v1.0.3-rc.3](https://github.com/NubeIO/driver-bacnet/tree/v1.0.3-rc.3) (2026-01-04)
+- Issue-144: Support non-sequential object instance
+- Issue-138: Initial object instances based on the points from the config file
+- Prerequisites:
+  - ROS >= 1.0.0
 
+## [v1.0.3-rc.2](https://github.com/NubeIO/driver-bacnet/tree/v1.0.3-rc.2) (2025-12-15)
+- Issue-138: Initial object instances based on the points from the config file
+- Prerequisites:
+  - ROS >= 1.0.0
+
+## [v1.0.3-rc.1](https://github.com/NubeIO/driver-bacnet/tree/v1.0.3-rc.1) (2025-08-28)
+- Issue-137: Remove Multi-state points; Add an error message when the request resulted an error
+- Issue-138: Support for points list in the config file
+- Issue-139: Support for binding to specific IP address/interface
+- Prerequisites:
+  - ROS >= 1.0.0
 
 ## [v1.0.2](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2) (2024-11-08)
 - Fixed device ID returned from reading property list.
