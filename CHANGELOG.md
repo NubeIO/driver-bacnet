@@ -1,6 +1,7 @@
 # CHANGELOG
 
-
+## [v1.0.4-rc.1](https://github.com/NubeIO/driver-bacnet/tree/v1.0.4-rc.1) (2026-06-25)
+- Add support for OBJECT_INTEGER_VALUE in MQTT client
 
 ## [v1.0.2](https://github.com/NubeIO/driver-bacnet/tree/v1.0.2) (2024-11-08)
 - Fixed device ID returned from reading property list.
