@@ -1804,6 +1804,10 @@ char *get_object_type_str(int object_type)
       str = "msv";
       break;
 
+    case OBJECT_INTEGER_VALUE:
+      str = "iv";
+      break;
+
     case OBJECT_TRENDLOG:
       str = "tlog";
       break;
@@ -2356,6 +2360,23 @@ int encode_read_value_result(BACNET_READ_PROPERTY_DATA *data, llist_obj_data *ob
       }
       break;
 
+    case OBJECT_INTEGER_VALUE:
+      switch(data->object_property) {
+        case PROP_PRIORITY_ARRAY:
+          encode_array_value_result(data, obj_data, tmp, sizeof(tmp) - 1);
+          break;
+
+        default:
+          object_value.object_type = data->object_type;
+          object_value.object_instance = data->object_instance;
+          object_value.object_property = data->object_property;
+          object_value.array_index = data->array_index;
+          object_value.value = &value;
+          bacapp_snprintf_value(tmp, sizeof(tmp) - 1, &object_value);
+          break;
+      }
+      break;
+
     default:
       object_value.object_type = data->object_type;
       object_value.object_instance = data->object_instance;
@@ -2502,6 +2523,23 @@ int encode_read_multiple_value_result(BACNET_READ_ACCESS_DATA *rpm_data, llist_o
         bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
         break;
 
+      case OBJECT_INTEGER_VALUE:
+        switch(listOfProperties->propertyIdentifier) {
+          case PROP_PRIORITY_ARRAY:
+            encode_read_multiple_array_value_result(rpm_data, tmp_val, sizeof(tmp_val) - 1);
+            break;
+
+          default:
+            object_value.object_type = rpm_data->object_type;
+            object_value.object_instance = rpm_data->object_instance;
+            object_value.object_property = listOfProperties->propertyIdentifier;
+            object_value.array_index = listOfProperties->propertyArrayIndex;
+            object_value.value = value;
+            bacapp_snprintf_value(tmp_val, sizeof(tmp_val) - 1, &object_value);
+            break;
+        }
+        break;
+
       default:
         object_value.object_type = rpm_data->object_type;
         object_value.object_instance = rpm_data->object_instance;
@@ -2586,6 +2624,7 @@ int encode_write_value_result(llist_obj_data *obj_data, char *buf, int buf_len)
     case OBJECT_MULTI_STATE_INPUT:
     case OBJECT_MULTI_STATE_OUTPUT:
     case OBJECT_MULTI_STATE_VALUE:
+    case OBJECT_INTEGER_VALUE:
       if (obj_data->prio_array_len > 0) {
         prio_array_set_to_json_string(&obj_data->prio_array[0], obj_data->prio_array_len,
           prio_array_buf, sizeof(prio_array_buf) - 1);
@@ -5508,6 +5547,26 @@ static int set_app_data_value_from_string(int object_type, int object_property, 
       }
       break;
 
+    case OBJECT_INTEGER_VALUE:
+      switch (object_property) {
+        case PROP_PRESENT_VALUE:
+        case PROP_PRIORITY_ARRAY:
+          property_tag = (strcasecmp(str, "null")) ? BACNET_APPLICATION_TAG_SIGNED_INT : BACNET_APPLICATION_TAG_NULL;
+          bacapp_parse_application_data(property_tag, str, value);
+          break;
+
+        case PROP_OBJECT_NAME:
+          bacapp_parse_application_data(BACNET_APPLICATION_TAG_CHARACTER_STRING, str, value);
+          break;
+
+        default:
+          if (mqtt_debug) {
+            printf("Unknown object property: %d\n", object_property);
+          }
+          return(1);
+      }
+      break;
+
     default:
       if (mqtt_debug) {
         printf("Unknown object type: %d\n", object_type);
@@ -5907,7 +5966,20 @@ int process_bacnet_client_write_value_command(bacnet_client_cmd_opts *opts)
       }
       break;
 
-    default: 
+    case OBJECT_INTEGER_VALUE:
+      if (opts->property != PROP_OBJECT_NAME && opts->property != PROP_PRESENT_VALUE &&
+        opts->property != PROP_PRIORITY_ARRAY) {
+        sprintf(err_msg, "Unsupported property: %d of object_type %d", opts->property, opts->object_type);
+        if (mqtt_debug) {
+          printf("%s\n", err_msg);
+        }
+
+        mqtt_publish_command_error(err_msg, opts, MQTT_WRITE_VALUE_CMD_RESULT_TOPIC);
+        return(1);
+      }
+      break;
+
+    default:
       sprintf(err_msg, "Unknown object type: %d", opts->object_type);
       if (mqtt_debug) {
         printf("%s\n", err_msg);
@@ -7858,7 +7930,7 @@ int subscribe_bacnet_client_whois_command(void *context)
   }
 
   return(0);
-}
+}//
 
 
 /*
@@ -9915,6 +9987,7 @@ bool is_object_type_supported(int object_type)
     case OBJECT_MULTI_STATE_INPUT:
     case OBJECT_MULTI_STATE_OUTPUT:
     case OBJECT_MULTI_STATE_VALUE:
+    case OBJECT_INTEGER_VALUE:
       return(true);
   }
 
@@ -9940,6 +10013,7 @@ bool is_object_property_supported(int object_type, int property_id)
     case OBJECT_MULTI_STATE_INPUT:
     case OBJECT_MULTI_STATE_OUTPUT:
     case OBJECT_MULTI_STATE_VALUE:
+    case OBJECT_INTEGER_VALUE:
       switch(property_id) {
         case PROP_OBJECT_IDENTIFIER:
         case PROP_OBJECT_LIST:
