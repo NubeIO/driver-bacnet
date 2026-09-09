@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## [v1.0.4](https://github.com/NubeIO/driver-bacnet/tree/v1.0.4) (2026-09-09)
+- Public release
+
 ## [v1.0.4-rc.1](https://github.com/NubeIO/driver-bacnet/tree/v1.0.4-rc.1) (2026-06-25)
 - Add support for OBJECT_INTEGER_VALUE in MQTT client
 
